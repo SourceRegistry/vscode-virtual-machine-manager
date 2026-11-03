@@ -1,0 +1,2 @@
+# IronRDP patches must keep their exact bytes (some target files use CRLF).
+scripts/ironrdp-patches/*.patch -text
