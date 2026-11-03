@@ -2,7 +2,7 @@
   "name": "vm-manager-hyperv",
   "displayName": "VM Manager – Hyper-V",
   "description": "Hyper-V provider for VM Manager: manage the Hyper-V virtual machines on this Windows machine, with an interactive console and a serial console in the editor.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "sourceregistry",
   "icon": "media/icon.png",
   "license": "Apache-2.0",
@@ -54,15 +54,23 @@
             "id": "enable",
             "title": "Enable Hyper-V",
             "description": "Hyper-V must be enabled as a Windows feature (Windows 10/11 Pro, Enterprise or Education, or Windows Server).\n[Check Prerequisites](command:vmm.hyperv.checkPrerequisites)",
-            "media": { "markdown": "media/prerequisites.md" },
-            "completionEvents": [ "onCommand:vmm.hyperv.checkPrerequisites" ]
+            "media": {
+              "markdown": "media/prerequisites.md"
+            },
+            "completionEvents": [
+              "onCommand:vmm.hyperv.checkPrerequisites"
+            ]
           },
           {
             "id": "addCluster",
             "title": "Add your local Hyper-V",
             "description": "Add a cluster of type Hyper-V. Your computer appears as its single node.\n[Add Cluster](command:vmm.addCluster)",
-            "media": { "markdown": "media/prerequisites.md" },
-            "completionEvents": [ "onContext:vmm.hasClusters" ]
+            "media": {
+              "markdown": "media/prerequisites.md"
+            },
+            "completionEvents": [
+              "onContext:vmm.hasClusters"
+            ]
           }
         ]
       }

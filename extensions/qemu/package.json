@@ -2,7 +2,7 @@
   "name": "vm-manager-qemu",
   "displayName": "VM Manager – QEMU",
   "description": "QEMU provider for VM Manager: create and run QEMU virtual machines with graphical (noVNC) and serial consoles.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "sourceregistry",
   "icon": "media/icon.png",
   "license": "Apache-2.0",
@@ -65,15 +65,23 @@
             "id": "install",
             "title": "Install QEMU",
             "description": "Install QEMU for your platform. On Windows also enable the Windows Hypervisor Platform feature for hardware acceleration.\n[Detect QEMU](command:vmm.qemu.detect)",
-            "media": { "markdown": "media/install.md" },
-            "completionEvents": [ "onCommand:vmm.qemu.detect" ]
+            "media": {
+              "markdown": "media/install.md"
+            },
+            "completionEvents": [
+              "onCommand:vmm.qemu.detect"
+            ]
           },
           {
             "id": "addCluster",
             "title": "Add a QEMU cluster",
             "description": "Add a cluster of type QEMU. VM definitions and disks are stored in a directory you choose.\n[Add Cluster](command:vmm.addCluster)",
-            "media": { "markdown": "media/install.md" },
-            "completionEvents": [ "onContext:vmm.hasClusters" ]
+            "media": {
+              "markdown": "media/install.md"
+            },
+            "completionEvents": [
+              "onContext:vmm.hasClusters"
+            ]
           }
         ]
       }
