@@ -5,8 +5,8 @@
 <h1 align="center">VM Manager for VS Code</h1>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager"><img src="https://img.shields.io/visual-studio-marketplace/v/sourceregistry.vm-manager?label=Marketplace" alt="Marketplace version"></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager"><img src="https://img.shields.io/visual-studio-marketplace/i/sourceregistry.vm-manager" alt="Installs"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager"><img src="https://vsmarketplacebadges.dev/version-short/sourceregistry.vm-manager.svg?label=Marketplace" alt="Marketplace version"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager"><img src="https://vsmarketplacebadges.dev/installs-short/sourceregistry.vm-manager.svg?label=Installs" alt="Installs"></a>
   <a href="https://github.com/SourceRegistry/vscode-virtual-machine-manager/actions/workflows/release.yml"><img src="https://github.com/SourceRegistry/vscode-virtual-machine-manager/actions/workflows/release.yml/badge.svg" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/SourceRegistry/vscode-virtual-machine-manager" alt="License"></a>
 </p>
