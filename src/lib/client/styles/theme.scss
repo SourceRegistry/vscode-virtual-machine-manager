@@ -1,0 +1,4 @@
+// Webview theme entry. client-lib provides the components and token system; the bridge maps
+// every runtime token onto the user's active VS Code colour theme so nothing is hard-coded.
+@use '$lib/client-lib/styles/app';
+@use './vscode-bridge';

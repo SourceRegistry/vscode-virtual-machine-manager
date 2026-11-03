@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 300" font-family="var(--vscode-font-family)" font-size="14">
+  <style>
+    .box { fill: var(--vscode-editorWidget-background); stroke: var(--vscode-widget-border, var(--vscode-contrastBorder, #8888)); stroke-width: 1; }
+    .title { fill: var(--vscode-foreground); font-weight: 600; }
+    .sub { fill: var(--vscode-descriptionForeground); font-size: 12px; }
+    .line { stroke: var(--vscode-descriptionForeground); stroke-width: 1.5; fill: none; }
+    .on { fill: var(--vscode-testing-iconPassed, #3fb950); }
+    .off { fill: var(--vscode-disabledForeground, #888); }
+  </style>
+  <rect class="box" x="20" y="20" width="230" height="56" rx="6"/>
+  <text class="title" x="36" y="44">Cluster</text>
+  <text class="sub" x="36" y="64">Local (Hyper-V) · Proxmox lab</text>
+
+  <path class="line" d="M60 76 V120 H90"/>
+  <rect class="box" x="90" y="96" width="230" height="56" rx="6"/>
+  <text class="title" x="106" y="120">Node</text>
+  <text class="sub" x="106" y="140">DESKTOP-ALEX · pve-01</text>
+
+  <path class="line" d="M130 152 V196 H160"/>
+  <path class="line" d="M130 196 V256 H160"/>
+  <rect class="box" x="160" y="174" width="250" height="44" rx="6"/>
+  <circle class="on" cx="180" cy="196" r="5"/>
+  <text class="title" x="194" y="201">web-01</text>
+  <text class="sub" x="300" y="201">Running</text>
+  <rect class="box" x="160" y="234" width="250" height="44" rx="6"/>
+  <circle class="off" cx="180" cy="256" r="5"/>
+  <text class="title" x="194" y="261">db-01</text>
+  <text class="sub" x="300" y="261">Off</text>
+</svg>

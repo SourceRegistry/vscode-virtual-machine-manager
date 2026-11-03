@@ -1,0 +1,226 @@
+import { Duplex, PassThrough } from 'node:stream';
+import * as vscode from 'vscode';
+import {
+	ProviderError,
+	type Capabilities,
+	type ClusterConnection,
+	type FieldSchema,
+	type FieldValues,
+	type HypervisorProvider,
+	type PreviewFrame,
+	type VmInfo
+} from '@vmm/sdk';
+
+/**
+ * In-memory provider, registered only in development mode. Lets the UI be exercised without
+ * a hypervisor: power transitions, create/edit/delete, a serial echo shell and a preview.
+ */
+export class FakeProvider implements HypervisorProvider {
+	readonly id = 'fake';
+	readonly displayName = 'Fake (development)';
+	readonly icon = 'beaker';
+	readonly connectionSchema: FieldSchema[] = [
+		{ key: 'nodes', label: 'Number of nodes', type: 'number', default: 2, min: 1, max: 5 },
+		{ key: 'token', label: 'API token', type: 'password', secret: true, description: 'Any value — exercises SecretStorage' }
+	];
+
+	defaultClusterName(): string {
+		return 'Fake Lab';
+	}
+
+	async connect(cluster: { config: FieldValues }): Promise<ClusterConnection> {
+		return new FakeConnection(Number(cluster.config.nodes ?? 2));
+	}
+}
+
+const vmSchema = (): FieldSchema[] => [
+	{ key: 'name', label: 'Name', type: 'text', required: true, group: 'General' },
+	{ key: 'cpus', label: 'Processors', type: 'number', min: 1, max: 32, default: 2, unit: 'cores', group: 'Hardware' },
+	{ key: 'memoryMB', label: 'Memory', type: 'number', min: 128, default: 2048, unit: 'MB', group: 'Hardware' },
+	{
+		key: 'os',
+		label: 'Operating system',
+		type: 'select',
+		default: 'linux',
+		group: 'General',
+		options: [
+			{ value: 'linux', label: 'Linux' },
+			{ value: 'windows', label: 'Windows' }
+		]
+	},
+	{ key: 'iso', label: 'Installation ISO', type: 'file', filters: { 'Disk images': ['iso'] }, group: 'Media', advanced: true },
+	{ key: 'autostart', label: 'Start with host', type: 'checkbox', default: false, group: 'General', advanced: true }
+];
+
+class FakeConnection implements ClusterConnection {
+	readonly capabilities: Capabilities = {
+		create: true,
+		edit: true,
+		delete: true,
+		power: ['start', 'shutdown', 'reboot', 'stop'],
+		consoles: ['serial'],
+		preview: true,
+		external: false
+	};
+	private readonly emitter = new vscode.EventEmitter<{ vmId?: string }>();
+	readonly onDidChange = this.emitter.event;
+	private readonly vms = new Map<string, VmInfo & { nodeId: string; started?: number; values: FieldValues }>();
+	private counter = 0;
+
+	constructor(private readonly nodeCount: number) {
+		for (let n = 0; n < nodeCount; n++) {
+			for (let i = 0; i < 3; i++) this.add(`node-${n + 1}`, { name: `vm-${n + 1}${String.fromCharCode(97 + i)}`, cpus: 2, memoryMB: 2048, os: 'linux' }, i === 0);
+		}
+	}
+
+	private add(nodeId: string, values: FieldValues, running = false): VmInfo {
+		const id = `fake-${++this.counter}`;
+		const vm = {
+			id,
+			nodeId,
+			name: String(values.name),
+			state: running ? ('running' as const) : ('stopped' as const),
+			cpus: Number(values.cpus ?? 1),
+			memoryMB: Number(values.memoryMB ?? 1024),
+			os: String(values.os ?? 'linux'),
+			started: running ? Date.now() : undefined,
+			ipAddresses: running ? [`10.0.0.${this.counter}`] : [],
+			values
+		};
+		this.vms.set(id, vm);
+		return vm;
+	}
+
+	private get(vmId: string) {
+		const vm = this.vms.get(vmId);
+		if (!vm) throw new ProviderError('VM not found', 'notFound');
+		return vm;
+	}
+
+	async listNodes() {
+		return Array.from({ length: this.nodeCount }, (_, i) => ({
+			id: `node-${i + 1}`,
+			name: `fake-node-${i + 1}`,
+			status: 'online' as const,
+			cpus: 16,
+			memoryMB: 65536,
+			memoryUsedMB: [...this.vms.values()].filter((v) => v.nodeId === `node-${i + 1}` && v.state === 'running').reduce((s, v) => s + (v.memoryMB ?? 0), 0)
+		}));
+	}
+
+	async listVms(nodeId: string): Promise<VmInfo[]> {
+		return [...this.vms.values()]
+			.filter((v) => v.nodeId === nodeId)
+			.map(({ nodeId: _n, started, values: _v, ...vm }) => ({
+				...vm,
+				uptimeSeconds: started ? Math.floor((Date.now() - started) / 1000) : undefined
+			}));
+	}
+
+	async getCreateSchema() {
+		return vmSchema();
+	}
+
+	async createVm(nodeId: string, values: FieldValues) {
+		return this.add(nodeId, values);
+	}
+
+	async getVmConfig(_nodeId: string, vmId: string) {
+		const vm = this.get(vmId);
+		return { schema: vmSchema(), values: { ...vm.values, name: vm.name, cpus: vm.cpus, memoryMB: vm.memoryMB } };
+	}
+
+	async updateVm(_nodeId: string, vmId: string, values: FieldValues) {
+		const vm = this.get(vmId);
+		vm.values = { ...vm.values, ...values };
+		vm.name = String(values.name ?? vm.name);
+		vm.cpus = Number(values.cpus ?? vm.cpus);
+		vm.memoryMB = Number(values.memoryMB ?? vm.memoryMB);
+	}
+
+	async deleteVm(_nodeId: string, vmId: string) {
+		this.get(vmId);
+		this.vms.delete(vmId);
+	}
+
+	async power(_nodeId: string, vmId: string, action: string) {
+		const vm = this.get(vmId);
+		const transition = (via: VmInfo['state'], to: VmInfo['state']) => {
+			vm.state = via;
+			setTimeout(() => {
+				vm.state = to;
+				vm.started = to === 'running' ? Date.now() : undefined;
+				vm.ipAddresses = to === 'running' ? [`10.0.0.${vmId.split('-')[1]}`] : [];
+				this.emitter.fire({ vmId });
+			}, 1500);
+		};
+		if (action === 'start') transition('starting', 'running');
+		else if (action === 'shutdown') transition('stopping', 'stopped');
+		else if (action === 'reboot') transition('starting', 'running');
+		else {
+			vm.state = 'stopped';
+			vm.started = undefined;
+		}
+	}
+
+	async openConsole(_nodeId: string, vmId: string) {
+		const vm = this.get(vmId);
+		if (vm.state !== 'running') throw new ProviderError(`${vm.name} is not running`, 'unavailable');
+		// A tiny line-editing echo "shell".
+		const input = new PassThrough();
+		const stream = new Duplex({
+			read() {},
+			write(chunk, _enc, cb) {
+				input.write(chunk);
+				cb();
+			}
+		});
+		let line = '';
+		const prompt = `\r\n${vm.name} login: root\r\n[root@${vm.name} ~]# `;
+		setTimeout(() => stream.push(`Fake serial console for ${vm.name}${prompt}`), 100);
+		input.on('data', (data: Buffer) => {
+			for (const ch of data.toString('utf8')) {
+				if (ch === '\r') {
+					stream.push(`\r\n${line ? `${line}: command not found` : ''}${prompt.slice(prompt.lastIndexOf('['))}`);
+					line = '';
+				} else if (ch === '\x7f') {
+					if (line) {
+						line = line.slice(0, -1);
+						stream.push('\b \b');
+					}
+				} else {
+					line += ch;
+					stream.push(ch);
+				}
+			}
+		});
+		return { stream, dispose: () => stream.destroy() };
+	}
+
+	async *openPreview(_nodeId: string, vmId: string, signal: AbortSignal): AsyncIterable<PreviewFrame> {
+		const width = 320;
+		const height = 200;
+		let t = 0;
+		while (!signal.aborted) {
+			const vm = this.get(vmId);
+			const data = new Uint8Array(width * height * 4);
+			for (let y = 0; y < height; y++) {
+				for (let x = 0; x < width; x++) {
+					const i = (y * width + x) * 4;
+					const on = vm.state === 'running';
+					data[i] = on ? (x + t) % 256 : 20;
+					data[i + 1] = on ? (y * 2) % 256 : 20;
+					data[i + 2] = on ? 160 : 20;
+					data[i + 3] = 255;
+				}
+			}
+			yield { width, height, format: 'rgba', data };
+			t += 8;
+			await new Promise((r) => setTimeout(r, 500));
+		}
+	}
+
+	dispose() {
+		this.emitter.dispose();
+	}
+}

@@ -1,0 +1,87 @@
+{
+  "name": "vm-manager-qemu",
+  "displayName": "VM Manager – QEMU",
+  "description": "QEMU provider for VM Manager: create and run QEMU virtual machines with graphical (noVNC) and serial consoles.",
+  "version": "0.1.0",
+  "publisher": "sourceregistry",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlexanderSlaa/vscode-virtual-machine.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "qemu",
+    "kvm",
+    "whpx",
+    "virtual machine",
+    "vm-manager-provider"
+  ],
+  "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "sourceregistry.vm-manager"
+  ],
+  "activationEvents": [],
+  "contributes": {
+    "vmManager.providers": [
+      {
+        "id": "qemu",
+        "displayName": "QEMU",
+        "description": "QEMU virtual machines managed by VS Code on this machine"
+      }
+    ],
+    "commands": [
+      {
+        "command": "vmm.qemu.detect",
+        "title": "Detect QEMU Installation",
+        "category": "VM"
+      }
+    ],
+    "configuration": {
+      "title": "VM Manager – QEMU",
+      "properties": {
+        "vmm.qemu.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Directory containing `qemu-system-*` and `qemu-img`. Leave empty to detect from `PATH` and common install locations. Clusters can override this."
+        }
+      }
+    },
+    "walkthroughs": [
+      {
+        "id": "qemuSetup",
+        "title": "Set up QEMU for VM Manager",
+        "description": "Install QEMU and let VM Manager find it.",
+        "steps": [
+          {
+            "id": "install",
+            "title": "Install QEMU",
+            "description": "Install QEMU for your platform. On Windows also enable the Windows Hypervisor Platform feature for hardware acceleration.\n[Detect QEMU](command:vmm.qemu.detect)",
+            "media": { "markdown": "media/install.md" },
+            "completionEvents": [ "onCommand:vmm.qemu.detect" ]
+          },
+          {
+            "id": "addCluster",
+            "title": "Add a QEMU cluster",
+            "description": "Add a cluster of type QEMU. VM definitions and disks are stored in a directory you choose.\n[Add Cluster](command:vmm.addCluster)",
+            "media": { "markdown": "media/install.md" },
+            "completionEvents": [ "onContext:vmm.hasClusters" ]
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "cd ../.. && node esbuild.mjs --only qemu"
+  },
+  "dependencies": {
+    "@vmm/sdk": "*"
+  }
+}

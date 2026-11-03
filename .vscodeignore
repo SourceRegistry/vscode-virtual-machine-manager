@@ -1,0 +1,9 @@
+**
+!package.json
+!README.md
+!LICENSE
+!CHANGELOG.md
+!dist/extension.js
+!dist/webview/**
+!media/**
+dist/**/*.map

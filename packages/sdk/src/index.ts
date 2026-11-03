@@ -1,0 +1,300 @@
+/**
+ * VM Manager provider SDK.
+ *
+ * A provider extension (e.g. "VM Manager – Hyper-V") depends on the core extension through
+ * `extensionDependencies`, reads the core API from `vscode.extensions.getExtension(CORE_EXTENSION_ID).exports`
+ * and calls `registerProvider()`. The core owns all UI, credential storage and console transport;
+ * the provider only talks to its hypervisor.
+ *
+ * This module has no runtime dependency on `vscode` so it can be unit tested and bundled anywhere.
+ */
+import type { Duplex } from 'node:stream';
+
+export const VMM_API_VERSION = 1;
+export const CORE_EXTENSION_ID = 'sourceregistry.vm-manager';
+/** `package.json` key a provider extension uses to announce the providers it contributes. */
+export const PROVIDER_CONTRIBUTION_KEY = 'vmManager.providers';
+
+// ---------------------------------------------------------------------------------------------
+// Primitives (structurally compatible with vscode.Disposable / vscode.Event)
+// ---------------------------------------------------------------------------------------------
+
+export interface Disposable {
+	dispose(): unknown;
+}
+
+export type Event<T> = (listener: (e: T) => unknown, thisArgs?: unknown, disposables?: Disposable[]) => Disposable;
+
+export interface Logger {
+	info(message: string): void;
+	warn(message: string): void;
+	error(message: string | Error): void;
+	debug(message: string): void;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Field schemas: providers describe forms once, the core renders them as native multi-step
+// input (QuickPick / InputBox) or as a webview form.
+// ---------------------------------------------------------------------------------------------
+
+export type FieldType =
+	| 'text'
+	| 'password'
+	| 'number'
+	| 'select'
+	| 'checkbox'
+	| 'file'
+	| 'directory'
+	| 'textarea';
+
+export type FieldValue = string | number | boolean | undefined;
+export type FieldValues = Record<string, FieldValue>;
+
+export interface FieldOption {
+	value: string;
+	label: string;
+	description?: string;
+}
+
+export interface FieldSchema {
+	key: string;
+	label: string;
+	type: FieldType;
+	description?: string;
+	placeholder?: string;
+	required?: boolean;
+	/** Stored in VS Code SecretStorage (OS keychain) instead of global state. */
+	secret?: boolean;
+	default?: FieldValue;
+	options?: FieldOption[];
+	min?: number;
+	max?: number;
+	/** Display unit for numbers, e.g. `MB`, `GB`, `cores`. */
+	unit?: string;
+	/** File dialog filters for `file` fields, e.g. `{ 'Disk images': ['iso', 'img'] }`. */
+	filters?: Record<string, string[]>;
+	readonly?: boolean;
+	/** Section heading used by the webview settings editor. */
+	group?: string;
+	/** Hide in the quick (native) create flow; still shown in the full settings editor. */
+	advanced?: boolean;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------------------------
+
+export type PowerAction = 'start' | 'shutdown' | 'reboot' | 'stop' | 'reset';
+export type ConsoleKind = 'vnc' | 'serial';
+export type VmState = 'running' | 'stopped' | 'paused' | 'saved' | 'starting' | 'stopping' | 'unknown';
+export type NodeStatus = 'online' | 'offline' | 'unknown';
+
+export interface Capabilities {
+	create: boolean;
+	edit: boolean;
+	delete: boolean;
+	power: PowerAction[];
+	/** Console kinds the provider can stream. Individual VMs may narrow this with `VmInfo.consoles`. */
+	consoles: ConsoleKind[];
+	/** Low frame-rate screenshot preview (used when no VNC is available, e.g. Hyper-V). */
+	preview: boolean;
+	/** Can open the hypervisor's own viewer (e.g. vmconnect.exe). */
+	external: boolean;
+}
+
+export interface NodeInfo {
+	id: string;
+	name: string;
+	status: NodeStatus;
+	cpus?: number;
+	/** 0..1 */
+	cpuUsage?: number;
+	memoryMB?: number;
+	memoryUsedMB?: number;
+	description?: string;
+}
+
+export interface VmInfo {
+	id: string;
+	name: string;
+	state: VmState;
+	cpus?: number;
+	memoryMB?: number;
+	uptimeSeconds?: number;
+	ipAddresses?: string[];
+	os?: string;
+	description?: string;
+	/** Narrows `Capabilities.consoles` for this VM (e.g. serial port not configured). */
+	consoles?: ConsoleKind[];
+}
+
+export interface ClusterConfig {
+	id: string;
+	name: string;
+	providerId: string;
+	/** Non-secret connection values. */
+	config: FieldValues;
+}
+
+/** Secret connection values, resolved from SecretStorage by the core. */
+export type SecretBag = Readonly<Record<string, string | undefined>>;
+
+export interface ProviderContext {
+	/** Directory reserved for this provider + cluster (created on demand by the provider). */
+	storagePath: string;
+	log: Logger;
+}
+
+export interface ChangeEvent {
+	nodeId?: string;
+	vmId?: string;
+}
+
+export interface VmConfig {
+	schema: FieldSchema[];
+	values: FieldValues;
+}
+
+export interface DeleteOptions {
+	deleteDisks: boolean;
+}
+
+/**
+ * A live console byte stream. For `vnc` the stream carries raw RFB protocol bytes,
+ * for `serial` raw terminal bytes.
+ */
+export interface ConsoleStream {
+	stream: Duplex;
+	dispose(): void;
+}
+
+export interface PreviewFrame {
+	width: number;
+	height: number;
+	/** `rgb565` little-endian (Hyper-V thumbnails) or `rgba`. */
+	format: 'rgb565' | 'rgba';
+	data: Uint8Array;
+}
+
+export interface ClusterConnection extends Disposable {
+	readonly capabilities: Capabilities;
+	listNodes(): Promise<NodeInfo[]>;
+	listVms(nodeId: string): Promise<VmInfo[]>;
+	getCreateSchema(nodeId: string): Promise<FieldSchema[]>;
+	createVm(nodeId: string, values: FieldValues): Promise<VmInfo>;
+	getVmConfig(nodeId: string, vmId: string): Promise<VmConfig>;
+	updateVm(nodeId: string, vmId: string, values: FieldValues): Promise<void>;
+	deleteVm(nodeId: string, vmId: string, options: DeleteOptions): Promise<void>;
+	power(nodeId: string, vmId: string, action: PowerAction): Promise<void>;
+	openConsole(nodeId: string, vmId: string, kind: ConsoleKind): Promise<ConsoleStream>;
+	openPreview?(nodeId: string, vmId: string, signal: AbortSignal): AsyncIterable<PreviewFrame>;
+	openExternal?(nodeId: string, vmId: string): Promise<void>;
+	/** Fire to make the core refresh immediately. Without it the core polls. */
+	readonly onDidChange?: Event<ChangeEvent>;
+}
+
+export interface HypervisorProvider {
+	/** Stable id, also used in `package.json` `contributes["vmManager.providers"]`. */
+	readonly id: string;
+	readonly displayName: string;
+	/** Codicon id for tree items, e.g. `server-environment`. */
+	readonly icon?: string;
+	readonly connectionSchema: FieldSchema[];
+	defaultClusterName?(): string;
+	testConnection?(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<void>;
+	connect(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<ClusterConnection>;
+}
+
+export interface VmManagerApi {
+	readonly apiVersion: number;
+	registerProvider(provider: HypervisorProvider): Disposable;
+}
+
+/** Shape of an entry in `contributes["vmManager.providers"]` of a provider extension. */
+export interface ProviderContribution {
+	id: string;
+	displayName: string;
+	description?: string;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Helpers shared by providers and core
+// ---------------------------------------------------------------------------------------------
+
+export class ProviderError extends Error {
+	constructor(
+		message: string,
+		readonly code: 'notFound' | 'unsupported' | 'permission' | 'unavailable' | 'invalid' | 'failed' = 'failed'
+	) {
+		super(message);
+		this.name = 'ProviderError';
+	}
+}
+
+export function fieldDefaults(schema: FieldSchema[]): FieldValues {
+	const values: FieldValues = {};
+	for (const field of schema) if (field.default !== undefined) values[field.key] = field.default;
+	return values;
+}
+
+/** Coerce raw (string) form values to the types declared by the schema. */
+export function coerceValues(schema: FieldSchema[], raw: Record<string, unknown>): FieldValues {
+	const values: FieldValues = {};
+	for (const field of schema) {
+		const value = raw[field.key];
+		if (value === undefined || value === null) continue;
+		switch (field.type) {
+			case 'number': {
+				if (value === '') break;
+				const n = typeof value === 'number' ? value : Number(value);
+				if (!Number.isNaN(n)) values[field.key] = n;
+				break;
+			}
+			case 'checkbox':
+				values[field.key] = value === true || value === 'true' || value === 'on' || value === '1';
+				break;
+			default:
+				values[field.key] = String(value);
+		}
+	}
+	return values;
+}
+
+/** Returns an error message for the first invalid field, or undefined. */
+export function validateValue(field: FieldSchema, value: FieldValue): string | undefined {
+	const empty = value === undefined || value === '';
+	if (empty) return field.required ? `${field.label} is required` : undefined;
+	if (field.type === 'number') {
+		const n = Number(value);
+		if (Number.isNaN(n)) return `${field.label} must be a number`;
+		if (field.min !== undefined && n < field.min) return `${field.label} must be at least ${field.min}`;
+		if (field.max !== undefined && n > field.max) return `${field.label} must be at most ${field.max}`;
+	}
+	if (field.type === 'select' && field.options && !field.options.some((o) => o.value === String(value))) {
+		return `${field.label} has an unknown value`;
+	}
+	return undefined;
+}
+
+export function validateValues(schema: FieldSchema[], values: FieldValues): { key: string; message: string } | undefined {
+	for (const field of schema) {
+		const message = validateValue(field, values[field.key]);
+		if (message) return { key: field.key, message };
+	}
+	return undefined;
+}
+
+export function formatMemory(mb: number | undefined): string {
+	if (mb === undefined) return '–';
+	return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB` : `${mb} MB`;
+}
+
+export function formatUptime(seconds: number | undefined): string {
+	if (!seconds) return '–';
+	const d = Math.floor(seconds / 86400);
+	const h = Math.floor((seconds % 86400) / 3600);
+	const m = Math.floor((seconds % 3600) / 60);
+	if (d) return `${d}d ${h}h`;
+	if (h) return `${h}h ${m}m`;
+	return `${m}m`;
+}

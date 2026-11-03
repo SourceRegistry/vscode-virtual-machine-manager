@@ -147,3 +147,10 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# extension
+*.vsix
+.vscode-test/
+
+# copied by scripts/package.mjs
+extensions/*/LICENSE

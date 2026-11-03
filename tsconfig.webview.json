@@ -1,0 +1,30 @@
+{
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowJs": false,
+    "resolveJsonModule": true,
+    "types": ["vite/client", "svelte", "node"],
+    "paths": {
+      "$app/env": ["./src/lib/client/shims/app-env.ts"],
+      "$app/environment": ["./src/lib/client/shims/app-env.ts"],
+      "$app/state": ["./src/lib/client/shims/app-state.svelte.ts"],
+      "$app/stores": ["./src/lib/client/shims/app-stores.ts"],
+      "$app/navigation": ["./src/lib/client/shims/app-navigation.ts"],
+      "$app/forms": ["./src/lib/client/shims/app-forms.ts"],
+      "$env/dynamic/public": ["./src/lib/client/shims/env-public.ts"],
+      "@sveltejs/kit": ["./src/lib/client/shims/kit.ts"],
+      "@sourceregistry/sveltekit-service-manager/client": ["./src/lib/client/shims/service-manager.ts"],
+      "$lib/*": ["./src/lib/*"],
+      "#lib/*": ["./src/lib/*"],
+      "@vmm/sdk": ["./packages/sdk/src/index.ts"]
+    }
+  },
+  "include": ["src/lib/client/**/*.ts", "src/lib/client/**/*.svelte", "src/shared/**/*.ts", "test/webview.test.ts"]
+}

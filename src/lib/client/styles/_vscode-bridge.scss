@@ -1,0 +1,133 @@
+// Maps client-lib runtime tokens to VS Code theme variables. VS Code injects the --vscode-*
+// variables into every webview and updates them live when the user switches theme, so these
+// rules follow light, dark, high-contrast and any third-party theme without a reload.
+//
+// The selectors are doubled for specificity so they win over client-lib's `:root` (light) and
+// `[data-theme='dark']` blocks regardless of which one theme-sync sets.
+
+:root:root,
+:root:root[data-theme='dark'],
+:root:root[data-theme='light'] {
+	// Typography
+	--font-family-base: var(--vscode-font-family);
+
+	// Brand → the theme's button colours
+	--color-primary: var(--vscode-button-background);
+	--color-primary-contrast: var(--vscode-button-foreground);
+	--color-secondary: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+	--color-secondary-contrast: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+	--color-primary-opaque: color-mix(in srgb, var(--vscode-button-background) 60%, transparent);
+	--color-primary-soft: var(--vscode-list-hoverBackground);
+	--color-primary-border: var(--vscode-focusBorder);
+
+	// Semantic
+	--color-success: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
+	--color-warning: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+	--color-danger: var(--vscode-errorForeground, var(--vscode-charts-red));
+	--color-info: var(--vscode-editorInfo-foreground, var(--vscode-charts-blue));
+	--color-success-contrast: var(--vscode-editor-background);
+	--color-warning-contrast: var(--vscode-editor-background);
+	--color-danger-contrast: var(--vscode-editor-background);
+	--color-info-contrast: var(--vscode-editor-background);
+
+	// Surfaces
+	--color-background-page: var(--vscode-editor-background);
+	--color-background-primary: var(--vscode-editor-background);
+	--color-background-primary-opaque: var(--vscode-editor-background);
+	--color-background-secondary: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+	--color-background-secondary-opaque: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+	--color-background-tertiary: var(--vscode-input-background);
+	--main-bg: var(--vscode-editor-background);
+	--main-border: 1px solid var(--vscode-widget-border, transparent);
+	--card-surface-base: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	--card-variant-bg-tint: 8%;
+	--card-variant-border-tint: 60%;
+
+	// Text
+	--color-text-primary: var(--vscode-foreground);
+	--color-text-secondary: var(--vscode-descriptionForeground);
+	--color-text-muted: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+	--color-text-light: var(--vscode-foreground);
+	--color-text-dark: var(--vscode-foreground);
+
+	// Structure
+	--color-border-primary: var(--vscode-widget-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
+	--color-scrollbar-thumb-color: var(--vscode-scrollbarSlider-background);
+	--color-scrollbar-track-color: transparent;
+}
+
+html {
+	background: var(--vscode-editor-background);
+	font-size: var(--vscode-font-size, 13px);
+}
+
+body {
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size, 13px);
+	font-weight: var(--vscode-font-weight, normal);
+	color: var(--vscode-foreground);
+	background: var(--vscode-editor-background);
+	margin: 0;
+	padding: 0;
+}
+
+:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+// Inputs follow the theme's input colours (client-lib reads --bg / --border per input).
+input,
+select,
+textarea {
+	--bg: var(--vscode-input-background);
+	--border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent));
+	color: var(--vscode-input-foreground);
+}
+
+input::placeholder,
+textarea::placeholder {
+	color: var(--vscode-input-placeholderForeground);
+}
+
+/* Wrappers that only carry data-vscode-context for native context menus; no layout of their own. */
+.context {
+	display: contents;
+}
+
+code,
+pre,
+.mono {
+	font-family: var(--vscode-editor-font-family);
+	font-size: var(--vscode-editor-font-size);
+}
+
+a {
+	color: var(--vscode-textLink-foreground);
+}
+
+a:hover {
+	color: var(--vscode-textLink-activeForeground);
+}
+
+// High contrast themes: give surfaces a visible border, like native VS Code UI.
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+	.card,
+	.table,
+	.dropdown-menu {
+		outline: 1px solid var(--vscode-contrastBorder);
+	}
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--vscode-scrollbarSlider-background);
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+::-webkit-scrollbar-thumb:active {
+	background: var(--vscode-scrollbarSlider-activeBackground);
+}

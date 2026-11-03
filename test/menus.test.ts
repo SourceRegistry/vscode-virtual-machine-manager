@@ -1,0 +1,97 @@
+/**
+ * Evaluates the `viewItem =~ /…/` / `vmmItem =~ /…/` parts of the contributed context menus against the
+ * real context-value encoding, so a broken regex (e.g. a JSON "\b" that became a backspace) fails here
+ * instead of silently hiding menu items.
+ */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import type { Capabilities, VmInfo, VmState } from '@vmm/sdk';
+import { clusterContextValue, nodeContextValue, vmContextValue } from '../src/shared/contextValue';
+
+interface MenuItem {
+	command: string;
+	when: string;
+	group: string;
+}
+
+const pkg = JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
+const menus = pkg.contributes.menus as Record<string, MenuItem[]>;
+
+const caps: Capabilities = {
+	create: true,
+	edit: true,
+	delete: true,
+	power: ['start', 'shutdown', 'reboot', 'stop'],
+	consoles: ['serial'],
+	preview: true,
+	external: true
+};
+
+function regexOf(when: string): RegExp {
+	const match = /(?:viewItem|vmmItem) =~ \/(.*)\//.exec(when);
+	if (!match) throw new Error(`No item regex in: ${when}`);
+	return new RegExp(match[1]);
+}
+
+function commandsFor(menu: string, contextValue: string, { inline = false } = {}): string[] {
+	return menus[menu]
+		.filter((m) => m.group.startsWith('inline') === inline)
+		.filter((m) => regexOf(m.when).test(contextValue))
+		.map((m) => m.command);
+}
+
+const vm = (state: VmState): VmInfo => ({ id: 'v', name: 'vm', state });
+
+describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
+	it('contains no control characters', () => {
+		expect(JSON.stringify(menus[menu])).not.toMatch(/\\u00|\\b(?![a-z])/);
+		for (const item of menus[menu]) expect([...item.when].every((c) => c.charCodeAt(0) >= 32)).toBe(true);
+	});
+
+	it('offers start, consoles and management for a stopped VM', () => {
+		expect(commandsFor(menu, vmContextValue(vm('stopped'), caps))).toEqual([
+			'vmm.start',
+			'vmm.connectGraphical',
+			'vmm.connectSerial',
+			'vmm.openExternal',
+			'vmm.editVm',
+			'vmm.deleteVm',
+			'vmm.copyId'
+		]);
+	});
+
+	it('offers shutdown, reboot, stop and consoles for a running VM', () => {
+		expect(commandsFor(menu, vmContextValue(vm('running'), caps))).toEqual([
+			'vmm.shutdown',
+			'vmm.reboot',
+			'vmm.stop',
+			'vmm.connectGraphical',
+			'vmm.connectSerial',
+			'vmm.openExternal',
+			'vmm.editVm',
+			'vmm.deleteVm',
+			'vmm.copyId'
+		]);
+	});
+
+	it('only offers actions the provider supports', () => {
+		const limited: Capabilities = { ...caps, power: ['start', 'stop'], consoles: [], preview: false, external: false, edit: false, delete: false };
+		expect(commandsFor(menu, vmContextValue(vm('running'), limited))).toEqual(['vmm.stop', 'vmm.copyId']);
+	});
+
+	it('offers create on nodes and management on clusters', () => {
+		expect(commandsFor(menu, nodeContextValue('online', caps))).toContain('vmm.createVm');
+		expect(commandsFor(menu, clusterContextValue('connected'))).toEqual(['vmm.reconnectCluster', 'vmm.editCluster', 'vmm.removeCluster']);
+	});
+});
+
+describe('tree inline actions', () => {
+	it('shows start on stopped and connect/shutdown on running VMs', () => {
+		expect(commandsFor('view/item/context', vmContextValue(vm('saved'), caps), { inline: true })).toEqual(['vmm.start']);
+		expect(commandsFor('view/item/context', vmContextValue(vm('running'), caps), { inline: true })).toEqual([
+			'vmm.connectGraphical',
+			'vmm.shutdown'
+		]);
+	});
+});

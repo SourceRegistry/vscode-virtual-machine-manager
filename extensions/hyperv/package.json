@@ -1,0 +1,76 @@
+{
+  "name": "vm-manager-hyperv",
+  "displayName": "VM Manager – Hyper-V",
+  "description": "Microsoft Hyper-V provider for VM Manager: manage local Hyper-V virtual machines, serial console and live preview.",
+  "version": "0.1.0",
+  "publisher": "sourceregistry",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlexanderSlaa/vscode-virtual-machine.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "hyper-v",
+    "hyperv",
+    "virtual machine",
+    "vm-manager-provider"
+  ],
+  "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "sourceregistry.vm-manager"
+  ],
+  "activationEvents": [],
+  "contributes": {
+    "vmManager.providers": [
+      {
+        "id": "hyperv",
+        "displayName": "Hyper-V",
+        "description": "Microsoft Hyper-V on this Windows machine"
+      }
+    ],
+    "commands": [
+      {
+        "command": "vmm.hyperv.checkPrerequisites",
+        "title": "Check Hyper-V Prerequisites",
+        "category": "VM"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "hypervSetup",
+        "title": "Set up Hyper-V for VM Manager",
+        "description": "Make sure Hyper-V is enabled and your account may manage it.",
+        "when": "isWindows",
+        "steps": [
+          {
+            "id": "enable",
+            "title": "Enable Hyper-V",
+            "description": "Hyper-V must be enabled as a Windows feature (Windows 10/11 Pro, Enterprise or Education, or Windows Server).\n[Check Prerequisites](command:vmm.hyperv.checkPrerequisites)",
+            "media": { "markdown": "media/prerequisites.md" },
+            "completionEvents": [ "onCommand:vmm.hyperv.checkPrerequisites" ]
+          },
+          {
+            "id": "addCluster",
+            "title": "Add your local Hyper-V",
+            "description": "Add a cluster of type Hyper-V. Your computer appears as its single node.\n[Add Cluster](command:vmm.addCluster)",
+            "media": { "markdown": "media/prerequisites.md" },
+            "completionEvents": [ "onContext:vmm.hasClusters" ]
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "cd ../.. && node esbuild.mjs --only hyperv"
+  },
+  "dependencies": {
+    "@vmm/sdk": "*"
+  }
+}

@@ -1,0 +1,4 @@
+[submodule "src/lib/client-lib"]
+	path = src/lib/client-lib
+	url = https://gitlab.projectsource.nl/sourceregistry/svelte/client-lib.git
+	branch = migration/svelte-standards

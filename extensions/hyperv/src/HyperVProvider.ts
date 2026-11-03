@@ -1,0 +1,485 @@
+import * as net from 'node:net';
+import * as os from 'node:os';
+import { spawn } from 'node:child_process';
+import {
+	ProviderError,
+	type Capabilities,
+	type ClusterConfig,
+	type ClusterConnection,
+	type ConsoleKind,
+	type ConsoleStream,
+	type DeleteOptions,
+	type FieldSchema,
+	type FieldValues,
+	type HypervisorProvider,
+	type Logger,
+	type NodeInfo,
+	type PowerAction,
+	type PreviewFrame,
+	type ProviderContext,
+	type VmConfig,
+	type VmInfo,
+	type VmState
+} from '@vmm/sdk';
+import { PowerShellError, PowerShellSession } from './PowerShellSession';
+import * as scripts from './scripts';
+
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const VM_NAME = /^[^\\/:*?"<>|]{1,100}$/;
+const NODE_ID = 'local';
+
+interface RawVm {
+	Id: string;
+	Name: string;
+	State: string;
+	Cpus: number;
+	MemoryMB: number;
+	StartupMB: number;
+	Uptime: number;
+	Generation: number;
+	Notes: string;
+	Ips: string[] | string | null;
+	ComPort: string;
+}
+
+interface RawHost {
+	Name: string;
+	Cpus: number;
+	MemoryMB: number;
+	FreeMB: number;
+	Os: string;
+	VhdPath: string;
+}
+
+interface RawConfig {
+	Name: string;
+	State: string;
+	Generation: number;
+	Cpus: number;
+	MemoryMB: number;
+	DynamicMemory: boolean;
+	Switch: string;
+	Iso: string;
+	SecureBoot: string | null;
+	AutoStart: string;
+	AutoStop: string;
+	CheckpointType: string;
+	Serial: boolean;
+	ComPort: string;
+	Notes: string;
+	Disks: string;
+	Path: string;
+}
+
+export function mapState(state: string): VmState {
+	switch (state) {
+		case 'Running':
+		case 'RunningCritical':
+			return 'running';
+		case 'Off':
+		case 'OffCritical':
+			return 'stopped';
+		case 'Paused':
+		case 'PausedCritical':
+			return 'paused';
+		case 'Saved':
+		case 'SavedCritical':
+			return 'saved';
+		case 'Starting':
+		case 'StartingCritical':
+		case 'Resuming':
+		case 'Reset':
+		case 'ResetCritical':
+			return 'starting';
+		case 'Stopping':
+		case 'StoppingCritical':
+		case 'Saving':
+		case 'SavingCritical':
+		case 'Pausing':
+		case 'PausingCritical':
+			return 'stopping';
+		default:
+			return 'unknown';
+	}
+}
+
+export function toVmInfo(raw: RawVm): VmInfo {
+	const ips = (Array.isArray(raw.Ips) ? raw.Ips : raw.Ips ? [raw.Ips] : [])
+		.filter(Boolean)
+		// IPv4 first, skip link-local IPv6
+		.filter((ip) => !ip.toLowerCase().startsWith('fe80'))
+		.sort((a, b) => Number(a.includes(':')) - Number(b.includes(':')));
+	const state = mapState(raw.State);
+	return {
+		id: raw.Id,
+		name: raw.Name,
+		state,
+		cpus: raw.Cpus,
+		memoryMB: state === 'running' ? raw.MemoryMB : raw.StartupMB,
+		uptimeSeconds: raw.Uptime || undefined,
+		ipAddresses: ips,
+		description: raw.Notes || undefined,
+		os: `Generation ${raw.Generation}`,
+		consoles: raw.ComPort ? ['serial'] : []
+	};
+}
+
+function friendlyError(error: unknown): Error {
+	const message = error instanceof Error ? error.message : String(error);
+	if (/is not recognized as the name of a cmdlet|Get-VM/i.test(message) && /not recognized/i.test(message)) {
+		return new ProviderError('The Hyper-V PowerShell module is not available. Enable Hyper-V (including its management tools) first.', 'unavailable');
+	}
+	if (/permission|access.*denied|required permission|authorization policy/i.test(message)) {
+		return new ProviderError(
+			'Access denied. Add your account to the "Hyper-V Administrators" group (sign out and in afterwards) or run VS Code as administrator.',
+			'permission'
+		);
+	}
+	if (error instanceof PowerShellError) return new ProviderError(message, 'failed');
+	return error instanceof Error ? error : new Error(message);
+}
+
+function assertVmId(vmId: string): string {
+	if (!GUID.test(vmId)) throw new ProviderError('Invalid virtual machine id', 'invalid');
+	return vmId;
+}
+
+export class HyperVProvider implements HypervisorProvider {
+	readonly id = 'hyperv';
+	readonly displayName = 'Hyper-V';
+	readonly icon = 'server-environment';
+	readonly connectionSchema: FieldSchema[] = [];
+
+	defaultClusterName(): string {
+		return 'Local (Hyper-V)';
+	}
+
+	async testConnection(_cluster: ClusterConfig, _secrets: unknown, context: ProviderContext): Promise<void> {
+		const connection = await this.connect(_cluster, {}, context);
+		try {
+			await connection.listNodes();
+		} finally {
+			connection.dispose();
+		}
+	}
+
+	async connect(_cluster: ClusterConfig, _secrets: unknown, context: ProviderContext): Promise<HyperVConnection> {
+		if (process.platform !== 'win32') {
+			throw new ProviderError('Hyper-V is only available on Windows hosts.', 'unsupported');
+		}
+		return new HyperVConnection(context.log);
+	}
+}
+
+export class HyperVConnection implements ClusterConnection {
+	readonly capabilities: Capabilities = {
+		create: true,
+		edit: true,
+		delete: true,
+		power: ['start', 'shutdown', 'reboot', 'stop'],
+		consoles: ['serial'],
+		preview: true,
+		external: true
+	};
+
+	/** Fast queries (polling). */
+	private readonly query: PowerShellSession;
+	/** Slow operations (graceful shutdown can take minutes) so they never block polling. */
+	private readonly ops: PowerShellSession;
+	private preview: PowerShellSession | undefined;
+	private hostCache: RawHost | undefined;
+
+	constructor(private readonly log: Logger) {
+		this.query = new PowerShellSession('query', log);
+		this.ops = new PowerShellSession('ops', log);
+	}
+
+	private async run<T>(session: PowerShellSession, script: string, params?: unknown, timeout?: number): Promise<T[]> {
+		try {
+			return await session.run<T>(script, params, timeout);
+		} catch (error) {
+			throw friendlyError(error);
+		}
+	}
+
+	async listNodes(): Promise<NodeInfo[]> {
+		const [host] = await this.run<RawHost>(this.query, scripts.HOST_INFO);
+		this.hostCache = host;
+		return [
+			{
+				id: NODE_ID,
+				name: host?.Name ?? os.hostname(),
+				status: 'online',
+				cpus: host?.Cpus,
+				memoryMB: host?.MemoryMB,
+				memoryUsedMB: host ? host.MemoryMB - host.FreeMB : undefined,
+				description: host?.Os
+			}
+		];
+	}
+
+	async listVms(): Promise<VmInfo[]> {
+		const vms = await this.run<RawVm>(this.query, scripts.LIST_VMS);
+		return vms.map(toVmInfo);
+	}
+
+	private async switches(): Promise<{ value: string; label: string; description?: string }[]> {
+		const switches = await this.run<{ Name: string; Type: string }>(this.query, scripts.LIST_SWITCHES);
+		return switches.map((s) => ({ value: s.Name, label: s.Name, description: s.Type }));
+	}
+
+	async getCreateSchema(): Promise<FieldSchema[]> {
+		const switches = await this.switches();
+		const defaultSwitch = switches.find((s) => s.value === 'Default Switch')?.value ?? switches[0]?.value;
+		return [
+			{ key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'my-vm' },
+			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: 240, default: 2, required: true },
+			{ key: 'memoryMB', label: 'Startup memory', type: 'number', unit: 'MB', min: 32, default: 4096, required: true },
+			{ key: 'diskGB', label: 'Disk size', type: 'number', unit: 'GB', min: 1, max: 65536, default: 64, required: true },
+			{
+				key: 'generation',
+				label: 'Generation',
+				type: 'select',
+				required: true,
+				default: '2',
+				options: [
+					{ value: '2', label: 'Generation 2', description: 'UEFI, Secure Boot — modern operating systems' },
+					{ value: '1', label: 'Generation 1', description: 'BIOS — legacy operating systems' }
+				]
+			},
+			{
+				key: 'secureBoot',
+				label: 'Secure Boot',
+				type: 'select',
+				default: 'MicrosoftWindows',
+				description: 'Generation 2 only',
+				required: true,
+				options: [
+					{ value: 'MicrosoftWindows', label: 'Microsoft Windows' },
+					{ value: 'MicrosoftUEFICertificateAuthority', label: 'Microsoft UEFI CA', description: 'Most Linux distributions' },
+					{ value: 'off', label: 'Disabled' }
+				]
+			},
+			{ key: 'switch', label: 'Network switch', type: 'select', options: switches, default: defaultSwitch },
+			{ key: 'iso', label: 'Installation media (ISO)', type: 'file', filters: { 'Disk images': ['iso'] } },
+			{ key: 'dynamicMemory', label: 'Dynamic memory', type: 'checkbox', default: true, advanced: true },
+			{ key: 'serial', label: 'Serial console (COM1 named pipe)', type: 'checkbox', default: true, advanced: true },
+			{
+				key: 'vhdDirectory',
+				label: 'Disk location',
+				type: 'directory',
+				placeholder: this.hostCache?.VhdPath || 'Hyper-V default',
+				advanced: true
+			},
+			{ key: 'notes', label: 'Notes', type: 'textarea', advanced: true }
+		];
+	}
+
+	async createVm(_nodeId: string, values: FieldValues): Promise<VmInfo> {
+		const name = String(values.name ?? '').trim();
+		if (!VM_NAME.test(name)) throw new ProviderError('The name contains characters that are not allowed: \\ / : * ? " < > |', 'invalid');
+		const params = {
+			name,
+			cpus: Number(values.cpus ?? 2),
+			memoryMB: Number(values.memoryMB ?? 4096),
+			diskGB: Number(values.diskGB ?? 64),
+			generation: Number(values.generation ?? 2),
+			secureBoot: values.secureBoot ?? 'MicrosoftWindows',
+			switch: values.switch,
+			iso: values.iso,
+			dynamicMemory: values.dynamicMemory ?? true,
+			serial: values.serial ?? true,
+			vhdDirectory: values.vhdDirectory,
+			notes: values.notes
+		};
+		const [created] = await this.run<{ Id: string; Name: string }>(this.ops, scripts.CREATE_VM, params, 5 * 60_000);
+		if (!created) throw new ProviderError('Hyper-V did not return the new virtual machine');
+		return { id: created.Id, name: created.Name, state: 'stopped' };
+	}
+
+	async getVmConfig(_nodeId: string, vmId: string): Promise<VmConfig> {
+		const [config] = await this.run<RawConfig>(this.query, scripts.GET_CONFIG, { id: assertVmId(vmId) });
+		if (!config) throw new ProviderError('Virtual machine not found', 'notFound');
+		const switches = await this.switches();
+		const off = config.State === 'Off';
+		const offOnly = off ? undefined : 'Can only be changed while the virtual machine is off.';
+		const schema: FieldSchema[] = [
+			{ key: 'name', label: 'Name', type: 'text', required: true, group: 'General' },
+			{ key: 'notes', label: 'Notes', type: 'textarea', group: 'General' },
+			{ key: 'generation', label: 'Generation', type: 'number', readonly: true, group: 'General' },
+			{ key: 'path', label: 'Configuration location', type: 'text', readonly: true, group: 'General' },
+			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: 240, required: true, group: 'Hardware', description: offOnly },
+			{ key: 'memoryMB', label: 'Startup memory', type: 'number', unit: 'MB', min: 32, required: true, group: 'Hardware' },
+			{ key: 'dynamicMemory', label: 'Dynamic memory', type: 'checkbox', group: 'Hardware', description: offOnly },
+			{ key: 'disks', label: 'Hard disks', type: 'text', readonly: true, group: 'Hardware' },
+			{ key: 'iso', label: 'DVD drive (ISO)', type: 'file', filters: { 'Disk images': ['iso'] }, group: 'Hardware' },
+			{ key: 'switch', label: 'Network switch', type: 'select', options: switches, group: 'Network' },
+			{
+				key: 'serial',
+				label: 'Serial console (COM1 named pipe)',
+				type: 'checkbox',
+				group: 'Console',
+				description: config.ComPort ? `Connected to ${config.ComPort}` : offOnly
+			}
+		];
+		if (config.Generation === 2) {
+			schema.push({
+				key: 'secureBoot',
+				label: 'Secure Boot',
+				type: 'select',
+				group: 'Firmware',
+				required: true,
+				description: offOnly,
+				options: [
+					{ value: 'MicrosoftWindows', label: 'Microsoft Windows' },
+					{ value: 'MicrosoftUEFICertificateAuthority', label: 'Microsoft UEFI CA' },
+					{ value: 'off', label: 'Disabled' }
+				]
+			});
+		}
+		schema.push(
+			{
+				key: 'autoStart',
+				label: 'Automatic start action',
+				type: 'select',
+				group: 'Automation',
+				required: true,
+				options: [
+					{ value: 'Nothing', label: 'Nothing' },
+					{ value: 'StartIfRunning', label: 'Start if it was running' },
+					{ value: 'Start', label: 'Always start' }
+				]
+			},
+			{
+				key: 'autoStop',
+				label: 'Automatic stop action',
+				type: 'select',
+				group: 'Automation',
+				required: true,
+				options: [
+					{ value: 'Save', label: 'Save state' },
+					{ value: 'TurnOff', label: 'Turn off' },
+					{ value: 'ShutDown', label: 'Shut down the guest' }
+				]
+			},
+			{
+				key: 'checkpointType',
+				label: 'Checkpoint type',
+				type: 'select',
+				group: 'Automation',
+				required: true,
+				options: [
+					{ value: 'Production', label: 'Production' },
+					{ value: 'ProductionOnly', label: 'Production only' },
+					{ value: 'Standard', label: 'Standard' },
+					{ value: 'Disabled', label: 'Disabled' }
+				]
+			}
+		);
+		return {
+			schema,
+			values: {
+				name: config.Name,
+				notes: config.Notes || undefined,
+				generation: config.Generation,
+				path: config.Path,
+				cpus: config.Cpus,
+				memoryMB: config.MemoryMB,
+				dynamicMemory: config.DynamicMemory,
+				disks: config.Disks,
+				iso: config.Iso || undefined,
+				switch: config.Switch || undefined,
+				serial: config.Serial,
+				secureBoot: config.SecureBoot ?? undefined,
+				autoStart: config.AutoStart,
+				autoStop: config.AutoStop,
+				checkpointType: config.CheckpointType
+			}
+		};
+	}
+
+	async updateVm(_nodeId: string, vmId: string, values: FieldValues): Promise<void> {
+		if (values.name !== undefined && !VM_NAME.test(String(values.name).trim())) {
+			throw new ProviderError('The name contains characters that are not allowed: \\ / : * ? " < > |', 'invalid');
+		}
+		await this.run(this.ops, scripts.UPDATE_VM, { id: assertVmId(vmId), values }, 2 * 60_000);
+	}
+
+	async deleteVm(_nodeId: string, vmId: string, options: DeleteOptions): Promise<void> {
+		await this.run(this.ops, scripts.DELETE_VM, { id: assertVmId(vmId), deleteDisks: options.deleteDisks }, 5 * 60_000);
+	}
+
+	async power(_nodeId: string, vmId: string, action: PowerAction): Promise<void> {
+		// Graceful shutdown waits for the guest; give it time.
+		const timeout = action === 'shutdown' || action === 'reboot' ? 10 * 60_000 : 2 * 60_000;
+		await this.run(this.ops, scripts.POWER, { id: assertVmId(vmId), action }, timeout);
+	}
+
+	async openConsole(_nodeId: string, vmId: string, kind: ConsoleKind): Promise<ConsoleStream> {
+		if (kind !== 'serial') throw new ProviderError('Hyper-V has no VNC endpoint; use the preview or the native viewer.', 'unsupported');
+		assertVmId(vmId);
+		const raw = (await this.run<RawVm>(this.query, scripts.LIST_VMS)).find((v) => v.Id === vmId);
+		if (!raw) throw new ProviderError('Virtual machine not found', 'notFound');
+		const vm = toVmInfo(raw);
+		const pipe = raw.ComPort;
+		if (!pipe) {
+			throw new ProviderError(
+				'No serial port is configured. Enable "Serial console" in the VM settings while the machine is off.',
+				'unavailable'
+			);
+		}
+		if (vm.state !== 'running') throw new ProviderError(`${vm.name} is not running`, 'unavailable');
+		const socket = await new Promise<net.Socket>((resolve, reject) => {
+			const s = net.connect(pipe);
+			s.once('connect', () => resolve(s));
+			s.once('error', (error: NodeJS.ErrnoException) => {
+				if (error.code === 'EACCES' || error.code === 'EPERM') {
+					reject(new ProviderError('Access to the serial pipe was denied. Hyper-V only allows administrators to open it: run VS Code as administrator.', 'permission'));
+				} else if (error.code === 'EBUSY') {
+					reject(new ProviderError('The serial port is in use by another program.', 'unavailable'));
+				} else reject(error);
+			});
+		});
+		this.log.info(`Serial console connected to ${pipe}`);
+		return { stream: socket, dispose: () => socket.destroy() };
+	}
+
+	async *openPreview(_nodeId: string, vmId: string, signal: AbortSignal): AsyncIterable<PreviewFrame> {
+		assertVmId(vmId);
+		this.preview ??= new PowerShellSession('preview', this.log);
+		while (!signal.aborted) {
+			const started = Date.now();
+			const [frame] = await this.run<{ Width: number; Height: number; Data: string }>(
+				this.preview,
+				scripts.THUMBNAIL,
+				{ id: vmId, maxWidth: 1280 },
+				20_000
+			);
+			if (signal.aborted) return;
+			if (frame) {
+				yield {
+					width: frame.Width,
+					height: frame.Height,
+					format: 'rgb565',
+					data: new Uint8Array(Buffer.from(frame.Data, 'base64'))
+				};
+			}
+			const wait = Math.max(150, 700 - (Date.now() - started));
+			await new Promise((resolve) => setTimeout(resolve, wait));
+		}
+	}
+
+	async openExternal(_nodeId: string, vmId: string): Promise<void> {
+		const vm = (await this.listVms()).find((v) => v.id === assertVmId(vmId));
+		if (!vm) throw new ProviderError('Virtual machine not found', 'notFound');
+		const child = spawn('vmconnect.exe', ['localhost', vm.name], { detached: true, stdio: 'ignore', windowsHide: false });
+		child.on('error', (error) => this.log.error(`vmconnect failed: ${error.message}`));
+		child.unref();
+	}
+
+	dispose(): void {
+		this.query.dispose();
+		this.ops.dispose();
+		this.preview?.dispose();
+	}
+}

@@ -1,0 +1,704 @@
+{
+  "name": "vm-manager",
+  "displayName": "VM Manager",
+  "description": "Manage virtual machines (Hyper-V, QEMU, Proxmox, ...) from VS Code: clusters, nodes, power actions, graphical and serial consoles.",
+  "version": "0.1.0",
+  "publisher": "sourceregistry",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlexanderSlaa/vscode-virtual-machine.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "virtual machine",
+    "vm",
+    "hypervisor",
+    "hyper-v",
+    "qemu",
+    "proxmox",
+    "novnc"
+  ],
+  "main": "./dist/extension.js",
+  "workspaces": [
+    "packages/*",
+    "extensions/*"
+  ],
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
+  "scripts": {
+    "build": "npm run build:webview && npm run build:extension",
+    "build:extension": "node esbuild.mjs",
+    "build:webview": "vite build",
+    "watch:extension": "node esbuild.mjs --watch",
+    "watch:webview": "vite build --watch --mode development",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p extensions/hyperv/tsconfig.json --noEmit && tsc -p extensions/qemu/tsconfig.json --noEmit && svelte-check --tsconfig ./tsconfig.webview.json --threshold error",
+    "test": "vitest run",
+    "test:integration": "node test/integration/runTest.mjs",
+    "package": "npm run build && node scripts/package.mjs",
+    "vscode:prepublish": "npm run build"
+  },
+  "activationEvents": [
+    "onWebviewPanel:vmm.overview"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vmm",
+          "title": "Virtual Machines",
+          "icon": "$(vm)"
+        }
+      ]
+    },
+    "views": {
+      "vmm": [
+        {
+          "id": "vmm.clusters",
+          "name": "Clusters",
+          "icon": "$(vm)",
+          "contextualTitle": "Virtual Machines"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "vmm.clusters",
+        "contents": "No hypervisor provider is installed yet. Providers are separate extensions so each hypervisor can be updated independently.\n[$(extensions) Install a Provider](command:vmm.installProviders)\n[Get Started](command:vmm.showWalkthrough)",
+        "when": "!vmm.hasProviders"
+      },
+      {
+        "view": "vmm.clusters",
+        "contents": "No clusters configured. A cluster groups the nodes (hosts) of one hypervisor, for example your local Hyper-V or a Proxmox cluster.\n[$(add) Add Cluster](command:vmm.addCluster)\n[Get Started](command:vmm.showWalkthrough)",
+        "when": "vmm.hasProviders && !vmm.hasClusters"
+      }
+    ],
+    "commands": [
+      {
+        "command": "vmm.addCluster",
+        "title": "Add Cluster",
+        "category": "VM",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vmm.editCluster",
+        "title": "Edit Cluster",
+        "category": "VM",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "vmm.removeCluster",
+        "title": "Remove Cluster",
+        "category": "VM",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "vmm.reconnectCluster",
+        "title": "Reconnect",
+        "category": "VM",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "vmm.refresh",
+        "title": "Refresh",
+        "category": "VM",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vmm.openOverview",
+        "title": "Open Overview",
+        "category": "VM",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "vmm.installProviders",
+        "title": "Install Hypervisor Providers",
+        "category": "VM",
+        "icon": "$(extensions)"
+      },
+      {
+        "command": "vmm.showWalkthrough",
+        "title": "Get Started with VM Manager",
+        "category": "VM",
+        "icon": "$(book)"
+      },
+      {
+        "command": "vmm.createVm",
+        "title": "Create Virtual Machine",
+        "category": "VM",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vmm.editVm",
+        "title": "Settings",
+        "category": "VM",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "vmm.deleteVm",
+        "title": "Delete",
+        "category": "VM",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "vmm.start",
+        "title": "Start",
+        "category": "VM",
+        "icon": "$(play)"
+      },
+      {
+        "command": "vmm.shutdown",
+        "title": "Shut Down",
+        "category": "VM",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "vmm.reboot",
+        "title": "Reboot",
+        "category": "VM",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "vmm.stop",
+        "title": "Stop (Power Off)",
+        "category": "VM",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "vmm.connectGraphical",
+        "title": "Connect Graphical Console",
+        "category": "VM",
+        "icon": "$(device-desktop)"
+      },
+      {
+        "command": "vmm.connectSerial",
+        "title": "Connect Serial Console",
+        "category": "VM",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "vmm.openExternal",
+        "title": "Open in Native Viewer",
+        "category": "VM",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "vmm.copyId",
+        "title": "Copy ID",
+        "category": "VM"
+      },
+      {
+        "command": "vmm.console.sendCtrlAltDel",
+        "title": "Send Ctrl+Alt+Del",
+        "category": "VM Console",
+        "icon": "$(keyboard)"
+      },
+      {
+        "command": "vmm.console.toggleScaling",
+        "title": "Toggle Scaling",
+        "category": "VM Console",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "vmm.console.reconnect",
+        "title": "Reconnect Console",
+        "category": "VM Console",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "vmm.console.openInNewWindow",
+        "title": "Open in New Window",
+        "category": "VM Console",
+        "icon": "$(multiple-windows)"
+      },
+      {
+        "command": "vmm.console.shutdown",
+        "title": "Shut Down",
+        "category": "VM Console",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "vmm.console.reboot",
+        "title": "Reboot",
+        "category": "VM Console",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "vmm.console.stop",
+        "title": "Stop (Power Off)",
+        "category": "VM Console",
+        "icon": "$(stop-circle)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "vmm.editCluster",
+          "when": "vmm.hasClusters"
+        },
+        {
+          "command": "vmm.removeCluster",
+          "when": "vmm.hasClusters"
+        },
+        {
+          "command": "vmm.reconnectCluster",
+          "when": "vmm.hasClusters"
+        },
+        {
+          "command": "vmm.createVm",
+          "when": "vmm.hasClusters"
+        },
+        {
+          "command": "vmm.editVm",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.deleteVm",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.start",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.shutdown",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.reboot",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.stop",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.connectGraphical",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.connectSerial",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.openExternal",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.copyId",
+          "when": "false"
+        },
+        {
+          "command": "vmm.console.sendCtrlAltDel",
+          "when": "activeWebviewPanelId == 'vmm.console.vnc'"
+        },
+        {
+          "command": "vmm.console.toggleScaling",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|preview)$/"
+        },
+        {
+          "command": "vmm.console.reconnect",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./"
+        },
+        {
+          "command": "vmm.console.openInNewWindow",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./"
+        },
+        {
+          "command": "vmm.console.shutdown",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./"
+        },
+        {
+          "command": "vmm.console.reboot",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./"
+        },
+        {
+          "command": "vmm.console.stop",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "vmm.addCluster",
+          "when": "view == vmm.clusters && vmm.hasProviders",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vmm.openOverview",
+          "when": "view == vmm.clusters && vmm.hasClusters",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vmm.refresh",
+          "when": "view == vmm.clusters && vmm.hasClusters",
+          "group": "navigation@3"
+        },
+        {
+          "command": "vmm.installProviders",
+          "when": "view == vmm.clusters",
+          "group": "9_more@1"
+        },
+        {
+          "command": "vmm.showWalkthrough",
+          "when": "view == vmm.clusters",
+          "group": "9_more@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "vmm.refresh",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;/",
+          "group": "inline@9"
+        },
+        {
+          "command": "vmm.reconnectCluster",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;/",
+          "group": "1_connection@1"
+        },
+        {
+          "command": "vmm.editCluster",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;/",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "vmm.removeCluster",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;/",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "vmm.installProviders",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;status=missingProvider;/",
+          "group": "inline@1"
+        },
+        {
+          "command": "vmm.createVm",
+          "when": "view == vmm.clusters && viewItem =~ /^node;.*\\bcreate;/",
+          "group": "inline@1"
+        },
+        {
+          "command": "vmm.createVm",
+          "when": "view == vmm.clusters && viewItem =~ /^node;.*\\bcreate;/",
+          "group": "1_create@1"
+        },
+        {
+          "command": "vmm.refresh",
+          "when": "view == vmm.clusters && viewItem =~ /^node;/",
+          "group": "9_refresh@1"
+        },
+        {
+          "command": "vmm.start",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
+          "group": "inline@1"
+        },
+        {
+          "command": "vmm.connectGraphical",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bgraphical;/",
+          "group": "inline@2"
+        },
+        {
+          "command": "vmm.shutdown",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bshutdown;/",
+          "group": "inline@3"
+        },
+        {
+          "command": "vmm.start",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
+          "group": "1_power@1"
+        },
+        {
+          "command": "vmm.shutdown",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bshutdown;/",
+          "group": "1_power@2"
+        },
+        {
+          "command": "vmm.reboot",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\breboot;/",
+          "group": "1_power@3"
+        },
+        {
+          "command": "vmm.stop",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=(running|paused|starting|stopping|unknown);.*\\bstop;/",
+          "group": "1_power@4"
+        },
+        {
+          "command": "vmm.connectGraphical",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bgraphical;/",
+          "group": "2_connect@1"
+        },
+        {
+          "command": "vmm.connectSerial",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bserial;/",
+          "group": "2_connect@2"
+        },
+        {
+          "command": "vmm.openExternal",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bexternal;/",
+          "group": "2_connect@3"
+        },
+        {
+          "command": "vmm.editVm",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bedit;/",
+          "group": "3_manage@1"
+        },
+        {
+          "command": "vmm.deleteVm",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdelete;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.copyId",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;/",
+          "group": "9_copy@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "vmm.console.sendCtrlAltDel",
+          "when": "activeWebviewPanelId == 'vmm.console.vnc'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vmm.console.toggleScaling",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|preview)$/",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vmm.console.openInNewWindow",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./",
+          "group": "navigation@3"
+        },
+        {
+          "command": "vmm.console.reconnect",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./",
+          "group": "1_console@1"
+        },
+        {
+          "command": "vmm.console.shutdown",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./",
+          "group": "2_power@1"
+        },
+        {
+          "command": "vmm.console.reboot",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./",
+          "group": "2_power@2"
+        },
+        {
+          "command": "vmm.console.stop",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\./",
+          "group": "2_power@3"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "vmm.reconnectCluster",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;/",
+          "group": "1_connection@1"
+        },
+        {
+          "command": "vmm.editCluster",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;/",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "vmm.removeCluster",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;/",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "vmm.createVm",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^node;.*\\bcreate;/",
+          "group": "1_create@1"
+        },
+        {
+          "command": "vmm.refresh",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^node;/",
+          "group": "9_refresh@1"
+        },
+        {
+          "command": "vmm.start",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
+          "group": "1_power@1"
+        },
+        {
+          "command": "vmm.shutdown",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\bshutdown;/",
+          "group": "1_power@2"
+        },
+        {
+          "command": "vmm.reboot",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\breboot;/",
+          "group": "1_power@3"
+        },
+        {
+          "command": "vmm.stop",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=(running|paused|starting|stopping|unknown);.*\\bstop;/",
+          "group": "1_power@4"
+        },
+        {
+          "command": "vmm.connectGraphical",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bgraphical;/",
+          "group": "2_connect@1"
+        },
+        {
+          "command": "vmm.connectSerial",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bserial;/",
+          "group": "2_connect@2"
+        },
+        {
+          "command": "vmm.openExternal",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bexternal;/",
+          "group": "2_connect@3"
+        },
+        {
+          "command": "vmm.editVm",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bedit;/",
+          "group": "3_manage@1"
+        },
+        {
+          "command": "vmm.deleteVm",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bdelete;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.copyId",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;/",
+          "group": "9_copy@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "VM Manager",
+      "properties": {
+        "vmm.refreshInterval": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 300,
+          "markdownDescription": "Seconds between state refreshes while the Clusters view or the Overview is visible. Providers that push change events refresh immediately."
+        },
+        "vmm.console.openInNewWindow": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open consoles directly in a new window instead of an editor tab."
+        },
+        "vmm.console.scaleViewport": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scale graphical consoles to fit the editor."
+        },
+        "vmm.confirmPowerOff": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask for confirmation before a hard power off (Stop)."
+        }
+      }
+    },
+    "walkthroughs": [
+      {
+        "id": "gettingStarted",
+        "title": "Get Started with VM Manager",
+        "description": "Manage Hyper-V, QEMU and other hypervisors without leaving VS Code.",
+        "steps": [
+          {
+            "id": "installProvider",
+            "title": "Install a hypervisor provider",
+            "description": "Each hypervisor is supported by its own small extension, so it can be updated independently.\n[Install Providers](command:vmm.installProviders)",
+            "media": {
+              "markdown": "media/walkthrough/providers.md"
+            },
+            "completionEvents": [
+              "onContext:vmm.hasProviders"
+            ]
+          },
+          {
+            "id": "addCluster",
+            "title": "Add your first cluster",
+            "description": "A cluster is one hypervisor installation, for example ``Local (Hyper-V)``. It contains nodes (hosts) which run your virtual machines.\n[Add Cluster](command:vmm.addCluster)",
+            "media": {
+              "svg": "media/walkthrough/hierarchy.svg",
+              "altText": "Cluster, node and virtual machine hierarchy"
+            },
+            "completionEvents": [
+              "onContext:vmm.hasClusters"
+            ]
+          },
+          {
+            "id": "createVm",
+            "title": "Create or pick a virtual machine",
+            "description": "Right-click a node to create a virtual machine, or use the actions next to an existing one to start, shut down, reboot or stop it.\n[Create Virtual Machine](command:vmm.createVm)",
+            "media": {
+              "markdown": "media/walkthrough/power.md"
+            },
+            "completionEvents": [
+              "onContext:vmm.hasVms"
+            ]
+          },
+          {
+            "id": "connect",
+            "title": "Connect to a console",
+            "description": "Graphical consoles use noVNC and serial consoles use xterm, right inside an editor tab. Use **Open in New Window** in the editor toolbar to pop a console out.\n[Connect Graphical Console](command:vmm.connectGraphical)",
+            "media": {
+              "markdown": "media/walkthrough/consoles.md"
+            },
+            "completionEvents": [
+              "onCommand:vmm.connectGraphical",
+              "onCommand:vmm.connectSerial"
+            ]
+          },
+          {
+            "id": "overview",
+            "title": "See everything at a glance",
+            "description": "The overview shows every cluster, node and virtual machine with its state and resources.\n[Open Overview](command:vmm.openOverview)",
+            "media": {
+              "markdown": "media/walkthrough/overview.md"
+            },
+            "completionEvents": [
+              "onCommand:vmm.openOverview"
+            ]
+          },
+          {
+            "id": "credentials",
+            "title": "Your credentials stay safe",
+            "description": "Passwords and API tokens are stored in the operating system keychain through VS Code Secret Storage. They are never written to settings files and never sent to the webviews.",
+            "media": {
+              "markdown": "media/walkthrough/credentials.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/node": "^22.19.0",
+    "@types/vscode": "~1.95.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^21.0.4",
+    "sass": "^1.107.1",
+    "svelte": "^5.57.3",
+    "svelte-check": "^4.7.8",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "@novnc/novnc": "^1.7.0",
+    "@vscode/codicons": "^0.0.46-24",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "bootstrap-icons": "^1.13.2"
+  }
+}
