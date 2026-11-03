@@ -1,0 +1,27 @@
+VM Manager: let Svelte create the component's shadow root.
+
+IronRDP attaches the shadow root itself (shadow: 'none' + extend), which only works with the
+Svelte it pins (~5.20): newer Svelte 5 renders into a shadow root only when it created it, so the
+screen ends up in the light DOM behind an empty shadow root and is never drawn.
+
+diff --git a/web-client/iron-remote-desktop/src/iron-remote-desktop.svelte b/web-client/iron-remote-desktop/src/iron-remote-desktop.svelte
+index 3d21b911..6dde036e 100644
+--- a/web-client/iron-remote-desktop/src/iron-remote-desktop.svelte
++++ b/web-client/iron-remote-desktop/src/iron-remote-desktop.svelte
+@@ -1,15 +1,7 @@
+ <svelte:options
+     customElement={{
+         tag: 'iron-remote-desktop',
+-        shadow: 'none',
+-        extend: (elementConstructor) => {
+-            return class extends elementConstructor {
+-                constructor() {
+-                    super();
+-                    this.attachShadow({ mode: 'open', delegatesFocus: true });
+-                }
+-            };
+-        },
++        shadow: { mode: 'open', delegatesFocus: true },
+     }}
+ />
+ 

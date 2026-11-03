@@ -27,7 +27,7 @@ describe('Hyper-V state mapping', () => {
 			Ips: ['fe80::1', '2001:db8::5', '10.0.0.5'],
 			ComPort: '\\\\.\\pipe\\web'
 		});
-		expect(vm).toMatchObject({ state: 'running', memoryMB: 3000, consoles: ['serial'], uptimeSeconds: 120 });
+		expect(vm).toMatchObject({ state: 'running', memoryMB: 3000, consoles: ['rdp', 'serial'], uptimeSeconds: 120 });
 		expect(vm.ipAddresses).toEqual(['10.0.0.5', '2001:db8::5']);
 	});
 
@@ -45,7 +45,7 @@ describe('Hyper-V state mapping', () => {
 			Ips: null,
 			ComPort: ''
 		});
-		expect(vm).toMatchObject({ state: 'stopped', memoryMB: 2048, consoles: [], description: 'note', ipAddresses: [] });
+		expect(vm).toMatchObject({ state: 'stopped', memoryMB: 2048, consoles: ['rdp'], description: 'note', ipAddresses: [] });
 	});
 });
 

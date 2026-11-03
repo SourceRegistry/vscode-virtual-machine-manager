@@ -187,6 +187,25 @@ if ($r.ReturnValue -ne 0 -or -not $r.ImageData) { throw "Could not capture the s
 [pscustomobject]@{ Width = $w; Height = $h; Data = [Convert]::ToBase64String([byte[]]$r.ImageData) }
 `;
 
+/**
+ * Who the console sign-in is for. Microsoft accounts authenticate over the network as
+ * `MicrosoftAccount\<e-mail>`; the device may also be set to Windows Hello only (passwordless).
+ */
+export const CONSOLE_ACCOUNT = String.raw`
+$user = Get-LocalUser -Name $env:USERNAME -ErrorAction SilentlyContinue
+$msa = $null
+if ($user -and [string]$user.PrincipalSource -eq 'MicrosoftAccount') {
+	$msa = (Get-ChildItem 'HKCU:\Software\Microsoft\IdentityCRL\UserExtendedProperties' -ErrorAction SilentlyContinue | Select-Object -First 1).PSChildName
+}
+$passwordless = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device' -ErrorAction SilentlyContinue).DevicePasswordLessBuildVersion
+[pscustomobject]@{
+	User = [string]$env:USERNAME
+	Domain = [string]$env:USERDOMAIN
+	MicrosoftAccount = [string]$msa
+	Passwordless = [bool]($passwordless -eq 2)
+}
+`;
+
 export const PREREQUISITES = String.raw`
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)

@@ -85,7 +85,7 @@ export interface FieldSchema {
 // ---------------------------------------------------------------------------------------------
 
 export type PowerAction = 'start' | 'shutdown' | 'reboot' | 'stop' | 'reset';
-export type ConsoleKind = 'vnc' | 'serial';
+export type ConsoleKind = 'vnc' | 'serial' | 'rdp';
 export type VmState = 'running' | 'stopped' | 'paused' | 'saved' | 'starting' | 'stopping' | 'unknown';
 export type NodeStatus = 'online' | 'offline' | 'unknown';
 
@@ -160,11 +160,54 @@ export interface DeleteOptions {
 }
 
 /**
- * A live console byte stream. For `vnc` the stream carries raw RFB protocol bytes,
- * for `serial` raw terminal bytes.
+ * A live console byte stream. For `vnc` the stream carries raw RFB protocol bytes, for `serial`
+ * raw terminal bytes and for `rdp` the raw TCP connection to the RDP endpoint (the core does the
+ * pre-connection blob, TLS and relaying; the in-editor client does CredSSP and RDP).
  */
 export interface ConsoleStream {
 	stream: Duplex;
+	dispose(): void;
+}
+
+/** Where and how the core's RDP client connects for an `rdp` console. */
+export interface RdpTarget {
+	/** Host name of the RDP server, used as the CredSSP service principal (e.g. the Hyper-V host). */
+	serverName: string;
+	/**
+	 * Hyper-V VMConnect routing: the core sends this VM id as a pre-connection blob before TLS.
+	 * `basic` is the VM's own console (works for every guest, including firmware screens);
+	 * `enhanced` asks the guest for an Enhanced Session (needs guest support).
+	 */
+	vmConnect?: { vmId: string; mode: 'basic' | 'enhanced' };
+	/** Suggested user name for the credential prompt, e.g. `DESKTOP-ALEX\alex`. */
+	defaultUsername?: string;
+	/** Explains whose credentials are asked for, e.g. "your Windows account on DESKTOP-ALEX". */
+	credentialsHint?: string;
+	/** Advice shown when the server rejects the sign-in (account formats, policies…). */
+	signInHelp?: string;
+	/**
+	 * Single sign-on with the identity VS Code runs as (e.g. Windows SSPI "Negotiate" with the
+	 * logon token). When present the core authenticates the RDP connection (CredSSP) itself and
+	 * asks for no password; it falls back to a password prompt if this fails.
+	 */
+	currentUser?: {
+		/** e.g. `DESKTOP-ALEX\\alex`, shown in the console status. */
+		readonly displayName: string;
+		createContext(targetName: string): Promise<SecurityContext>;
+	};
+}
+
+/**
+ * A client-side GSS/SSPI security context (Negotiate/Kerberos/NTLM), as needed for CredSSP:
+ * token exchange, then message encryption with the negotiated session key.
+ */
+export interface SecurityContext {
+	/** Advances the handshake with the server's token (empty on the first call). */
+	step(input: Uint8Array): Promise<{ token: Uint8Array; complete: boolean }>;
+	/** Seals `data` (SSPI EncryptMessage); the result is `trailer ‖ ciphertext`. */
+	encrypt(data: Uint8Array, sequence: number): Promise<Uint8Array>;
+	/** Unseals `trailer ‖ ciphertext` from the server (SSPI DecryptMessage). */
+	decrypt(data: Uint8Array, sequence: number): Promise<Uint8Array>;
 	dispose(): void;
 }
 
@@ -187,6 +230,8 @@ export interface ClusterConnection extends Disposable {
 	deleteVm(nodeId: string, vmId: string, options: DeleteOptions): Promise<void>;
 	power(nodeId: string, vmId: string, action: PowerAction): Promise<void>;
 	openConsole(nodeId: string, vmId: string, kind: ConsoleKind): Promise<ConsoleStream>;
+	/** Required when `capabilities.consoles` includes `rdp`. Called before `openConsole(…, 'rdp')`. */
+	getRdpTarget?(nodeId: string, vmId: string): Promise<RdpTarget>;
 	openPreview?(nodeId: string, vmId: string, signal: AbortSignal): AsyncIterable<PreviewFrame>;
 	openExternal?(nodeId: string, vmId: string): Promise<void>;
 	/** Fire to make the core refresh immediately. Without it the core polls. */

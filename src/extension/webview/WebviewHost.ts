@@ -41,7 +41,10 @@ export function renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri, bo
 		`img-src ${webview.cspSource} data: blob:`,
 		`style-src ${webview.cspSource} 'unsafe-inline'`,
 		`font-src ${webview.cspSource}`,
-		`script-src 'nonce-${nonce}' ${webview.cspSource}`
+		// The RDP console runs IronRDP as WebAssembly, fetched from the extension's own files.
+		boot.view === 'console.rdp'
+			? `script-src 'nonce-${nonce}' ${webview.cspSource} 'wasm-unsafe-eval'; connect-src ${webview.cspSource}`
+			: `script-src 'nonce-${nonce}' ${webview.cspSource}`
 	].join('; ');
 	const bootJson = JSON.stringify(boot).replace(/</g, '\\u003c');
 	return `<!DOCTYPE html>

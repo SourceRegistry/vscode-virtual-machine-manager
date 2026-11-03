@@ -6,7 +6,21 @@ Manage the Hyper-V virtual machines on your Windows machine from VS Code.
 * List, create, edit and delete virtual machines (generation 1 and 2, Secure Boot templates,
   switches, ISO, dynamic memory, automatic start/stop, checkpoints).
 * Start, shut down (integration services), reboot and power off.
-* Live screen preview in an editor tab and one click to the native *Virtual Machine Connection*.
+* Interactive graphical console in an editor tab: the same RDP connection *Virtual Machine
+  Connection* (vmconnect) uses, rendered by an in-editor RDP client. Keyboard, mouse,
+  Ctrl+Alt+Del, scaling and *Open in New Window* work as in other consoles.
+  * Signs in with the Windows account VS Code runs as, like vmconnect: no password and no
+    elevation (the account must be allowed to manage Hyper-V, e.g. member of "Hyper-V
+    Administrators"). This uses Windows' SSPI (Negotiate) through PowerShell.
+  * If that fails, or with the cluster setting *Console sign-in: Ask for a user name and password*,
+    it asks for an account instead (for a Microsoft account: `MicrosoftAccount\you@example.com` and
+    the account password, not the PIN). That sign-in is stored in your OS keychain; **VM: Forget
+    Console Sign-in** removes it.
+  * *Basic session* (default) shows the VM's own screen, including firmware and boot. *Enhanced
+    session* (cluster setting) needs guest support (Windows, or Linux with xrdp).
+  * Hyper-V allows one basic console connection per VM; connecting takes over an open vmconnect
+    window.
+* One click to the native *Virtual Machine Connection*.
 * Serial console on the COM1 named pipe (requires VS Code to run as administrator).
 
 ## Requirements

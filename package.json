@@ -235,6 +235,12 @@
         "title": "Stop (Power Off)",
         "category": "VM Console",
         "icon": "$(stop-circle)"
+      },
+      {
+        "command": "vmm.forgetConsoleCredentials",
+        "title": "Forget Console Sign-in",
+        "category": "VM",
+        "icon": "$(key)"
       }
     ],
     "menus": {
@@ -373,6 +379,11 @@
           "group": "2_manage@2"
         },
         {
+          "command": "vmm.forgetConsoleCredentials",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;/",
+          "group": "2_manage@3"
+        },
+        {
           "command": "vmm.installProviders",
           "when": "view == vmm.clusters && viewItem =~ /^cluster;status=missingProvider;/",
           "group": "inline@1"
@@ -461,12 +472,12 @@
       "editor/title": [
         {
           "command": "vmm.console.sendCtrlAltDel",
-          "when": "activeWebviewPanelId == 'vmm.console.vnc'",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|rdp)$/",
           "group": "navigation@1"
         },
         {
           "command": "vmm.console.toggleScaling",
-          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|preview)$/",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|rdp|preview)$/",
           "group": "navigation@2"
         },
         {
@@ -510,6 +521,11 @@
           "command": "vmm.removeCluster",
           "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;/",
           "group": "2_manage@2"
+        },
+        {
+          "command": "vmm.forgetConsoleCredentials",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;/",
+          "group": "2_manage@3"
         },
         {
           "command": "vmm.createVm",

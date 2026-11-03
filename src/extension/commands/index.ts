@@ -8,6 +8,7 @@ import type { VmTreeProvider } from '../tree/VmTreeProvider';
 import { stateLabel } from '../tree/VmTreeProvider';
 import { BACK, collectFields, pickStep, textStep, type PickItem } from '../input/MultiStepInput';
 import type { ConsoleManager } from '../webview/ConsoleManager';
+import type { RdpCredentialStore } from '../rdp/credentials';
 import { OverviewPanel } from '../webview/OverviewPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, showError } from '../util/log';
@@ -21,6 +22,7 @@ export interface CommandDeps {
 	manager: ConnectionManager;
 	tree: VmTreeProvider;
 	consoles: ConsoleManager;
+	credentials: RdpCredentialStore;
 }
 
 type Arg = unknown;
@@ -53,7 +55,7 @@ function asClusterId(arg: Arg): string | undefined {
 }
 
 export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
-	const { context, store, registry, manager, tree, consoles } = deps;
+	const { context, store, registry, manager, tree, consoles, credentials } = deps;
 
 	async function loadAll(): Promise<void> {
 		await Promise.all(manager.clusters().map((c) => manager.ensureLoaded(c.cluster.id)));
@@ -342,6 +344,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		const caps = location.cluster.connection?.capabilities;
 		const consolesAvailable = location.vm.consoles ?? caps?.consoles ?? [];
 		if (consolesAvailable.includes('vnc')) return consoles.open(location.ref, 'vnc');
+		if (consolesAvailable.includes('rdp')) return consoles.open(location.ref, 'rdp');
 		if (caps?.preview) return consoles.open(location.ref, 'preview');
 		if (caps?.external) return openExternal(location.ref);
 		void vscode.window.showInformationMessage(`${location.vm.name} has no graphical console.`);
@@ -377,6 +380,12 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register('vmm.addCluster', () => addCluster()),
 		register('vmm.editCluster', (arg) => editCluster(arg)),
 		register('vmm.removeCluster', (arg) => removeCluster(arg)),
+		register('vmm.forgetConsoleCredentials', async (arg) => {
+			const clusterId = await resolveCluster(arg, 'Select the cluster whose console sign-in to forget');
+			if (!clusterId) return;
+			await credentials.forget(clusterId);
+			void vscode.window.showInformationMessage('Console sign-in forgotten. You will be asked again on the next connect.');
+		}),
 		register('vmm.reconnectCluster', async (arg) => {
 			const clusterId = await resolveCluster(arg, 'Select the cluster to reconnect');
 			if (clusterId) await inView(() => manager.reconnect(clusterId));

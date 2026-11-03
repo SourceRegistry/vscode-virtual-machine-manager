@@ -1,16 +1,21 @@
 import * as vscode from 'vscode';
-import type { ConsoleStream, PowerAction } from '@vmm/sdk';
-import type { ViewKind, VmRef, WebviewToHost } from '../../shared/protocol';
+import { randomBytes } from 'node:crypto';
+import type { ConsoleStream, PowerAction, RdpTarget } from '@vmm/sdk';
+import { RdpErrorKind, type ViewKind, type VmRef, type WebviewToHost } from '../../shared/protocol';
+import { RdpGateway } from '../rdp/RdpGateway';
+import { vmConnectPayload } from '../rdp/rdcleanpath';
+import { splitUsername, type RdpCredentialStore } from '../rdp/credentials';
 import type { ConnectionManager } from '../clusters/ConnectionManager';
 import { errorMessage, log } from '../util/log';
-import { panelIcon, renderHtml, toBuffer, WebviewChannel, webviewOptions } from './WebviewHost';
+import { panelIcon, renderHtml, toBuffer, WebviewChannel, webviewOptions, webviewRoot } from './WebviewHost';
 
-export type ConsoleViewKind = 'vnc' | 'serial' | 'preview';
+export type ConsoleViewKind = 'vnc' | 'serial' | 'preview' | 'rdp';
 
 const VIEW_TYPES: Record<ConsoleViewKind, string> = {
 	vnc: 'vmm.console.vnc',
 	serial: 'vmm.console.serial',
-	preview: 'vmm.console.preview'
+	preview: 'vmm.console.preview',
+	rdp: 'vmm.console.rdp'
 };
 
 /**
@@ -21,6 +26,11 @@ const VIEW_TYPES: Record<ConsoleViewKind, string> = {
 class ConsoleSession implements vscode.Disposable {
 	private stream: ConsoleStream | undefined;
 	private previewAbort: AbortController | undefined;
+	/** RDP: the gateway for the client's current socket, and what it connects to. */
+	private gateway: RdpGateway | undefined;
+	private rdp: { target: RdpTarget; token: string; singleSignOn: boolean } | undefined;
+	/** Single sign-on failed once in this tab: use the password prompt until the tab is reopened. */
+	private singleSignOnFailed = false;
 	private readonly channel: WebviewChannel;
 	private readonly disposables: vscode.Disposable[] = [];
 	private generation = 0;
@@ -31,6 +41,7 @@ class ConsoleSession implements vscode.Disposable {
 		readonly kind: ConsoleViewKind,
 		readonly panel: vscode.WebviewPanel,
 		private readonly manager: ConnectionManager,
+		private readonly credentials: RdpCredentialStore,
 		private readonly onDispose: (session: ConsoleSession) => void
 	) {
 		this.channel = new WebviewChannel(
@@ -57,12 +68,31 @@ class ConsoleSession implements vscode.Disposable {
 				void this.connect();
 				break;
 			case 'console.input':
-				this.stream?.stream.write(toBuffer(message.data));
+				if (this.gateway) this.gateway.write(toBuffer(message.data));
+				else this.stream?.stream.write(toBuffer(message.data));
+				break;
+			case 'log': {
+				const line = `[console ${this.manager.findVm(this.ref)?.vm.name ?? this.ref.vmId}] ${String(message.message).slice(0, 2000)}`;
+				if (message.level === 'error') log.error(line);
+				else if (message.level === 'warn') log.warn(line);
+				else log.info(line);
+				break;
+			}
+			case 'console.socket':
+				if (message.action === 'open') this.openGateway();
+				else this.closeGateway();
+				break;
+			case 'rdp.ended':
+				this.closeGateway();
+				if (message.errorKind === RdpErrorKind.WrongPassword || message.errorKind === RdpErrorKind.LogonFailure) {
+					void this.signInRejected();
+				}
 				break;
 		}
 	}
 
 	async connect(): Promise<void> {
+		if (this.kind === 'rdp') return this.startRdp();
 		const generation = ++this.generation;
 		this.closeStream();
 		await this.channel.post({ kind: 'console.status', status: 'connecting' });
@@ -115,6 +145,102 @@ class ConsoleSession implements vscode.Disposable {
 		}
 	}
 
+	/**
+	 * RDP: resolve where to connect and with which account, then let the webview's IronRDP client
+	 * start. The client opens its "WebSocket" (relayed to `openGateway`) right after.
+	 */
+	private async startRdp(options: { force?: boolean; reason?: string } = {}): Promise<void> {
+		const generation = ++this.generation;
+		this.closeStream();
+		await this.channel.post({ kind: 'console.status', status: 'connecting' });
+		try {
+			const connection = await this.manager.connect(this.ref.clusterId);
+			if (!connection.getRdpTarget) throw new Error('This hypervisor does not offer an RDP console.');
+			const target = await connection.getRdpTarget(this.ref.nodeId, this.ref.vmId);
+			const singleSignOn = !!target.currentUser && !!target.vmConnect && !this.singleSignOnFailed && !options.force;
+			const credentials = singleSignOn
+				? { ...splitUsername(target.currentUser!.displayName), password: '' }
+				: await this.credentials.resolve(this.ref.clusterId, target, options);
+			if (generation !== this.generation) return;
+			if (!credentials) throw new Error('Sign-in was cancelled. Reconnect to try again.');
+			const token = randomBytes(24).toString('base64url');
+			this.rdp = { target, token, singleSignOn };
+			if (singleSignOn) log.info(`RDP console: signing in as ${target.currentUser!.displayName} (Windows single sign-on)`);
+			await this.channel.post({
+				kind: 'rdp.start',
+				config: {
+					username: credentials.username,
+					domain: credentials.domain,
+					password: credentials.password,
+					destination: `${target.serverName}:${target.vmConnect ? 2179 : 3389}`,
+					authToken: token,
+					vmConnect: target.vmConnect,
+					singleSignOn
+				}
+			});
+		} catch (error) {
+			if (generation === this.generation) {
+				await this.channel.post({ kind: 'console.status', status: 'error', message: errorMessage(error) });
+			}
+		}
+	}
+
+	/** Drops the rejected password (Reconnect asks again) and explains what to check. */
+	private async signInRejected(): Promise<void> {
+		await this.credentials.invalidate(this.ref.clusterId);
+		const help = this.rdp?.target.signInHelp;
+		log.warn('RDP console sign-in was rejected by the server');
+		await this.channel.post({
+			kind: 'console.status',
+			status: 'error',
+			message: `The user name or password was rejected. ${help ?? ''} Reconnect to sign in again.`.replace(/\s+/g, ' ').trim()
+		});
+	}
+
+	private openGateway(): void {
+		this.closeGateway();
+		const rdp = this.rdp;
+		if (!rdp) {
+			void this.channel.post({ kind: 'console.status', status: 'error', message: 'The RDP session was not prepared. Reconnect to try again.' });
+			return;
+		}
+		const { target, token, singleSignOn } = rdp;
+		const gateway: RdpGateway = new RdpGateway({
+			authToken: token,
+			open: async () => {
+				const connection = await this.manager.connect(this.ref.clusterId);
+				const endpoint = await connection.openConsole(this.ref.nodeId, this.ref.vmId, 'rdp');
+				return {
+					stream: endpoint.stream,
+					dispose: () => endpoint.dispose(),
+					serverName: target.serverName,
+					vmConnectPayload: target.vmConnect ? vmConnectPayload(target.vmConnect.vmId, target.vmConnect.mode) : undefined,
+					createSecurityContext: singleSignOn && target.currentUser ? (name) => target.currentUser!.createContext(name) : undefined
+				};
+			},
+			send: (data) => void this.channel.post({ kind: 'console.data', data }),
+			close: (error, details) => {
+				if (this.gateway !== gateway) return;
+				this.gateway = undefined;
+				if (details?.singleSignOnFailed) {
+					this.singleSignOnFailed = true;
+					log.warn(`RDP console: ${error}`);
+					error = `${error}. Reconnect to sign in with a user name and password instead.`;
+				}
+				void this.channel.post({ kind: 'console.status', status: error ? 'error' : 'closed', message: error });
+			},
+			log: (line) => log.info(line)
+		});
+		this.gateway = gateway;
+		void this.channel.post({ kind: 'console.status', status: 'open' });
+	}
+
+	private closeGateway(): void {
+		const gateway = this.gateway;
+		this.gateway = undefined;
+		gateway?.dispose();
+	}
+
 	sendCommand(command: 'ctrlAltDel' | 'toggleScaling'): void {
 		void this.channel.post({ kind: 'console.command', command });
 	}
@@ -124,6 +250,7 @@ class ConsoleSession implements vscode.Disposable {
 	}
 
 	private closeStream(): void {
+		this.closeGateway();
 		this.previewAbort?.abort();
 		this.previewAbort = undefined;
 		const stream = this.stream;
@@ -151,7 +278,8 @@ export class ConsoleManager implements vscode.Disposable {
 
 	constructor(
 		private readonly extensionUri: vscode.Uri,
-		private readonly manager: ConnectionManager
+		private readonly manager: ConnectionManager,
+		private readonly credentials: RdpCredentialStore
 	) {}
 
 	async open(ref: VmRef, kind: ConsoleViewKind): Promise<void> {
@@ -179,9 +307,13 @@ export class ConsoleManager implements vscode.Disposable {
 			title,
 			ref,
 			vmName: name,
-			settings: { scaleViewport }
+			settings: { scaleViewport },
+			rdp:
+				kind === 'rdp'
+					? { wasmUrl: panel.webview.asWebviewUri(vscode.Uri.joinPath(webviewRoot(this.extensionUri), 'ironrdp_web_bg.wasm')).toString() }
+					: undefined
 		});
-		const session = new ConsoleSession(key, ref, kind, panel, this.manager, (s) => {
+		const session = new ConsoleSession(key, ref, kind, panel, this.manager, this.credentials, (s) => {
 			this.sessions.delete(s.key);
 			if (this.lastActive === s) this.lastActive = undefined;
 		});

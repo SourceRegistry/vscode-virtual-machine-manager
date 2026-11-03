@@ -1,0 +1,89 @@
+VM Manager: resize the canvas when the server reactivates with another desktop size.
+
+Hyper-V VMConnect accepts the requested size, then reactivates the session with the guest's
+resolution. The web client reallocated its framebuffer but kept the canvas at the old size, so
+part of the screen was cut off. The canvas now follows the reactivated size and the component's
+canvas-resized callback (previously ignored) is called so it can rescale.
+
+diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
+index 3fa3279b..ffcd6701 100644
+--- a/crates/ironrdp-web/src/session.rs
++++ b/crates/ironrdp-web/src/session.rs
+@@ -75,6 +75,7 @@ struct SessionBuilderInner {
+     desktop_size: DesktopSize,
+ 
+     render_canvas: Option<HtmlCanvasElement>,
++    canvas_resized_callback: Option<js_sys::Function>,
+     set_cursor_style_callback: Option<js_sys::Function>,
+     set_cursor_style_callback_context: Option<JsValue>,
+     remote_clipboard_changed_callback: Option<js_sys::Function>,
+@@ -123,6 +124,7 @@ impl Default for SessionBuilderInner {
+             },
+ 
+             render_canvas: None,
++            canvas_resized_callback: None,
+             set_cursor_style_callback: None,
+             set_cursor_style_callback_context: None,
+             remote_clipboard_changed_callback: None,
+@@ -279,8 +281,10 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+         self.clone()
+     }
+ 
+-    /// Because the server does not resize the framebuffer in the RDP protocol, this feature is unused in IronRDP.
+-    fn canvas_resized_callback(&self, _callback: js_sys::Function) -> Self {
++    /// Optional. Called after the canvas backing store changed size because the server reactivated the session
++    /// with another desktop size (e.g. Hyper-V VMConnect switching to the guest's resolution).
++    fn canvas_resized_callback(&self, callback: js_sys::Function) -> Self {
++        self.0.borrow_mut().canvas_resized_callback = Some(callback);
+         self.clone()
+     }
+ 
+@@ -477,6 +481,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+         );
+ 
+         let enable_server_pointer = self.0.borrow().enable_server_pointer;
++        let canvas_resized_callback = self.0.borrow().canvas_resized_callback.clone();
+         config.enable_server_pointer = enable_server_pointer;
+ 
+         let (input_events_tx, input_events_rx) = mpsc::unbounded();
+@@ -590,6 +595,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             input_events_tx,
+ 
+             render_canvas,
++            canvas_resized_callback,
+             set_cursor_style_callback,
+             set_cursor_style_callback_context,
+ 
+@@ -638,6 +644,7 @@ pub(crate) struct Session {
+     input_events_tx: mpsc::UnboundedSender<RdpInputEvent>,
+ 
+     render_canvas: HtmlCanvasElement,
++    canvas_resized_callback: Option<js_sys::Function>,
+     set_cursor_style_callback: js_sys::Function,
+     set_cursor_style_callback_context: JsValue,
+ 
+@@ -1136,6 +1143,24 @@ impl iron_remote_desktop::Session for Session {
+                                 drop(image);
+                                 ensure_framebuffer_allocatable(desktop_size)?;
+                                 image = DecodedImage::new(PixelFormat::RgbA32, desktop_size.width, desktop_size.height);
++                                // The server may reactivate with a size other than the one requested (Hyper-V
++                                // VMConnect uses the guest's resolution): the canvas must match the framebuffer.
++                                if let (Some(width), Some(height)) = (
++                                    NonZeroU32::new(u32::from(desktop_size.width)),
++                                    NonZeroU32::new(u32::from(desktop_size.height)),
++                                ) {
++                                    if self.render_canvas.width() != width.get()
++                                        || self.render_canvas.height() != height.get()
++                                    {
++                                        debug!(width = width.get(), height = height.get(), "Resize canvas to the reactivated desktop");
++                                        gui.resize(width, height);
++                                        if let Some(callback) = &self.canvas_resized_callback {
++                                            if let Err(error) = callback.call0(&JsValue::NULL) {
++                                                warn!(?error, "Canvas resized callback failed");
++                                            }
++                                        }
++                                    }
++                                }
+                                 if !active_stage.reactivate(
+                                     connection_activation.io_channel_id(),
+                                     connection_activation.user_channel_id(),

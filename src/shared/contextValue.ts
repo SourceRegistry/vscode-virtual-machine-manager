@@ -23,7 +23,7 @@ export function vmContextValue(vm: VmInfo, caps: Capabilities | undefined): stri
 	if (caps) {
 		flags.push(...caps.power);
 		const consoles = vm.consoles ?? caps.consoles;
-		if (consoles.includes('vnc') || caps.preview) flags.push('graphical');
+		if (consoles.includes('vnc') || consoles.includes('rdp') || caps.preview) flags.push('graphical');
 		if (consoles.includes('serial')) flags.push('serial');
 		if (caps.external) flags.push('external');
 		if (caps.edit) flags.push('edit');

@@ -1,0 +1,61 @@
+VM Manager: let the RDCleanPath gateway run CredSSP (Windows single sign-on).
+
+When the VMConnect payload ends with ';VmmProxyCredssp=1' (stripped by the gateway before it is
+sent to Hyper-V), the web client skips its own CredSSP and continues with the post-CredSSP X.224
+exchange, the same tail IronRDP's native connect_front_with_current_user uses.
+
+diff --git a/crates/ironrdp-vmconnect/src/lib.rs b/crates/ironrdp-vmconnect/src/lib.rs
+index 4ffe5354..ee3b7490 100644
+--- a/crates/ironrdp-vmconnect/src/lib.rs
++++ b/crates/ironrdp-vmconnect/src/lib.rs
+@@ -148,6 +148,22 @@ pub fn pcb_sent_via_proxy() -> PcbSent {
+ /// This path always performs CredSSP and then negotiates HYBRID. A connector that disabled TLS or
+ /// CredSSP is rejected so X.224 cannot advertise a protocol set that disagrees with the wire
+ /// sequence.
++/// X.224 front after an RDCleanPath gateway already completed CredSSP on this connection (for
++/// example with the user's Windows logon). Same tail as [`connect_front_with_current_user`].
++#[instrument(skip_all)]
++pub async fn connect_front_after_proxy_credssp<S>(
++    _pcb_sent: PcbSent,
++    framed: &mut Framed<S>,
++    connector: &mut ClientConnector,
++) -> ConnectorResult<Upgraded>
++where
++    S: FramedRead + FramedWrite,
++{
++    prepare_connector(connector)?;
++    let mut buf = WriteBuf::new();
++    finish_front(framed, connector, &mut buf).await
++}
++
+ #[instrument(skip_all)]
+ pub async fn connect_front<S, N>(
+     _pcb_sent: PcbSent,
+diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
+index 403b738d..3fa3279b 100644
+--- a/crates/ironrdp-web/src/session.rs
++++ b/crates/ironrdp-web/src/session.rs
+@@ -1836,6 +1836,11 @@ where
+         kerberos_config,
+     } = params;
+     let request_vmconnect = vmconnect.is_some();
++    // VM Manager for VS Code: the gateway already ran CredSSP with the user's Windows logon
++    // (single sign-on); continue with the post-CredSSP X.224 exchange. The gateway strips the marker.
++    let proxy_credssp = vmconnect
++        .as_deref()
++        .is_some_and(|payload| payload.ends_with(";VmmProxyCredssp=1"));
+ 
+     let mut buf = WriteBuf::new();
+ 
+@@ -1998,6 +2003,11 @@ where
+                 let should_upgrade = ironrdp_futures::skip_connect_begin(connector);
+                 ironrdp_futures::mark_as_upgraded(should_upgrade, connector)
+             }
++            None if proxy_credssp => {
++                ironrdp_vmconnect::connect_front_after_proxy_credssp(ironrdp_vmconnect::pcb_sent_via_proxy(), framed, connector)
++                    .await
++                    .context("connect Hyper-V front after gateway CredSSP")?
++            }
+             None => ironrdp_vmconnect::connect_front(
+                 ironrdp_vmconnect::pcb_sent_via_proxy(),
+                 framed,

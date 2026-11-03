@@ -154,3 +154,7 @@ vite.config.ts.timestamp-*
 
 # copied by scripts/package.mjs
 extensions/*/LICENSE
+
+# IDEA
+.vscode
+.idea

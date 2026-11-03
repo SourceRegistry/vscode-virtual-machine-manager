@@ -1,5 +1,8 @@
 import type { FieldSchema, FieldValues } from '@vmm/sdk';
 
+/** Secret slot (per cluster) for credentials the core asks for when opening an RDP console. */
+export const CONSOLE_CREDENTIALS_KEY = 'console.rdp';
+
 export function secretStorageKey(clusterId: string, field: string): string {
 	return `vmm/cluster/${clusterId}/${field}`;
 }

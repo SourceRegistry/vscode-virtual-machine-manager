@@ -9,6 +9,7 @@ import { VmStatusBar } from './status/StatusBar';
 import { VmTreeProvider } from './tree/VmTreeProvider';
 import { initLog, log } from './util/log';
 import { ConsoleManager } from './webview/ConsoleManager';
+import { RdpCredentialStore } from './rdp/credentials';
 import { OverviewPanel } from './webview/OverviewPanel';
 
 export function activate(context: vscode.ExtensionContext): VmManagerApi {
@@ -18,7 +19,8 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 	const store = new ClusterStore(context);
 	const manager = new ConnectionManager(context, store, registry);
 	const tree = new VmTreeProvider(manager, registry);
-	const consoles = new ConsoleManager(context.extensionUri, manager);
+	const credentials = new RdpCredentialStore(context.secrets);
+	const consoles = new ConsoleManager(context.extensionUri, manager, credentials);
 	const statusBar = new VmStatusBar(manager);
 
 	context.subscriptions.push(
@@ -29,7 +31,7 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 		consoles,
 		statusBar,
 		OverviewPanel.registerSerializer(context.extensionUri, manager),
-		...registerCommands({ context, store, registry, manager, tree, consoles })
+		...registerCommands({ context, store, registry, manager, tree, consoles, credentials })
 	);
 
 	const updateProviderContext = () =>

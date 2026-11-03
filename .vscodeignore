@@ -7,3 +7,6 @@
 !dist/webview/**
 !media/**
 dist/**/*.map
+!THIRD_PARTY_NOTICES.md
+!vendor/ironrdp/LICENSE-MIT
+!vendor/ironrdp/LICENSE-APACHE

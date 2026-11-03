@@ -1,8 +1,8 @@
 # VM Manager for VS Code
 
 Manage virtual machines on any hypervisor without leaving VS Code: create, edit, delete, start, shut
-down, reboot and power off machines, and open graphical (noVNC) or serial (xterm) consoles in editor
-tabs that you can pop out into their own window.
+down, reboot and power off machines, and open graphical (noVNC, RDP) or serial (xterm) consoles in
+editor tabs that you can pop out into their own window.
 
 Everything is organised as **Cluster → Node → Virtual machine**:
 
@@ -20,7 +20,7 @@ its own (like *Database Client JDBC* for *Database Client*):
 
 | Extension | Status | Graphical console | Serial console |
 |---|---|---|---|
-| `sourceregistry.vm-manager-hyperv` | ✅ Hyper-V on the local Windows machine | live preview + native viewer (`vmconnect`) | COM1 named pipe |
+| `sourceregistry.vm-manager-hyperv` | ✅ Hyper-V on the local Windows machine | interactive RDP console (VMConnect), native viewer | COM1 named pipe |
 | `sourceregistry.vm-manager-qemu` | ✅ QEMU machines run by VS Code (WHPX / KVM / HVF) | noVNC | ✅ |
 | Proxmox VE, XCP-ng, VMware, Nutanix | planned | | |
 
@@ -33,11 +33,14 @@ its own (like *Database Client JDBC* for *Database Client*):
   [client-lib](https://gitlab.projectsource.nl/sourceregistry/svelte/client-lib) Svelte 5 library.
 * **Follows your theme** — every colour and font in the webviews comes from the active VS Code theme
   (light, dark, high contrast and third-party themes), and updates live when you switch.
-* **Consoles in the editor** — noVNC and xterm, toolbar actions for Ctrl+Alt+Del, scaling, power and
-  *Open in New Window*. Connections run in the extension host and are relayed to the tab, so they
-  also work in Remote SSH / WSL / Codespaces.
-* **Secure credentials** — secrets go to VS Code Secret Storage (OS keychain), never to settings or
-  webviews.
+* **Consoles in the editor** — noVNC, an RDP client ([IronRDP](https://github.com/Devolutions/IronRDP),
+  WebAssembly) and xterm, toolbar actions for Ctrl+Alt+Del, scaling, power and *Open in New Window*.
+  Connections run in the extension host and are relayed to the tab, so they also work in Remote SSH
+  / WSL / Codespaces.
+* **Secure credentials** — secrets go to VS Code Secret Storage (OS keychain), never to settings.
+  RDP consoles prefer single sign-on (the Hyper-V console signs in with your Windows logon, no
+  password). When a password is used instead, it is handed to that console tab because the RDP
+  client authenticates (CredSSP) inside it.
 
 ## Repository layout
 
@@ -98,6 +101,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
 The provider declares its connection fields as a `FieldSchema[]` (fields marked `secret` are stored
 in Secret Storage by the core), and implements `ClusterConnection`: list nodes and VMs, CRUD, power
-actions, and `openConsole()` returning a byte stream (raw RFB for `vnc`, raw bytes for `serial`).
+actions, and `openConsole()` returning a byte stream (raw RFB for `vnc`, raw bytes for `serial`,
+the raw TCP connection to the RDP endpoint for `rdp` together with `getRdpTarget()`; the core runs
+the RDCleanPath gateway: pre-connection blob, TLS, relaying).
 The core renders all UI and relays console streams, and activates provider extensions lazily when a
 stored cluster needs them.

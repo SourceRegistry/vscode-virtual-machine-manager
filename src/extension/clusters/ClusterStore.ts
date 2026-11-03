@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import type { ClusterConfig, FieldSchema, FieldValues, SecretBag } from '@vmm/sdk';
-import { secretStorageKey, splitSecrets } from './secrets';
+import { CONSOLE_CREDENTIALS_KEY, secretStorageKey, splitSecrets } from './secrets';
 
 export { secretStorageKey, splitSecrets };
 
@@ -67,6 +67,8 @@ export class ClusterStore implements vscode.Disposable {
 		const existing = this.get(id);
 		if (!existing) return;
 		for (const key of existing.secretKeys) await this.context.secrets.delete(secretStorageKey(id, key));
+		// Console credentials the core stored for this cluster (see rdp/credentials.ts).
+		await this.context.secrets.delete(secretStorageKey(id, CONSOLE_CREDENTIALS_KEY));
 		await this.save(this.all().filter((c) => c.id !== id));
 	}
 

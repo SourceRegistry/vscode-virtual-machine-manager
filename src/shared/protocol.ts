@@ -13,7 +13,7 @@ import type {
 	VmInfo
 } from '@vmm/sdk';
 
-export type ViewKind = 'overview' | 'vmSettings' | 'console.vnc' | 'console.serial' | 'console.preview';
+export type ViewKind = 'overview' | 'vmSettings' | 'console.vnc' | 'console.serial' | 'console.preview' | 'console.rdp';
 
 export interface VmRef {
 	clusterId: string;
@@ -45,7 +45,34 @@ export interface BootData {
 	ref?: VmRef;
 	vmName?: string;
 	settings?: { scaleViewport: boolean };
+	/** RDP console: where the IronRDP WebAssembly module is served from. */
+	rdp?: { wasmUrl: string };
 }
+
+/** Everything the in-editor RDP client needs to start a session through the host's gateway. */
+export interface RdpStartConfig {
+	username: string;
+	domain: string;
+	password: string;
+	/** `host:port` the client reports in its RDCleanPath request. */
+	destination: string;
+	/** Per-session secret the gateway expects as `proxy_auth`. */
+	authToken: string;
+	vmConnect?: { vmId: string; mode: 'basic' | 'enhanced' };
+	/** The gateway authenticates with the user's Windows logon; the client skips its own CredSSP. */
+	singleSignOn?: boolean;
+}
+
+/** IronRDP error kinds (iron-remote-desktop `IronErrorKind`). */
+export const RdpErrorKind = {
+	General: 0,
+	WrongPassword: 1,
+	LogonFailure: 2,
+	AccessDenied: 3,
+	RDCleanPath: 4,
+	ProxyConnect: 5,
+	NegotiationFailure: 6
+} as const;
 
 /** Commands the overview is allowed to run on the host (allow-listed there). */
 export type OverviewCommand =
@@ -89,7 +116,13 @@ export type RpcMethod = keyof RpcMethods;
 export type WebviewToHost =
 	| { kind: 'ready' }
 	| { kind: 'request'; id: number; method: RpcMethod; params?: unknown }
-	| { kind: 'console.input'; data: Uint8Array };
+	| { kind: 'console.input'; data: Uint8Array }
+	/** RDP client opened / closed its (relayed) gateway socket. */
+	| { kind: 'console.socket'; action: 'open' | 'close' }
+	/** Diagnostics from a console view, written to the VM Manager output channel. */
+	| { kind: 'log'; level: 'info' | 'warn' | 'error'; message: string }
+	/** RDP session failed (errorKind: `RdpErrorKind`) or ended. */
+	| { kind: 'rdp.ended'; errorKind?: number; message?: string };
 
 export type ConsoleStatus = 'connecting' | 'open' | 'closed' | 'error';
 
@@ -101,6 +134,7 @@ export type HostToWebview =
 	| { kind: 'console.status'; status: ConsoleStatus; message?: string }
 	| { kind: 'console.data'; data: Uint8Array }
 	| { kind: 'console.command'; command: 'ctrlAltDel' | 'toggleScaling' }
+	| { kind: 'rdp.start'; config: RdpStartConfig }
 	| { kind: 'preview.frame'; frame: PreviewFrame };
 
 export type { FieldSchema, FieldValues };

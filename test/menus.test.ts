@@ -82,7 +82,12 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 
 	it('offers create on nodes and management on clusters', () => {
 		expect(commandsFor(menu, nodeContextValue('online', caps))).toContain('vmm.createVm');
-		expect(commandsFor(menu, clusterContextValue('connected'))).toEqual(['vmm.reconnectCluster', 'vmm.editCluster', 'vmm.removeCluster']);
+		expect(commandsFor(menu, clusterContextValue('connected'))).toEqual([
+			'vmm.reconnectCluster',
+			'vmm.editCluster',
+			'vmm.removeCluster',
+			'vmm.forgetConsoleCredentials'
+		]);
 	});
 });
 

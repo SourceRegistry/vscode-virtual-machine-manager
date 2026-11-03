@@ -6,6 +6,7 @@
 	import ConsoleVnc from './views/ConsoleVnc.svelte';
 	import ConsoleSerial from './views/ConsoleSerial.svelte';
 	import ConsolePreview from './views/ConsolePreview.svelte';
+	import ConsoleRdp from './views/ConsoleRdp.svelte';
 
 	let { boot }: { boot: BootData } = $props();
 </script>
@@ -20,6 +21,8 @@
 	<ConsoleSerial {boot} />
 {:else if boot.view === 'console.preview'}
 	<ConsolePreview {boot} />
+{:else if boot.view === 'console.rdp'}
+	<ConsoleRdp {boot} />
 {/if}
 
 <Toaster />

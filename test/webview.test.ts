@@ -77,6 +77,11 @@ describe.skipIf(!existsSync(bundle))('webview bundle', () => {
 		// APIs happy-dom lacks.
 		(HTMLElement.prototype as unknown as Record<string, unknown>).showPopover ??= function () {};
 		(HTMLElement.prototype as unknown as Record<string, unknown>).hidePopover ??= function () {};
+		// The tests import the bundle once per view into the same DOM; a webview loads it once.
+		const define = customElements.define.bind(customElements);
+		customElements.define = (name, constructor, options) => {
+			if (!customElements.get(name)) define(name, constructor, options);
+		};
 	});
 
 	it('renders the overview from the host snapshot', async () => {
@@ -116,6 +121,34 @@ describe.skipIf(!existsSync(bundle))('webview bundle', () => {
 		expect(text).toContain('Network');
 		expect((document.querySelector('input[name="name"]') as HTMLInputElement | null)?.value).toBe('web-01');
 		expect(document.querySelector('select[name="switch"]')).not.toBeNull();
+	});
+
+	it('mounts the RDP console and relays its WebSocket over postMessage', async () => {
+		sent.length = 0;
+		await boot('console.rdp');
+		expect(document.querySelector('iron-remote-desktop')).not.toBeNull();
+		expect(sent.some((m) => m.kind === 'ready')).toBe(true);
+
+		const reply = (message: HostToWebview) => window.dispatchEvent(new MessageEvent('message', { data: message }));
+		const events: string[] = [];
+		const socket = new WebSocket('wss://anything.invalid/');
+		socket.binaryType = 'arraybuffer';
+		socket.addEventListener('open', () => events.push('open'));
+		socket.addEventListener('message', (e) => events.push(`message:${new Uint8Array((e as MessageEvent).data as ArrayBuffer).join(',')}`));
+		// addEventListener only (what IronRDP uses): happy-dom, unlike Chromium, also invokes `on*`
+		// properties of EventTarget subclasses during dispatch.
+		socket.addEventListener('close', (e) => events.push(`close:${(e as CloseEvent).code}`));
+		expect(sent.at(-1)).toEqual({ kind: 'console.socket', action: 'open' });
+
+		reply({ kind: 'console.status', status: 'open' });
+		reply({ kind: 'console.data', data: Uint8Array.of(1, 2, 3) });
+		await new Promise((r) => setTimeout(r, 0));
+		const view = new Uint8Array([9, 8, 7, 6]).subarray(1, 3);
+		socket.send(view);
+		expect(sent.at(-1)).toEqual({ kind: 'console.input', data: Uint8Array.of(8, 7) });
+		socket.close();
+		expect(sent.at(-1)).toEqual({ kind: 'console.socket', action: 'close' });
+		expect(events).toEqual(['open', 'message:1,2,3', 'close:1000']);
 	});
 
 	it('announces readiness from console views', async () => {
