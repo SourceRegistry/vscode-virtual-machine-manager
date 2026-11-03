@@ -75,6 +75,21 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 		]);
 	});
 
+	it('only offers a hard power-off while a shutdown runs', () => {
+		const busy = { ...vm('stopping'), operation: 'shutdown' as const };
+		expect(commandsFor(menu, vmContextValue(busy, caps))).toEqual([
+			'vmm.stop',
+			'vmm.connectGraphical',
+			'vmm.connectSerial',
+			'vmm.openExternal',
+			'vmm.editVm',
+			'vmm.deleteVm',
+			'vmm.copyId'
+		]);
+		const poweringOff = { ...vm('stopping'), operation: 'stop' as const };
+		expect(commandsFor(menu, vmContextValue(poweringOff, caps))).not.toContain('vmm.stop');
+	});
+
 	it('only offers actions the provider supports', () => {
 		const limited: Capabilities = { ...caps, power: ['start', 'stop'], consoles: [], preview: false, external: false, edit: false, delete: false };
 		expect(commandsFor(menu, vmContextValue(vm('running'), limited))).toEqual(['vmm.stop', 'vmm.copyId']);

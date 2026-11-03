@@ -23,8 +23,13 @@ export interface VmRef {
 
 export type ClusterStatus = 'disconnected' | 'connecting' | 'connected' | 'error' | 'missingProvider';
 
+/** A VM as the UI shows it: while `operation` runs, `state` is its transitional state. */
+export interface VmSnapshot extends VmInfo {
+	operation?: PowerAction;
+}
+
 export interface NodeSnapshot extends NodeInfo {
-	vms: VmInfo[];
+	vms: VmSnapshot[];
 }
 
 export interface ClusterSnapshot {
@@ -121,6 +126,8 @@ export type WebviewToHost =
 	| { kind: 'console.socket'; action: 'open' | 'close' }
 	/** Diagnostics from a console view, written to the VM Manager output channel. */
 	| { kind: 'log'; level: 'info' | 'warn' | 'error'; message: string }
+	/** Shown to the user as a notification (e.g. characters that could not be typed). */
+	| { kind: 'notify'; level: 'info' | 'warn'; message: string }
 	/** RDP session failed (errorKind: `RdpErrorKind`) or ended. */
 	| { kind: 'rdp.ended'; errorKind?: number; message?: string };
 
@@ -134,6 +141,8 @@ export type HostToWebview =
 	| { kind: 'console.status'; status: ConsoleStatus; message?: string }
 	| { kind: 'console.data'; data: Uint8Array }
 	| { kind: 'console.command'; command: 'ctrlAltDel' | 'toggleScaling' }
+	/** Type `text` as key presses (consoles without a clipboard channel). */
+	| { kind: 'console.type'; text: string }
 	| { kind: 'rdp.start'; config: RdpStartConfig }
 	| { kind: 'preview.frame'; frame: PreviewFrame };
 

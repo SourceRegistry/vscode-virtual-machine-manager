@@ -71,6 +71,12 @@ class ConsoleSession implements vscode.Disposable {
 				if (this.gateway) this.gateway.write(toBuffer(message.data));
 				else this.stream?.stream.write(toBuffer(message.data));
 				break;
+			case 'notify': {
+				const text = `${this.manager.findVm(this.ref)?.vm.name ?? 'Console'}: ${String(message.message).slice(0, 500)}`;
+				if (message.level === 'warn') void vscode.window.showWarningMessage(text);
+				else void vscode.window.showInformationMessage(text);
+				break;
+			}
 			case 'log': {
 				const line = `[console ${this.manager.findVm(this.ref)?.vm.name ?? this.ref.vmId}] ${String(message.message).slice(0, 2000)}`;
 				if (message.level === 'error') log.error(line);
@@ -243,6 +249,19 @@ class ConsoleSession implements vscode.Disposable {
 
 	sendCommand(command: 'ctrlAltDel' | 'toggleScaling'): void {
 		void this.channel.post({ kind: 'console.command', command });
+	}
+
+	/** Types `text` into the guest as key presses. Returns false when nothing is connected. */
+	typeText(text: string): boolean {
+		if (this.kind === 'serial') {
+			// A serial line takes the characters themselves; terminals send CR for Enter.
+			if (!this.stream) return false;
+			this.stream.stream.write(Buffer.from(text.replace(/\r?\n/g, '\r'), 'utf8'));
+			return true;
+		}
+		if (this.kind === 'preview') return false;
+		void this.channel.post({ kind: 'console.type', text });
+		return true;
 	}
 
 	power(action: PowerAction): Promise<void> {

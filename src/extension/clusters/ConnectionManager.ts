@@ -1,10 +1,18 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import type { ClusterConnection, PowerAction, VmInfo } from '@vmm/sdk';
-import type { ClusterSnapshot, ClusterStatus, NodeSnapshot, VmRef } from '../../shared/protocol';
+import type { ClusterConnection, PowerAction } from '@vmm/sdk';
+import type { ClusterSnapshot, ClusterStatus, NodeSnapshot, VmRef, VmSnapshot } from '../../shared/protocol';
 import type { ClusterStore, StoredCluster } from './ClusterStore';
 import type { ProviderRegistry } from '../registry/ProviderRegistry';
 import { errorMessage, log, scopedLogger } from '../util/log';
+import { OPERATION_LABEL, OPERATION_STATE, allowedDuring } from '../../shared/operations';
+
+/** How long a graceful shutdown keeps the VM shown as shutting down after the request was sent. */
+const SHUTDOWN_WAIT_MS = 10 * 60_000;
+
+function vmKey(ref: VmRef): string {
+	return `${ref.clusterId}/${ref.nodeId}/${ref.vmId}`;
+}
 
 export interface ClusterRuntime {
 	cluster: StoredCluster;
@@ -20,7 +28,7 @@ export interface ClusterRuntime {
 
 export interface VmLocation {
 	ref: VmRef;
-	vm: VmInfo;
+	vm: VmSnapshot;
 	cluster: ClusterRuntime;
 	node: NodeSnapshot;
 }
@@ -36,6 +44,8 @@ export class ConnectionManager implements vscode.Disposable {
 	readonly onDidChange = this.emitter.event;
 	private readonly visibility = new Set<string>();
 	private timer: NodeJS.Timeout | undefined;
+	/** Power operations in flight, by VM (see `power`). */
+	private readonly operations = new Map<string, { action: PowerAction }>();
 	private readonly disposables: vscode.Disposable[] = [this.emitter];
 
 	constructor(
@@ -191,6 +201,7 @@ export class ConnectionManager implements vscode.Disposable {
 					})
 				);
 				rt.nodes = snapshots;
+				this.applyOperations(rt.cluster.id, false);
 				rt.loaded = true;
 				if (rt.status !== 'connected') this.setStatus(rt, 'connected');
 				this.emitter.fire(rt.cluster.id);
@@ -210,12 +221,63 @@ export class ConnectionManager implements vscode.Disposable {
 	// Operations
 	// -----------------------------------------------------------------------------------------
 
+	/** The power operation running on a VM, if any. */
+	operation(ref: VmRef): PowerAction | undefined {
+		return this.operations.get(vmKey(ref))?.action;
+	}
+
+	/**
+	 * Runs a power operation as a background task: the VM shows its transitional state right away
+	 * and the returned promise settles when the hypervisor call returns (a graceful shutdown can
+	 * take minutes). Only a hard power-off may start while another operation runs.
+	 */
 	async power(ref: VmRef, action: PowerAction): Promise<void> {
-		const connection = await this.connect(ref.clusterId);
-		await connection.power(ref.nodeId, ref.vmId, action);
-		await this.refresh(ref.clusterId);
-		// Many hypervisors report transitional states for a few seconds; refresh again shortly.
-		setTimeout(() => void this.refresh(ref.clusterId), 2500);
+		const key = vmKey(ref);
+		const running = this.operations.get(key);
+		if (running && !allowedDuring(running.action, action)) {
+			throw new Error(`${OPERATION_LABEL[running.action].replace('…', '')} is already in progress.`);
+		}
+		const operation = { action };
+		this.operations.set(key, operation);
+		this.applyOperations(ref.clusterId);
+		try {
+			const connection = await this.connect(ref.clusterId);
+			await connection.power(ref.nodeId, ref.vmId, action);
+			// Some hypervisors only send the ACPI request (QEMU): the guest is still shutting down.
+			if (action === 'shutdown') await this.waitUntilOff(connection, ref, () => this.operations.get(key) === operation);
+		} finally {
+			// A later operation (power-off during a shutdown) replaced this one: leave it.
+			if (this.operations.get(key) === operation) this.operations.delete(key);
+			await this.refresh(ref.clusterId);
+			// Many hypervisors report transitional states for a few seconds; refresh again shortly.
+			setTimeout(() => void this.refresh(ref.clusterId), 2500);
+		}
+	}
+
+	private async waitUntilOff(connection: ClusterConnection, ref: VmRef, current: () => boolean): Promise<void> {
+		const deadline = Date.now() + SHUTDOWN_WAIT_MS;
+		while (current() && Date.now() < deadline) {
+			const vm = await connection.listVms(ref.nodeId).then(
+				(vms) => vms.find((v) => v.id === ref.vmId),
+				() => undefined // Listing failed: stop waiting, the next refresh shows the state.
+			);
+			if (!vm || vm.state === 'stopped' || vm.state === 'saved') return;
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+		}
+	}
+
+	/** Shows running operations as transitional states (the hypervisor may still report the old one). */
+	private applyOperations(clusterId: string, notify = true): void {
+		const rt = this.runtimes.get(clusterId);
+		if (!rt) return;
+		for (const node of rt.nodes) {
+			node.vms = node.vms.map((vm) => {
+				const operation = this.operations.get(vmKey({ clusterId, nodeId: node.id, vmId: vm.id }))?.action;
+				if (!operation) return vm.operation ? { ...vm, operation: undefined } : vm;
+				return { ...vm, operation, state: OPERATION_STATE[operation] };
+			});
+		}
+		if (notify) this.emitter.fire(clusterId);
 	}
 
 	// -----------------------------------------------------------------------------------------

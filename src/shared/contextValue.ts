@@ -5,9 +5,13 @@
  *
  *   cluster;status=<status>;
  *   node;status=<status>;[create;]
- *   vm;state=<state>;flag;flag;     flags: power actions, graphical, serial, external, edit, delete
+ *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial, external, edit, delete
+ *
+ * While a power operation runs, `state` is the transitional state and only the actions allowed
+ * during it are listed (see operations.ts), plus `busy`.
  */
-import type { Capabilities, VmInfo } from '@vmm/sdk';
+import type { Capabilities, PowerAction, VmInfo } from '@vmm/sdk';
+import { allowedDuring } from './operations';
 import type { ClusterStatus } from './protocol';
 
 export function clusterContextValue(status: ClusterStatus): string {
@@ -18,10 +22,12 @@ export function nodeContextValue(status: string, caps: Capabilities | undefined)
 	return `node;status=${status};${caps?.create ? 'create;' : ''}`;
 }
 
-export function vmContextValue(vm: VmInfo, caps: Capabilities | undefined): string {
+export function vmContextValue(vm: VmInfo & { operation?: PowerAction }, caps: Capabilities | undefined): string {
 	const flags: string[] = [];
 	if (caps) {
-		flags.push(...caps.power);
+		const running = vm.operation;
+		flags.push(...(running ? caps.power.filter((action) => allowedDuring(running, action)) : caps.power));
+		if (running) flags.push('busy');
 		const consoles = vm.consoles ?? caps.consoles;
 		if (consoles.includes('vnc') || consoles.includes('rdp') || caps.preview) flags.push('graphical');
 		if (consoles.includes('serial')) flags.push('serial');

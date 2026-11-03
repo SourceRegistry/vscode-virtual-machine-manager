@@ -207,6 +207,12 @@
         "icon": "$(screen-full)"
       },
       {
+        "command": "vmm.console.typeClipboard",
+        "title": "Type Clipboard Text",
+        "category": "VM Console",
+        "icon": "$(clippy)"
+      },
+      {
         "command": "vmm.console.reconnect",
         "title": "Reconnect Console",
         "category": "VM Console",
@@ -303,11 +309,15 @@
         },
         {
           "command": "vmm.console.sendCtrlAltDel",
-          "when": "activeWebviewPanelId == 'vmm.console.vnc'"
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|rdp)$/"
         },
         {
           "command": "vmm.console.toggleScaling",
-          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|preview)$/"
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|rdp|preview)$/"
+        },
+        {
+          "command": "vmm.console.typeClipboard",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|rdp|serial)$/"
         },
         {
           "command": "vmm.console.reconnect",
@@ -481,9 +491,14 @@
           "group": "navigation@2"
         },
         {
+          "command": "vmm.console.typeClipboard",
+          "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|rdp|serial)$/",
+          "group": "navigation@3"
+        },
+        {
           "command": "vmm.console.openInNewWindow",
           "when": "activeWebviewPanelId =~ /^vmm\\.console\\./",
-          "group": "navigation@3"
+          "group": "navigation@4"
         },
         {
           "command": "vmm.console.reconnect",

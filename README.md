@@ -35,7 +35,8 @@ its own (like *Database Client JDBC* for *Database Client*):
   (light, dark, high contrast and third-party themes), and updates live when you switch.
 * **Consoles in the editor** — noVNC, an RDP client ([IronRDP](https://github.com/Devolutions/IronRDP),
   WebAssembly) and xterm, toolbar actions for Ctrl+Alt+Del, scaling, power and *Open in New Window*.
-  Connections run in the extension host and are relayed to the tab, so they also work in Remote SSH
+  *Type Clipboard Text* types the clipboard into the guest as key presses (US keyboard layout), for
+  consoles without a shared clipboard. Connections run in the extension host and are relayed to the tab, so they also work in Remote SSH
   / WSL / Codespaces.
 * **Secure credentials** — secrets go to VS Code Secret Storage (OS keychain), never to settings.
   RDP consoles prefer single sign-on (the Hyper-V console signs in with your Windows logon, no

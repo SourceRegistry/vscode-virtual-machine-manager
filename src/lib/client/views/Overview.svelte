@@ -15,11 +15,12 @@
 	import FloatingActionButton from '#lib/client-lib/components/actions/FloatingActionButton.svelte';
 	import Dropdown from '#lib/client-lib/components/overlays/Dropdown.svelte';
 	import Icon from '#lib/client-lib/components/icons/Icon.svelte';
-	import { formatMemory, formatUptime, type VmInfo } from '@vmm/sdk';
-	import type { ClusterSnapshot, NodeSnapshot, OverviewCommand } from '../../../shared/protocol';
+	import { formatMemory, formatUptime } from '@vmm/sdk';
+	import type { ClusterSnapshot, NodeSnapshot, OverviewCommand, VmSnapshot } from '../../../shared/protocol';
 	import { onMessage, request } from '../rpc/bridge';
 	import { clusterStates, vmStates } from '../vmState';
 	import { clusterContextValue, nodeContextValue, vmContextValue } from '../../../shared/contextValue';
+	import { OPERATION_LABEL, allowedDuring } from '../../../shared/operations';
 
 	let clusters = $state<ClusterSnapshot[]>([]);
 	let loading = $state(true);
@@ -50,7 +51,7 @@
 		return unsubscribe;
 	});
 
-	function run(command: OverviewCommand, target: { clusterId?: string; nodeId?: string; vm?: VmInfo } = {}) {
+	function run(command: OverviewCommand, target: { clusterId?: string; nodeId?: string; vm?: VmSnapshot } = {}) {
 		const ref =
 			target.vm && target.clusterId && target.nodeId
 				? { clusterId: target.clusterId, nodeId: target.nodeId, vmId: target.vm.id }
@@ -82,7 +83,7 @@
 		return parts.join(' · ');
 	}
 
-	function consolesOf(cluster: ClusterSnapshot, vm: VmInfo) {
+	function consolesOf(cluster: ClusterSnapshot, vm: VmSnapshot) {
 		const caps = cluster.capabilities;
 		const kinds = vm.consoles ?? caps?.consoles ?? [];
 		return {
@@ -214,6 +215,7 @@
 															data-row-context={vscodeContext(vmContextValue(vm, caps), { clusterId: cluster.id, nodeId: node.id, vmId: vm.id })}
 														>
 															<Status value={vm.state} states={vmStates} />
+															{#if vm.operation}<span class="operation">{OPERATION_LABEL[vm.operation]}</span>{/if}
 														</span>
 													</Item>
 													<Item><strong>{vm.name}</strong></Item>
@@ -233,7 +235,7 @@
 																>
 																	<Icon icon="display" />
 																</Button>
-															{:else if vm.state !== 'running' && caps?.power.includes('start')}
+															{:else if !vm.operation && vm.state !== 'running' && caps?.power.includes('start')}
 																<Button
 																	size="sm"
 																	transparent
@@ -247,16 +249,16 @@
 															<Dropdown size="sm" transparent alignHorizontal="right" aria-label="Actions for {vm.name}">
 																{#snippet menu()}
 																	{@const target = { clusterId: cluster.id, nodeId: node.id, vm }}
-																	{#if vm.state !== 'running' && caps?.power.includes('start')}
+																	{#if !vm.operation && vm.state !== 'running' && caps?.power.includes('start')}
 																		<Button transparent onclick={() => run('vmm.start', target)}><Icon icon="play-fill" margin="right" />Start</Button>
 																	{/if}
-																	{#if vm.state === 'running' && caps?.power.includes('shutdown')}
+																	{#if !vm.operation && vm.state === 'running' && caps?.power.includes('shutdown')}
 																		<Button transparent onclick={() => run('vmm.shutdown', target)}><Icon icon="power" margin="right" />Shut down</Button>
 																	{/if}
-																	{#if vm.state === 'running' && caps?.power.includes('reboot')}
+																	{#if !vm.operation && vm.state === 'running' && caps?.power.includes('reboot')}
 																		<Button transparent onclick={() => run('vmm.reboot', target)}><Icon icon="arrow-repeat" margin="right" />Reboot</Button>
 																	{/if}
-																	{#if vm.state !== 'stopped' && caps?.power.includes('stop')}
+																	{#if (vm.operation ? allowedDuring(vm.operation, 'stop') : vm.state !== 'stopped') && caps?.power.includes('stop')}
 																		<Button transparent onclick={() => run('vmm.stop', target)}><Icon icon="stop-fill" margin="right" />Stop (power off)</Button>
 																	{/if}
 																	{#if consoles.graphical}

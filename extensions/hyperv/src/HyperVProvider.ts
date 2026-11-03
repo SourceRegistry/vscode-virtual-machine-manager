@@ -452,7 +452,18 @@ export class HyperVConnection implements ClusterConnection {
 	async power(_nodeId: string, vmId: string, action: PowerAction): Promise<void> {
 		// Graceful shutdown waits for the guest; give it time.
 		const timeout = action === 'shutdown' || action === 'reboot' ? 10 * 60_000 : 2 * 60_000;
-		await this.run(this.ops, scripts.POWER, { id: assertVmId(vmId), action }, timeout);
+		// Calls on one session run in order: while it is busy (e.g. a shutdown waiting for the
+		// guest) use a separate PowerShell process so this operation is not queued behind it.
+		if (!this.ops.busy) {
+			await this.run(this.ops, scripts.POWER, { id: assertVmId(vmId), action }, timeout);
+			return;
+		}
+		const session = new PowerShellSession(`ops-${action}`, this.log);
+		try {
+			await this.run(session, scripts.POWER, { id: assertVmId(vmId), action }, timeout);
+		} finally {
+			session.dispose();
+		}
 	}
 
 	async getRdpTarget(_nodeId: string, vmId: string): Promise<RdpTarget> {

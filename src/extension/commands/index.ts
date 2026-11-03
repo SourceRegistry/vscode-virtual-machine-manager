@@ -12,6 +12,7 @@ import type { RdpCredentialStore } from '../rdp/credentials';
 import { OverviewPanel } from '../webview/OverviewPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, showError } from '../util/log';
+import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
 
 export const WALKTHROUGH_ID = 'sourceregistry.vm-manager#gettingStarted';
 
@@ -132,12 +133,13 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	// -----------------------------------------------------------------------------------------
 
 	async function power(arg: Arg, action: PowerAction): Promise<void> {
+		const idle = (l: VmLocation) => !l.vm.operation;
 		const filters: Record<PowerAction, (l: VmLocation) => boolean> = {
-			start: (l) => l.vm.state !== 'running',
-			shutdown: (l) => l.vm.state === 'running',
-			reboot: (l) => l.vm.state === 'running',
-			stop: (l) => l.vm.state !== 'stopped',
-			reset: (l) => l.vm.state === 'running'
+			start: (l) => idle(l) && l.vm.state !== 'running',
+			shutdown: (l) => idle(l) && l.vm.state === 'running',
+			reboot: (l) => idle(l) && l.vm.state === 'running',
+			stop: (l) => (l.vm.operation ? allowedDuring(l.vm.operation, 'stop') : l.vm.state !== 'stopped'),
+			reset: (l) => idle(l) && l.vm.state === 'running'
 		};
 		const verbs: Record<PowerAction, string> = {
 			start: 'start',
@@ -156,11 +158,20 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			);
 			if (choice !== 'Power Off') return;
 		}
-		try {
-			await inView(() => manager.power(location.ref, action));
-		} catch (error) {
-			await showError(`Could not ${verbs[action]} ${location.vm.name}`, error);
+		const running = manager.operation(location.ref);
+		if (running && !allowedDuring(running, action)) {
+			void vscode.window.showInformationMessage(`${location.vm.name}: ${OPERATION_LABEL[running]}`);
+			return;
 		}
+		// Background task: the command returns at once, the VM shows a spinner until the
+		// hypervisor call returns (a graceful shutdown can take minutes).
+		const name = location.vm.name;
+		const task = manager.power(location.ref, action);
+		void vscode.window.withProgress(
+			{ location: vscode.ProgressLocation.Window, title: `${OPERATION_TITLE[action]} ${name}` },
+			() => task.catch(() => undefined)
+		);
+		task.catch((error: unknown) => showError(`Could not ${verbs[action]} ${name}`, error));
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -368,6 +379,31 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}
 	}
 
+	/** Long pastes take a while to type and are easy to trigger by accident. */
+	const TYPE_CONFIRM_LENGTH = 2000;
+
+	async function typeClipboard(): Promise<void> {
+		const session = consoles.active();
+		if (!session) {
+			void vscode.window.showInformationMessage('Open a console first, then type the clipboard into it.');
+			return;
+		}
+		const text = await vscode.env.clipboard.readText();
+		if (!text) {
+			void vscode.window.showInformationMessage('The clipboard has no text to type.');
+			return;
+		}
+		if (text.length > TYPE_CONFIRM_LENGTH) {
+			const choice = await vscode.window.showWarningMessage(
+				`Type ${text.length.toLocaleString()} characters into the console?`,
+				{ modal: true, detail: 'The text is sent as key presses, which takes a while for long text.' },
+				'Type'
+			);
+			if (choice !== 'Type') return;
+		}
+		if (!session.typeText(text)) void vscode.window.showWarningMessage('The console is not connected.');
+	}
+
 	async function consolePower(action: PowerAction): Promise<void> {
 		const session = consoles.active();
 		if (!session) return;
@@ -418,6 +454,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}),
 		register('vmm.console.sendCtrlAltDel', () => consoles.active()?.sendCommand('ctrlAltDel')),
 		register('vmm.console.toggleScaling', () => consoles.active()?.sendCommand('toggleScaling')),
+		register('vmm.console.typeClipboard', () => typeClipboard()),
 		register('vmm.console.reconnect', () => consoles.active()?.connect()),
 		register('vmm.console.openInNewWindow', () => consoles.moveToNewWindow()),
 		register('vmm.console.shutdown', () => consolePower('shutdown')),

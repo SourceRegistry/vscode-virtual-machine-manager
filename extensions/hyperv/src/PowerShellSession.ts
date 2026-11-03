@@ -41,9 +41,17 @@ export class PowerShellSession {
 
 	/** Runs `script` with `params` bound to `$p`; resolves with the pipeline output as an array. */
 	run<T = unknown>(script: string, params: unknown = {}, timeoutMs = 60_000): Promise<T[]> {
-		const task = this.queue.then(() => this.execute(script, params, timeoutMs));
+		this.pending++;
+		const task = this.queue.then(() => this.execute(script, params, timeoutMs)).finally(() => this.pending--);
 		this.queue = task.catch(() => undefined);
 		return task as Promise<T[]>;
+	}
+
+	private pending = 0;
+
+	/** A script is running or queued (calls run one after another). */
+	get busy(): boolean {
+		return this.pending > 0;
 	}
 
 	/** Like `run` but returns the first output object (or undefined). */

@@ -102,6 +102,13 @@ pre,
 	font-size: var(--vscode-editor-font-size);
 }
 
+/* Overview: "Shutting down…" next to a VM's state while a power operation runs. */
+.operation {
+	margin-left: 0.4em;
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.9em;
+}
+
 a {
 	color: var(--vscode-textLink-foreground);
 }

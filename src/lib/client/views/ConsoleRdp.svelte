@@ -3,6 +3,7 @@
 	import { RdpErrorKind, type BootData, type ConsoleStatus, type RdpStartConfig } from '../../../shared/protocol';
 	import ConsoleOverlay from '../components/ConsoleOverlay.svelte';
 	import { installRelayWebSocket } from '../console/RelayWebSocket';
+	import { keyStrokes, sleep, TYPING_DELAY_MS } from '../console/typing';
 	import { onMessage, post } from '../rpc/bridge';
 	import { Backend, ScreenScale, initIronRdp, vmConnect, type IronError, type UserInteraction } from '../rdp/ironrdp';
 
@@ -19,6 +20,31 @@
 	/** Progress and errors go to the VM Manager output channel (webview devtools are hard to reach). */
 	function trace(message: string, level: 'info' | 'warn' | 'error' = 'info') {
 		post({ kind: 'log', level, message });
+	}
+
+	let typing = 0;
+
+	/**
+	 * Types text as US-layout key presses. IronRDP has no API for raw keys, so this feeds it the
+	 * same keyboard events it listens for (it only takes them while the screen has focus).
+	 */
+	async function typeText(text: string) {
+		const run = ++typing;
+		const { strokes, skipped } = keyStrokes(text);
+		const press = (type: 'keydown' | 'keyup', code: string, key: string, shift: boolean) =>
+			window.dispatchEvent(new KeyboardEvent(type, { code, key, shiftKey: shift, bubbles: true, cancelable: true }));
+		element.focus();
+		for (const stroke of strokes) {
+			if (run !== typing || status !== 'open') return;
+			if (stroke.shift) press('keydown', 'ShiftLeft', 'Shift', true);
+			press('keydown', stroke.code, stroke.key, stroke.shift);
+			press('keyup', stroke.code, stroke.key, stroke.shift);
+			if (stroke.shift) press('keyup', 'ShiftLeft', 'Shift', false);
+			await sleep(TYPING_DELAY_MS);
+		}
+		if (skipped) {
+			post({ kind: 'notify', level: 'warn', message: `${skipped} character${skipped === 1 ? '' : 's'} without a key on a US keyboard were skipped.` });
+		}
 	}
 
 	/** Re-runs IronRDP's own sizing (it computes a 0×0 viewer when it measures before the canvas has a size). */
@@ -166,6 +192,9 @@
 						message = msg.message;
 						if (status !== 'open') status = 'error';
 					}
+					break;
+				case 'console.type':
+					if (status === 'open') void typeText(msg.text);
 					break;
 				case 'console.command':
 					if (msg.command === 'ctrlAltDel') ui?.ctrlAltDel();

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { formatMemory, formatUptime, type VmState } from '@vmm/sdk';
 import type { ClusterStatus, NodeSnapshot } from '../../shared/protocol';
 import { clusterContextValue, nodeContextValue, vmContextValue } from '../../shared/contextValue';
+import { OPERATION_LABEL } from '../../shared/operations';
 import type { ConnectionManager, ClusterRuntime } from '../clusters/ConnectionManager';
 import type { ProviderRegistry } from '../registry/ProviderRegistry';
 
@@ -176,12 +177,13 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		const caps = location.cluster.connection?.capabilities;
 		const [icon, color] = VM_ICONS[vm.state];
 		item.iconPath = new vscode.ThemeIcon(icon, color ? new vscode.ThemeColor(color) : undefined);
-		const parts = [stateLabel(vm.state)];
+		const label = vm.operation ? OPERATION_LABEL[vm.operation] : stateLabel(vm.state);
+		const parts = [label];
 		if (vm.state === 'running' && vm.ipAddresses?.length) parts.push(vm.ipAddresses[0]);
 		item.description = parts.join(' · ');
 		item.contextValue = vmContextValue(vm, caps);
 		const md = new vscode.MarkdownString(
-			`**${escapeMd(vm.name)}** — ${stateLabel(vm.state)}\n\n` +
+			`**${escapeMd(vm.name)}** — ${label}\n\n` +
 				`| | |\n|---|---|\n` +
 				`| vCPUs | ${vm.cpus ?? '–'} |\n` +
 				`| Memory | ${formatMemory(vm.memoryMB)} |\n` +

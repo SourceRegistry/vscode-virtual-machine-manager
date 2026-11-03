@@ -4,6 +4,7 @@
 	import type { BootData, ConsoleStatus } from '../../../shared/protocol';
 	import ConsoleOverlay from '../components/ConsoleOverlay.svelte';
 	import { PostMessageChannel } from '../console/PostMessageChannel';
+	import { keysym, normalizeNewlines, sleep, TYPING_DELAY_MS, usKey, XK_SHIFT_L } from '../console/typing';
 	import { onMessage, post } from '../rpc/bridge';
 
 	let { boot }: { boot: BootData } = $props();
@@ -43,6 +44,22 @@
 		});
 	}
 
+	let typing = 0;
+
+	/** Types text as keysyms (the VNC server maps them to keys); shifted characters press Shift. */
+	async function typeText(text: string) {
+		const run = ++typing;
+		const target = rfb;
+		for (const char of normalizeNewlines(text)) {
+			if (run !== typing || rfb !== target || !target) return;
+			const key = usKey(char);
+			if (key?.shift) target.sendKey(XK_SHIFT_L, 'ShiftLeft', true);
+			target.sendKey(keysym(char), key?.code ?? null);
+			if (key?.shift) target.sendKey(XK_SHIFT_L, 'ShiftLeft', false);
+			await sleep(TYPING_DELAY_MS);
+		}
+	}
+
 	onMount(() => {
 		const unsubscribe = onMessage((msg) => {
 			switch (msg.kind) {
@@ -55,6 +72,9 @@
 					break;
 				case 'console.data':
 					channel?.receive(msg.data);
+					break;
+				case 'console.type':
+					if (status === 'open') void typeText(msg.text);
 					break;
 				case 'console.command':
 					if (msg.command === 'ctrlAltDel') rfb?.sendCtrlAltDel();
