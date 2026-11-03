@@ -33,13 +33,26 @@ export function post(message: WebviewToHost): void {
 	vscode.postMessage(message);
 }
 
+/**
+ * RPC params are JSON data. Copy them so values taken from Svelte `$state` (proxies, which
+ * `postMessage` cannot clone) can be passed as they are.
+ */
+function plain<T>(value: T): T {
+	return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
+}
+
 type Params<M extends RpcMethod> = RpcMethods[M]['params'] extends void ? [] : [RpcMethods[M]['params']];
 
 export function request<M extends RpcMethod>(method: M, ...params: Params<M>): Promise<RpcMethods[M]['result']> {
 	const id = nextId++;
 	return new Promise((resolve, reject) => {
 		pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
-		post({ kind: 'request', id, method, params: params[0] });
+		try {
+			post({ kind: 'request', id, method, params: plain(params[0]) });
+		} catch (error) {
+			pending.delete(id);
+			reject(error instanceof Error ? error : new Error(String(error)));
+		}
 	});
 }
 

@@ -2,7 +2,6 @@
 	import Input from '#lib/client-lib/components/form/Input.svelte';
 	import Button from '#lib/client-lib/components/actions/Button.svelte';
 	import Icon from '#lib/client-lib/components/icons/Icon.svelte';
-	import Flexbox from '#lib/client-lib/components/layout/Flexbox.svelte';
 	import type { FieldSchema, FieldValues } from '@vmm/sdk';
 	import { request } from '../rpc/bridge';
 
@@ -67,34 +66,36 @@
 			bind:value={() => (values[field.key] as string | undefined) ?? '', (v) => (values[field.key] = v || undefined)}
 		/>
 	{:else if field.type === 'file' || field.type === 'directory'}
-		<Flexbox align="flex-end" gap="0.5rem">
-			<div style="flex: 1; min-width: 0;">
-				<Input
-					type="text"
-					name={field.key}
-					label={label(field)}
-					description={field.description}
-					required={field.required}
-					readonly={field.readonly}
-					disabled={disabled}
-					placeholder={field.placeholder ?? 'Path on the host'}
-					bind:value={() => (values[field.key] as string | undefined) ?? '', (v) => (values[field.key] = v || undefined)}
-				/>
-			</div>
-			{#if !field.readonly}
-				<Button
-					type="button"
-					transparent
-					disabled={disabled}
-					title="Browse…"
-					aria-label="Browse for {field.label}"
-					onclick={() => browse(field)}
-					style="margin-bottom: 1rem;"
-				>
-					<Icon icon="folder2-open" />
-				</Button>
-			{/if}
-		</Flexbox>
+		<!-- The browse button is rendered inside the field, on the input's row (see the styles). -->
+		<div class="path-field">
+			<Input
+				type="text"
+				name={field.key}
+				label={label(field)}
+				description={field.description}
+				required={field.required}
+				readonly={field.readonly}
+				disabled={disabled}
+				placeholder={field.placeholder ?? 'Path on the host'}
+				bind:value={() => (values[field.key] as string | undefined) ?? '', (v) => (values[field.key] = v || undefined)}
+			>
+				{#snippet children()}
+					{#if !field.readonly}
+						<Button
+							type="button"
+							class="browse"
+							transparent
+							disabled={disabled}
+							title="Browse…"
+							aria-label="Browse for {field.label}"
+							onclick={() => browse(field)}
+						>
+							<Icon icon="folder2-open" />
+						</Button>
+					{/if}
+				{/snippet}
+			</Input>
+		</div>
 	{:else}
 		<Input
 			type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
@@ -114,3 +115,25 @@
 		/>
 	{/if}
 {/each}
+
+<style>
+	/* Label, description and messages span the row; the input and the browse button share one. */
+	.path-field :global(.form-input) {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		column-gap: 0.25rem;
+		align-items: center;
+	}
+
+	.path-field :global(.form-input > *) {
+		grid-column: 1 / -1;
+	}
+
+	.path-field :global(.form-input > input) {
+		grid-column: 1;
+	}
+
+	.path-field :global(.form-input > .browse) {
+		grid-column: 2;
+	}
+</style>

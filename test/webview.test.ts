@@ -47,6 +47,8 @@ async function boot(view: string): Promise<void> {
 		getState: () => undefined,
 		setState: () => undefined,
 		postMessage: (message: WebviewToHost) => {
+			// VS Code structured-clones messages: proxies (Svelte $state) throw DataCloneError.
+			structuredClone(message);
 			sent.push(message);
 			if (message.kind !== 'request') return;
 			const result =
@@ -58,12 +60,15 @@ async function boot(view: string): Promise<void> {
 									{ key: 'name', label: 'Name', type: 'text', required: true, group: 'General' },
 									{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', group: 'Hardware' },
 									{ key: 'switch', label: 'Switch', type: 'select', options: [{ value: 'Default Switch', label: 'Default Switch' }], group: 'Network' },
-									{ key: 'serial', label: 'Serial console', type: 'checkbox', group: 'Console' }
+									{ key: 'serial', label: 'Serial console', type: 'checkbox', group: 'Console' },
+									{ key: 'iso', label: 'DVD drive', unit: 'ISO', type: 'file', filters: { 'Disk images': ['iso'] }, group: 'Hardware' }
 								],
 								values: { name: 'web-01', cpus: 4, switch: 'Default Switch', serial: true },
 								vm: snapshot[0].nodes[0].vms[0]
 							}
-						: undefined;
+						: message.method === 'browse'
+							? 'C:/isos/debian.iso'
+							: undefined;
 			setTimeout(() => reply({ kind: 'response', id: message.id, ok: true, result }));
 		}
 	});
@@ -121,6 +126,19 @@ describe.skipIf(!existsSync(bundle))('webview bundle', () => {
 		expect(text).toContain('Network');
 		expect((document.querySelector('input[name="name"]') as HTMLInputElement | null)?.value).toBe('web-01');
 		expect(document.querySelector('select[name="switch"]')).not.toBeNull();
+	});
+
+	it('fills a file field from the host file picker', async () => {
+		sent.length = 0;
+		await boot('vmSettings');
+		const browse = document.querySelector('button[aria-label="Browse for DVD drive"]') as HTMLButtonElement;
+		expect(browse).not.toBeNull();
+		browse.click();
+		await new Promise((r) => setTimeout(r, 20));
+		expect(sent.find((m) => m.kind === 'request' && m.method === 'browse')).toMatchObject({
+			params: { directory: false, title: 'DVD drive', filters: { 'Disk images': ['iso'] } }
+		});
+		expect((document.querySelector('input[name="iso"]') as HTMLInputElement).value).toBe('C:/isos/debian.iso');
 	});
 
 	it('mounts the RDP console and relays its WebSocket over postMessage', async () => {
