@@ -75,6 +75,22 @@ registers a *Fake (development)* provider so the UI can be exercised without a h
 
 `npm run package` writes one `.vsix` per extension to `out/`.
 
+## Releasing
+
+Releases are automatic. Every push to `main` runs
+[`.github/workflows/release.yml`](.github/workflows/release.yml): the tests (Linux and Windows,
+including the VS Code integration test), then [semantic-release](https://semantic-release.gitbook.io/),
+which derives the next version from the [Conventional Commits](https://www.conventionalcommits.org/)
+since the last tag (`fix:` → patch, `feat:` → minor, `BREAKING CHANGE:` → major), updates
+`CHANGELOG.md` and the package versions, publishes the core and provider extensions to the VS Code
+Marketplace and creates a GitHub release with the `.vsix` files. All extensions share one version.
+
+Publishing uses Marketplace [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
+(GitHub OIDC, `vsce publish --oidc`), so no access token is stored. The publisher's policy must name
+owner `SourceRegistry`, repository `vscode-virtual-machine`, workflow `release.yml` and environment
+`marketplace`. To publish an existing tag again (e.g. after a failed Marketplace upload), run the
+*Release* workflow manually with that tag.
+
 ## Writing a provider
 
 A provider is a VS Code extension that depends on the core and registers a `HypervisorProvider`

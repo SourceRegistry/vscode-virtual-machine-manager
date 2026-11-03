@@ -1,0 +1,85 @@
+# Releases on every push to main: semantic-release derives the version from the Conventional
+# Commits since the last tag, updates CHANGELOG.md and the package versions, publishes the core and
+# provider extensions to the VS Code Marketplace and creates a GitHub release with the VSIX files.
+#
+# Marketplace Trusted Publishing policy (publisher → Trusted Publishing):
+#   Repository owner: SourceRegistry
+#   Repository:       vscode-virtual-machine
+#   Workflow:         release.yml
+#   Environment:      marketplace
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Re-publish an existing release tag (e.g. v1.2.0) to the Marketplace. Leave empty to run a normal release.
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.event_name == 'push' || inputs.tag == ''
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: marketplace
+    permissions:
+      contents: write # release commit, tag and GitHub release
+      issues: write # comment on released issues
+      pull-requests: write # comment on released pull requests
+      id-token: write # Marketplace trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Release
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  republish:
+    if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+    runs-on: ubuntu-latest
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write # Marketplace trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+          submodules: recursive
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Package
+        run: npm run package
+
+      - name: Publish to the Marketplace
+        run: node scripts/publish.mjs

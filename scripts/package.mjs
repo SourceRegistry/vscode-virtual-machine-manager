@@ -1,5 +1,5 @@
 // Packages the core extension and every provider extension into ./out/*.vsix.
-// Each provider is its own Marketplace extension so it can be released independently.
+// Each provider is its own Marketplace extension; all of them share one version (see .releaserc.json).
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -16,7 +16,11 @@ const targets = [root, ...readdirSync(path.join(root, 'extensions')).map((d) => 
 );
 
 for (const dir of targets) {
-	if (dir !== root) copyFileSync(path.join(root, 'LICENSE'), path.join(dir, 'LICENSE'));
+	// Providers ship the shared licence and changelog (all extensions are released together).
+	if (dir !== root) {
+		copyFileSync(path.join(root, 'LICENSE'), path.join(dir, 'LICENSE'));
+		copyFileSync(path.join(root, 'CHANGELOG.md'), path.join(dir, 'CHANGELOG.md'));
+	}
 	console.log(`Packaging ${path.relative(root, dir) || 'core'}…`);
 	execFileSync(process.execPath, [vsce, 'package', '--no-dependencies', '--skip-license', '--out', out], {
 		cwd: dir,

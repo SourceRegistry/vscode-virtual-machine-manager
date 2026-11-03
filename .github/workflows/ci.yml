@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches-ignore: [main] # main is tested by release.yml before it releases
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Integration test (VS Code)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:integration
+
+      - name: Integration test (VS Code)
+        if: runner.os != 'Linux'
+        run: npm run test:integration
+
+      - name: Package
+        if: runner.os == 'Linux'
+        run: node scripts/package.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: vsix
+          path: out/*.vsix
+          if-no-files-found: error
