@@ -5,8 +5,9 @@
 !CHANGELOG.md
 !dist/extension.js
 !dist/webview/**
-!media/**
-media/marketplace/**
+!media/icon.png
+!media/icons/**
+!media/walkthrough/**
 dist/**/*.map
 !THIRD_PARTY_NOTICES.md
 !vendor/ironrdp/LICENSE-MIT

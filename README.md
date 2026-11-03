@@ -1,125 +1,100 @@
-# VM Manager for VS Code
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SourceRegistry/vscode-virtual-machine-manager/main/media/icon.png" width="128" height="128" alt="VM Manager logo">
+</p>
 
-Manage virtual machines on any hypervisor without leaving VS Code: create, edit, delete, start, shut
-down, reboot and power off machines, and open graphical (noVNC, RDP) or serial (xterm) consoles in
-editor tabs that you can pop out into their own window.
+<h1 align="center">VM Manager for VS Code</h1>
 
-Everything is organised as **Cluster → Node → Virtual machine**:
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager"><img src="https://img.shields.io/visual-studio-marketplace/v/sourceregistry.vm-manager?label=Marketplace" alt="Marketplace version"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager"><img src="https://img.shields.io/visual-studio-marketplace/i/sourceregistry.vm-manager" alt="Installs"></a>
+  <a href="https://github.com/SourceRegistry/vscode-virtual-machine-manager/actions/workflows/release.yml"><img src="https://github.com/SourceRegistry/vscode-virtual-machine-manager/actions/workflows/release.yml/badge.svg" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/SourceRegistry/vscode-virtual-machine-manager" alt="License"></a>
+</p>
+
+Manage your virtual machines without leaving VS Code. See every machine at a glance, start and stop
+them, change their settings and work in their consoles in an editor tab, next to your code.
+
+* **One place for all your hypervisors**: Hyper-V and QEMU today, more to come.
+* **Consoles in the editor**: the machine's screen or its serial console in a tab, which you can
+  drag to another window.
+* **Looks like VS Code**: everything follows your theme and uses the views, menus and command
+  palette you already know.
+
+## Get started
+
+1. **Install a provider** for your hypervisor. VM Manager itself does not talk to any hypervisor;
+   providers do:
+
+   | Provider | For |
+   |---|---|
+   | [VM Manager – Hyper-V](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-hyperv) | Hyper-V on this Windows machine |
+   | [VM Manager – QEMU](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-qemu) | QEMU machines on Windows, Linux and macOS |
+
+   Proxmox VE, XCP-ng, VMware and Nutanix are planned.
+2. Open the **Virtual Machines** view in the activity bar and click **Add Cluster**.
+3. Your machines appear in the view. Right-click one for everything you can do with it.
+
+The walkthrough (**VM: Get Started with VM Manager**) shows the same steps.
+
+## Find your way around
+
+Machines are grouped as **cluster → node → virtual machine**:
 
 ```
-Local (Hyper-V)            ← cluster   (one hypervisor installation)
-└─ DESKTOP-ALEX            ← node      (a host)
-   ├─ web-01  Running      ← VMs
+Local (Hyper-V)            ← cluster: one hypervisor you added
+└─ DESKTOP-ALEX            ← node: a host in it
+   ├─ web-01  Running      ← virtual machines
    └─ db-01   Off
 ```
 
-## Providers
+* **Virtual Machines view**: state icons, the running count as a badge, and quick actions next to
+  each machine (start, connect, shut down).
+* **Overview** (**VM: Open Overview**): a dashboard of every cluster, node and machine with CPU,
+  memory, uptime and IP addresses. Right-click a row for the same menu as in the tree.
+* **Status bar**: the number of running machines; click it to open the Overview.
 
-Hypervisors are supported by separate provider extensions, so each one is published and updated on
-its own (like *Database Client JDBC* for *Database Client*):
+## Work with machines
 
-| Extension | Status | Graphical console | Serial console |
-|---|---|---|---|
-| `sourceregistry.vm-manager-hyperv` | ✅ Hyper-V on the local Windows machine | interactive RDP console (VMConnect), native viewer | COM1 named pipe |
-| `sourceregistry.vm-manager-qemu` | ✅ QEMU machines run by VS Code (WHPX / KVM / HVF) | noVNC | ✅ |
-| Proxmox VE, XCP-ng, VMware, Nutanix | planned | | |
+* **Create** a machine from a node's context menu: name, processors, memory, disk, installation ISO
+  and network, step by step.
+* **Settings** opens an editor for the machine's configuration. Some settings can only change while
+  the machine is off.
+* **Start, Shut Down, Reboot, Stop (Power Off)**. *Shut Down* asks the guest to shut down cleanly;
+  *Stop* cuts the power. These run in the background: the machine shows a spinner and
+  "Shutting down…" until it is done, and you can keep working. If a shutdown hangs, *Stop* is still
+  available.
+* **Delete** removes the machine, and its disks if you choose so.
 
-## Features
+## Consoles
 
-* **Native UI first** — tree view with state icons and badge, inline and context-menu actions, welcome
-  views, multi-step quick inputs to add clusters and create VMs, modal confirmations, progress,
-  a status bar item, settings and a getting-started walkthrough.
-* **Overview** dashboard and a **settings editor** per VM, built with the
-  [client-lib](https://gitlab.projectsource.nl/sourceregistry/svelte/client-lib) Svelte 5 library.
-* **Follows your theme** — every colour and font in the webviews comes from the active VS Code theme
-  (light, dark, high contrast and third-party themes), and updates live when you switch.
-* **Consoles in the editor** — noVNC, an RDP client ([IronRDP](https://github.com/Devolutions/IronRDP),
-  WebAssembly) and xterm, toolbar actions for Ctrl+Alt+Del, scaling, power and *Open in New Window*.
-  *Type Clipboard Text* types the clipboard into the guest as key presses (US keyboard layout), for
-  consoles without a shared clipboard. Connections run in the extension host and are relayed to the tab, so they also work in Remote SSH
-  / WSL / Codespaces.
-* **Secure credentials** — secrets go to VS Code Secret Storage (OS keychain), never to settings.
-  RDP consoles prefer single sign-on (the Hyper-V console signs in with your Windows logon, no
-  password). When a password is used instead, it is handed to that console tab because the RDP
-  client authenticates (CredSSP) inside it.
+* **Graphical console**: the machine's screen in an editor tab, with keyboard and mouse. Hyper-V
+  machines use the same connection as *Virtual Machine Connection*; QEMU machines use VNC.
+* **Serial console**: a terminal on the machine's serial port, for Linux servers and boot logs.
+* The tab's toolbar has **Send Ctrl+Alt+Del**, **Toggle Scaling**, **Type Clipboard Text**,
+  **Reconnect**, the power actions and **Open in New Window**.
+* **Type Clipboard Text** types the clipboard into the machine as key presses, for consoles without a
+  shared clipboard (installers, login prompts). It types with a US keyboard layout.
+* Consoles connect through VS Code itself, so they also work over Remote SSH, WSL and Codespaces.
 
-## Repository layout
+## Your credentials
 
-```
-src/extension/        core extension host (registry, clusters, tree, commands, webview hosts)
-src/shared/           host ⇄ webview protocol types
-src/lib/client-lib/   client-lib (git submodule, branch migration/svelte-standards — never edited here)
-src/lib/client/       extension UI: views, components, SvelteKit shims, VS Code theme bridge
-packages/sdk/         @vmm/sdk — provider API shared by core and providers
-extensions/hyperv/    Hyper-V provider extension
-extensions/qemu/      QEMU provider extension
-```
+Passwords and tokens go to VS Code's Secret Storage (your operating system's keychain), never to
+settings files. The Hyper-V console signs in with your Windows account, so it needs no password.
+When a console does ask for a password, **VM: Forget Console Sign-in** removes the saved one.
 
-client-lib is written for SvelteKit. Webviews cannot run SvelteKit, so Vite aliases the `$app/*`,
-`$env/*` and `@sveltejs/kit` imports to small shims in `src/lib/client/shims` — client-lib stays
-unmodified. `src/lib/client/styles/_vscode-bridge.scss` maps all client-lib tokens to `--vscode-*`
-theme variables.
+## Settings
 
-## Development
+| Setting | Default | |
+|---|---|---|
+| `vmm.refreshInterval` | `5` | Seconds between state refreshes while the view or the Overview is visible. |
+| `vmm.console.openInNewWindow` | `false` | Open consoles in a new window instead of an editor tab. |
+| `vmm.console.scaleViewport` | `true` | Scale graphical consoles to fit the tab. |
+| `vmm.confirmPowerOff` | `true` | Ask before a hard power off (*Stop*). |
 
-```sh
-git clone --recurse-submodules <repo>
-npm install
-npm run build        # webview (Vite) + extension hosts (esbuild)
-npm test             # unit tests (vitest)
-npm run check        # tsc + svelte-check
-```
+Providers add their own settings, for example `vmm.qemu.path`.
 
-Press <kbd>F5</kbd> and pick **Run VM Manager (core + providers)**. In development mode the core also
-registers a *Fake (development)* provider so the UI can be exercised without a hypervisor.
+## Feedback
 
-`npm run package` writes one `.vsix` per extension to `out/`.
-
-## Releasing
-
-Releases are automatic. Every push to `main` runs
-[`.github/workflows/release.yml`](.github/workflows/release.yml): the tests (Linux and Windows,
-including the VS Code integration test), then [semantic-release](https://semantic-release.gitbook.io/),
-which derives the next version from the [Conventional Commits](https://www.conventionalcommits.org/)
-since the last tag (`fix:` → patch, `feat:` → minor, `BREAKING CHANGE:` → major), updates
-`CHANGELOG.md` and the package versions, publishes the core and provider extensions to the VS Code
-Marketplace and creates a GitHub release with the `.vsix` files. All extensions share one version.
-
-Publishing uses Marketplace [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
-(GitHub OIDC, `vsce publish --oidc`), so no access token is stored. The publisher's policy must name
-owner `SourceRegistry`, repository `vscode-virtual-machine`, workflow `release.yml` and environment
-`marketplace`. To publish an existing tag again (e.g. after a failed Marketplace upload), run the
-*Release* workflow manually with that tag.
-
-## Writing a provider
-
-A provider is a VS Code extension that depends on the core and registers a `HypervisorProvider`
-from `@vmm/sdk`:
-
-```jsonc
-// package.json
-{
-  "extensionDependencies": ["sourceregistry.vm-manager"],
-  "contributes": {
-    "vmManager.providers": [{ "id": "proxmox", "displayName": "Proxmox VE" }]
-  }
-}
-```
-
-```ts
-import * as vscode from 'vscode';
-import { CORE_EXTENSION_ID, type VmManagerApi } from '@vmm/sdk';
-
-export async function activate(context: vscode.ExtensionContext) {
-	const api = await vscode.extensions.getExtension<VmManagerApi>(CORE_EXTENSION_ID)!.activate();
-	context.subscriptions.push(api.registerProvider(new ProxmoxProvider()));
-}
-```
-
-The provider declares its connection fields as a `FieldSchema[]` (fields marked `secret` are stored
-in Secret Storage by the core), and implements `ClusterConnection`: list nodes and VMs, CRUD, power
-actions, and `openConsole()` returning a byte stream (raw RFB for `vnc`, raw bytes for `serial`,
-the raw TCP connection to the RDP endpoint for `rdp` together with `getRdpTarget()`; the core runs
-the RDCleanPath gateway: pre-connection blob, TLS, relaying).
-The core renders all UI and relays console streams, and activates provider extensions lazily when a
-stored cluster needs them.
+Found a bug or missing a hypervisor?
+[Open an issue](https://github.com/SourceRegistry/vscode-virtual-machine-manager/issues). To build the
+extension yourself or write a provider, see [DEVELOPMENT.md](DEVELOPMENT.md).

@@ -4,7 +4,7 @@
 #
 # Marketplace Trusted Publishing policy (publisher → Trusted Publishing):
 #   Repository owner: SourceRegistry
-#   Repository:       vscode-virtual-machine
+#   Repository:       vscode-virtual-machine-manager
 #   Workflow:         release.yml
 #   Environment:      marketplace
 name: Release
