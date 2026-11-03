@@ -4,6 +4,7 @@
   "description": "Microsoft Hyper-V provider for VM Manager: manage local Hyper-V virtual machines, serial console and live preview.",
   "version": "0.1.0",
   "publisher": "sourceregistry",
+  "icon": "media/icon.png",
   "license": "Apache-2.0",
   "private": true,
   "repository": {

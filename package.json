@@ -4,6 +4,7 @@
   "description": "Manage virtual machines (Hyper-V, QEMU, Proxmox, ...) from VS Code: clusters, nodes, power actions, graphical and serial consoles.",
   "version": "0.1.0",
   "publisher": "sourceregistry",
+  "icon": "media/icon.png",
   "license": "Apache-2.0",
   "private": true,
   "repository": {
@@ -710,6 +711,7 @@
     ]
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/exec": "^7.1.0",
     "@semantic-release/git": "^11.0.1",

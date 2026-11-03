@@ -6,6 +6,7 @@
 !dist/extension.js
 !dist/webview/**
 !media/**
+media/marketplace/**
 dist/**/*.map
 !THIRD_PARTY_NOTICES.md
 !vendor/ironrdp/LICENSE-MIT
