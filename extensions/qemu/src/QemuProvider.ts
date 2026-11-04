@@ -30,7 +30,9 @@ import {
 } from '@vmm/sdk';
 import { buildArgs, defaultAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
 import { detectQemu, type QemuInstallation } from './detect';
+import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
+import { gracefulShutdown } from './shutdown';
 
 const execFileAsync = promisify(execFile);
 const NODE_ID = 'local';
@@ -50,6 +52,16 @@ const CONNECTION_SCHEMA: FieldSchema[] = [
 		type: 'directory',
 		description: 'Where VM definitions and disks are stored. Leave empty for the extension storage.',
 		placeholder: 'Extension storage'
+	},
+	{
+		key: 'shutdownTimeout',
+		label: 'Shutdown timeout',
+		type: 'number',
+		unit: 's',
+		min: 5,
+		max: 600,
+		default: 30,
+		description: 'How long to wait for the guest after a shutdown request before offering to power it off.'
 	},
 	{
 		key: 'accelerator',
@@ -117,7 +129,9 @@ export class QemuProvider implements HypervisorProvider {
 		context.log.info(`Using QEMU ${installation.version} from ${installation.directory}`);
 		const vmDirectory = (cluster.config.vmDirectory as string | undefined) || path.join(context.storagePath, 'vms');
 		await fs.promises.mkdir(vmDirectory, { recursive: true });
-		return new QemuConnection(installation, vmDirectory, String(cluster.config.accelerator ?? 'auto'), context.log);
+		const timeout = Number(cluster.config.shutdownTimeout);
+		const shutdownTimeoutMs = (Number.isFinite(timeout) && timeout >= 5 ? Math.min(timeout, 600) : 30) * 1000;
+		return new QemuConnection(installation, vmDirectory, String(cluster.config.accelerator ?? 'auto'), context.log, shutdownTimeoutMs);
 	}
 
 	private qemuPath(cluster: ClusterConfig): string | undefined {
@@ -157,7 +171,8 @@ export class QemuConnection implements ClusterConnection {
 		private readonly qemu: QemuInstallation,
 		private readonly vmDirectory: string,
 		private readonly accelerator: string,
-		private readonly log: Logger
+		private readonly log: Logger,
+		private readonly shutdownTimeoutMs = 30_000
 	) {}
 
 	// -----------------------------------------------------------------------------------------
@@ -484,8 +499,55 @@ export class QemuConnection implements ClusterConnection {
 			return;
 		}
 		const client = await this.client(vmId, runtime);
-		if (action === 'shutdown') await client.execute('system_powerdown');
-		else await client.execute('system_reset');
+		if (action === 'shutdown') {
+			const method = await gracefulShutdown(
+				{
+					agent: () => this.agentRequest(runtime, 'powerdown'),
+					acpi: async () => {
+						// A paused guest cannot react to the power button.
+						await client.execute('cont').catch(() => undefined);
+						await client.execute('system_powerdown');
+					},
+					waitStopped: (ms) => this.waitStopped(runtime.pid, ms)
+				},
+				this.shutdownTimeoutMs,
+				def.name
+			);
+			this.log.info(`${def.name} shut down via ${method === 'agent' ? 'the guest agent' : 'ACPI'}`);
+			await this.clearRuntime(vmId);
+			this.changes.fire({ nodeId: NODE_ID, vmId });
+		} else if (action === 'reboot') {
+			// Soft reboot through the agent when it answers; otherwise a hardware reset.
+			if (!(await this.agentRequest(runtime, 'reboot'))) await client.execute('system_reset');
+		} else {
+			await client.execute('system_reset');
+		}
+	}
+
+	/** Asks the guest agent for a clean shutdown/reboot. `false` when the VM has no answering agent. */
+	private async agentRequest(runtime: VmRuntime, mode: 'powerdown' | 'reboot'): Promise<boolean> {
+		if (!runtime.agentPort) return false;
+		try {
+			const agent = await GuestAgentClient.connect(runtime.agentPort, 2000);
+			try {
+				await agent.shutdown(mode);
+			} finally {
+				agent.close();
+			}
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	/** Resolves `true` once the QEMU process is gone, `false` after `timeoutMs`. */
+	private async waitStopped(pid: number, timeoutMs: number): Promise<boolean> {
+		const deadline = Date.now() + timeoutMs;
+		while (Date.now() < deadline) {
+			if (!isAlive(pid)) return true;
+			await sleep(200);
+		}
+		return !isAlive(pid);
 	}
 
 	private async start(def: VmDefinition): Promise<void> {
@@ -499,6 +561,7 @@ export class QemuConnection implements ClusterConnection {
 			qmpPort: await freePort(),
 			vncPort: await freePort(5900, 5999),
 			serialPort: def.serial ? await freePort() : undefined,
+			agentPort: await freePort(),
 			startedAt: Date.now()
 		};
 		const args = buildArgs(def, runtime, {
@@ -546,13 +609,12 @@ export class QemuConnection implements ClusterConnection {
 		} catch {
 			// QMP unreachable: kill the process below.
 		}
-		const deadline = Date.now() + 5000;
-		while (isAlive(runtime.pid) && Date.now() < deadline) await sleep(100);
-		if (isAlive(runtime.pid)) {
-			try {
-				process.kill(runtime.pid);
-			} catch {
-				// already gone
+		if (!(await this.waitStopped(runtime.pid, 5000))) {
+			// QMP did not honour `quit` (hung or unreachable): terminate, then kill.
+			signal(runtime.pid, 'SIGTERM');
+			if (!(await this.waitStopped(runtime.pid, 3000))) {
+				signal(runtime.pid, 'SIGKILL');
+				await this.waitStopped(runtime.pid, 2000);
 			}
 		}
 		await this.clearRuntime(vmId);
@@ -587,6 +649,14 @@ function isAlive(pid: number): boolean {
 		return true;
 	} catch (error) {
 		return (error as NodeJS.ErrnoException).code === 'EPERM';
+	}
+}
+
+function signal(pid: number, name: NodeJS.Signals): void {
+	try {
+		process.kill(pid, name);
+	} catch {
+		// already gone
 	}
 }
 

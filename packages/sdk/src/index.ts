@@ -267,9 +267,13 @@ export interface ProviderContribution {
 // ---------------------------------------------------------------------------------------------
 
 export class ProviderError extends Error {
+	/**
+	 * `timeout`: a graceful request (shutdown, reboot) was sent but the guest did not act on it.
+	 * The core then offers to power the VM off.
+	 */
 	constructor(
 		message: string,
-		readonly code: 'notFound' | 'unsupported' | 'permission' | 'unavailable' | 'invalid' | 'failed' = 'failed'
+		readonly code: 'notFound' | 'unsupported' | 'permission' | 'unavailable' | 'invalid' | 'timeout' | 'failed' = 'failed'
 	) {
 		super(message);
 		this.name = 'ProviderError';

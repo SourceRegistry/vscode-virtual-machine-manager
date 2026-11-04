@@ -28,6 +28,8 @@ export interface VmRuntime {
 	qmpPort: number;
 	vncPort: number;
 	serialPort?: number;
+	/** Localhost port of the guest agent channel (absent for VMs started before it existed). */
+	agentPort?: number;
 	startedAt: number;
 }
 
@@ -126,6 +128,12 @@ export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvi
 		args.push('-serial', 'chardev:serial0');
 	} else {
 		args.push('-serial', 'none');
+	}
+	if (runtime.agentPort) {
+		// Guest agent channel: lets the host ask a cooperative guest for a clean shutdown/reboot.
+		args.push('-device', 'virtio-serial-pci');
+		args.push('-chardev', `socket,id=qga0,host=127.0.0.1,port=${runtime.agentPort},server=on,wait=off,telnet=off`);
+		args.push('-device', 'virtserialport,chardev=qga0,name=org.qemu.guest_agent.0');
 	}
 	args.push(...splitArgs(def.extraArgs));
 	return args;

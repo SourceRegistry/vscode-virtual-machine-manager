@@ -132,7 +132,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	// Power
 	// -----------------------------------------------------------------------------------------
 
-	async function power(arg: Arg, action: PowerAction): Promise<void> {
+	async function power(arg: Arg, action: PowerAction, confirmed = false): Promise<void> {
 		const idle = (l: VmLocation) => !l.vm.operation;
 		const filters: Record<PowerAction, (l: VmLocation) => boolean> = {
 			start: (l) => idle(l) && l.vm.state !== 'running',
@@ -150,7 +150,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		};
 		const location = await resolveVm(arg, `Select a virtual machine to ${verbs[action]}`, filters[action]);
 		if (!location) return;
-		if (action === 'stop' && vscode.workspace.getConfiguration('vmm').get<boolean>('confirmPowerOff', true)) {
+		if (action === 'stop' && !confirmed && vscode.workspace.getConfiguration('vmm').get<boolean>('confirmPowerOff', true)) {
 			const choice = await vscode.window.showWarningMessage(
 				`Power off "${location.vm.name}"?`,
 				{ modal: true, detail: 'This is like pulling the power plug. Unsaved data in the guest may be lost. Use Shut Down for a clean shutdown.' },
@@ -171,7 +171,17 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			{ location: vscode.ProgressLocation.Window, title: `${OPERATION_TITLE[action]} ${name}` },
 			() => task.catch(() => undefined)
 		);
-		task.catch((error: unknown) => showError(`Could not ${verbs[action]} ${name}`, error));
+		task.catch((error: unknown) => {
+			// The guest ignored a graceful request: don't leave the user stuck, offer the hard way out.
+			// Duck-typed: the provider extension bundles its own copy of the SDK's ProviderError.
+			if ((action === 'shutdown' || action === 'reboot') && (error as { code?: unknown } | undefined)?.code === 'timeout') {
+				void vscode.window.showWarningMessage(errorMessage(error), 'Power Off').then((choice) => {
+					if (choice === 'Power Off') void power(location.ref, 'stop', true);
+				});
+				return;
+			}
+			return showError(`Could not ${verbs[action]} ${name}`, error);
+		});
 	}
 
 	// -----------------------------------------------------------------------------------------
