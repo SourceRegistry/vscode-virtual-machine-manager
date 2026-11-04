@@ -19,12 +19,15 @@ import {
 	type ProviderContext,
 	type RdpTarget,
 	type VmConfig,
+	type VmDetails,
 	type VmInfo,
-	type VmState
+	type VmState,
+	type VmStats
 } from '@vmm/sdk';
 import { PowerShellError, PowerShellSession } from './PowerShellSession';
 import { createWindowsSecurityContext } from './sspi';
 import * as scripts from './scripts';
+import { toDetails, toStats, type RawDetails, type RawStats } from './inspect';
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VM_NAME = /^[^\\/:*?"<>|]{1,100}$/;
@@ -42,6 +45,7 @@ interface RawVm {
 	Notes: string;
 	Ips: string[] | string | null;
 	ComPort: string;
+	HasMedia?: boolean;
 }
 
 interface RawHost {
@@ -123,7 +127,8 @@ export function toVmInfo(raw: RawVm): VmInfo {
 		description: raw.Notes || undefined,
 		os: `Generation ${raw.Generation}`,
 		// Every VM has the VMConnect (RDP) console; the serial pipe only when a COM port is configured.
-		consoles: raw.ComPort ? ['rdp', 'serial'] : ['rdp']
+		consoles: raw.ComPort ? ['rdp', 'serial'] : ['rdp'],
+		mediaInserted: raw.HasMedia
 	};
 }
 
@@ -212,7 +217,10 @@ export class HyperVConnection implements ClusterConnection {
 		power: ['start', 'shutdown', 'reboot', 'stop'],
 		consoles: ['rdp', 'serial'],
 		preview: true,
-		external: true
+		external: true,
+		media: true,
+		details: true,
+		stats: true
 	};
 
 	/** Fast queries (polling). */
@@ -464,6 +472,24 @@ export class HyperVConnection implements ClusterConnection {
 		} finally {
 			session.dispose();
 		}
+	}
+
+	async getVmDetails(_nodeId: string, vmId: string): Promise<VmDetails> {
+		const [raw] = await this.run<RawDetails>(this.query, scripts.VM_DETAILS, { id: assertVmId(vmId) }, 60_000);
+		return toDetails(raw ?? { Generation: 0, Disks: null, Nics: null });
+	}
+
+	async getVmStats(_nodeId: string, vmId: string): Promise<VmStats> {
+		const [raw] = await this.run<RawStats>(this.query, scripts.VM_STATS, { id: assertVmId(vmId) });
+		return toStats(raw ?? { CpuPercent: null, AssignedMB: null, DemandMB: null, StartupMB: null });
+	}
+
+	async ejectMedia(_nodeId: string, vmId: string, deviceId: string): Promise<void> {
+		await this.run(this.ops, scripts.SET_MEDIA, { id: assertVmId(vmId), device: deviceId, path: '' }, 60_000);
+	}
+
+	async insertMedia(_nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void> {
+		await this.run(this.ops, scripts.SET_MEDIA, { id: assertVmId(vmId), device: deviceId, path: imagePath }, 60_000);
 	}
 
 	async getRdpTarget(_nodeId: string, vmId: string): Promise<RdpTarget> {

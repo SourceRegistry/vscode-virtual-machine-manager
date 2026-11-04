@@ -5,7 +5,7 @@
  *
  *   cluster;status=<status>;
  *   node;status=<status>;[create;]
- *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial, external, edit, delete
+ *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial, external, media, ejectable, edit, delete
  *
  * While a power operation runs, `state` is the transitional state and only the actions allowed
  * during it are listed (see operations.ts), plus `busy`.
@@ -32,6 +32,10 @@ export function vmContextValue(vm: VmInfo & { operation?: PowerAction }, caps: C
 		if (consoles.includes('vnc') || consoles.includes('rdp') || caps.preview) flags.push('graphical');
 		if (consoles.includes('serial')) flags.push('serial');
 		if (caps.external) flags.push('external');
+		if (caps.media) {
+			flags.push('media');
+			if (vm.mediaInserted) flags.push('ejectable');
+		}
 		if (caps.edit) flags.push('edit');
 		if (caps.delete) flags.push('delete');
 	}

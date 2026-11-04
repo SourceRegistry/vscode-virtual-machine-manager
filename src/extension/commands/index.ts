@@ -1,5 +1,6 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { fieldDefaults, validateValues, type FieldSchema, type PowerAction } from '@vmm/sdk';
+import { fieldDefaults, validateValues, type ClusterConnection, type DiskDevice, type FieldSchema, type PowerAction } from '@vmm/sdk';
 import type { VmRef } from '../../shared/protocol';
 import type { ClusterStore } from '../clusters/ClusterStore';
 import type { ConnectionManager, VmLocation } from '../clusters/ConnectionManager';
@@ -182,6 +183,66 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			}
 			return showError(`Could not ${verbs[action]} ${name}`, error);
 		});
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Installation media
+	// -----------------------------------------------------------------------------------------
+
+	/** The CD/DVD drive to act on: the only one, or the user's pick. */
+	async function pickDrive(location: VmLocation, connection: ClusterConnection, wantMedia: boolean): Promise<DiskDevice | undefined> {
+		const details = await connection.getVmDetails?.(location.ref.nodeId, location.ref.vmId);
+		const drives = (details?.disks ?? []).filter((d) => d.kind === 'cdrom' && d.removable !== false && (!wantMedia || d.path));
+		if (!drives.length) {
+			void vscode.window.showInformationMessage(
+				wantMedia ? `${location.vm.name} has no media in its CD/DVD drives.` : `${location.vm.name} has no CD/DVD drive.`
+			);
+			return undefined;
+		}
+		if (drives.length === 1) return drives[0];
+		const picked = await vscode.window.showQuickPick(
+			drives.map((d) => ({ label: d.label, description: d.path ? path.basename(d.path) : 'Empty', detail: d.path, drive: d })),
+			{ placeHolder: 'Select the CD/DVD drive' }
+		);
+		return picked?.drive;
+	}
+
+	async function ejectMedia(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to eject media from', (l) => !!l.cluster.connection?.capabilities.media && !!l.vm.mediaInserted);
+		if (!location) return;
+		try {
+			const connection = await manager.connect(location.ref.clusterId);
+			if (!connection.ejectMedia) return;
+			const drive = await pickDrive(location, connection, true);
+			if (!drive) return;
+			await connection.ejectMedia(location.ref.nodeId, location.ref.vmId, drive.id);
+			await manager.refresh(location.ref.clusterId);
+			void vscode.window.setStatusBarMessage(`$(circle-slash) Ejected ${drive.path ? path.basename(drive.path) : 'media'} from ${location.vm.name}`, 4000);
+		} catch (error) {
+			await showError(`Could not eject media from ${location.vm.name}`, error);
+		}
+	}
+
+	async function changeMedia(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to change the ISO of', (l) => !!l.cluster.connection?.capabilities.media);
+		if (!location) return;
+		try {
+			const connection = await manager.connect(location.ref.clusterId);
+			if (!connection.insertMedia) return;
+			const drive = await pickDrive(location, connection, false);
+			if (!drive) return;
+			const picked = await vscode.window.showOpenDialog({
+				title: `Insert into ${location.vm.name}`,
+				canSelectMany: false,
+				filters: { 'Disk images': ['iso', 'img'], 'All files': ['*'] }
+			});
+			if (!picked?.[0]) return;
+			await connection.insertMedia(location.ref.nodeId, location.ref.vmId, drive.id, picked[0].fsPath);
+			await manager.refresh(location.ref.clusterId);
+			void vscode.window.setStatusBarMessage(`$(files) Inserted ${path.basename(picked[0].fsPath)} into ${location.vm.name}`, 4000);
+		} catch (error) {
+			await showError(`Could not change the media of ${location.vm.name}`, error);
+		}
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -450,6 +511,8 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			const location = await resolveVm(arg, 'Select a virtual machine to configure');
 			if (location) VmSettingsPanel.show(context.extensionUri, manager, location.ref);
 		}),
+		register('vmm.ejectMedia', (arg) => ejectMedia(arg)),
+		register('vmm.changeMedia', (arg) => changeMedia(arg)),
 		register('vmm.deleteVm', (arg) => deleteVm(arg)),
 		register('vmm.start', (arg) => power(arg, 'start')),
 		register('vmm.shutdown', (arg) => power(arg, 'shutdown')),

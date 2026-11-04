@@ -31,6 +31,7 @@ Get-VM | ForEach-Object {
 		Notes = [string]$vm.Notes
 		Ips = @($vm.NetworkAdapters | ForEach-Object { $_.IPAddresses } | Where-Object { $_ })
 		ComPort = [string]$vm.ComPort1.Path
+		HasMedia = [bool](@(Get-VMDvdDrive -VM $vm | Where-Object { $_.Path }).Count)
 	}
 }
 `;
@@ -217,5 +218,50 @@ $service = Get-Service -Name vmms -ErrorAction SilentlyContinue
 	IsAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 	IsHyperVAdmin = $principal.IsInRole($hyperVAdmins)
 	User = $identity.Name
+}
+`;
+
+export const VM_DETAILS = String.raw`
+$vm = Get-VM -Id $p.id
+$disks = @()
+foreach ($d in (Get-VMHardDiskDrive -VM $vm)) {
+	$size = $null; $format = $null
+	if ($d.Path) {
+		try { $vhd = Get-VHD -Path $d.Path -ErrorAction Stop; $size = [int64]$vhd.Size; $format = $vhd.VhdFormat.ToString() } catch { }
+	}
+	$disks += [pscustomobject]@{ Id = ('{0}:{1}:{2}' -f $d.ControllerType, $d.ControllerNumber, $d.ControllerLocation); Kind = 'disk'; Path = [string]$d.Path; SizeBytes = $size; Format = $format }
+}
+foreach ($d in (Get-VMDvdDrive -VM $vm)) {
+	$size = $null
+	if ($d.Path -and (Test-Path -LiteralPath $d.Path)) { $size = [int64](Get-Item -LiteralPath $d.Path).Length }
+	$disks += [pscustomobject]@{ Id = ('{0}:{1}:{2}' -f $d.ControllerType, $d.ControllerNumber, $d.ControllerLocation); Kind = 'cdrom'; Path = [string]$d.Path; SizeBytes = $size; Format = 'iso' }
+}
+$nics = @(Get-VMNetworkAdapter -VM $vm | ForEach-Object {
+	[pscustomobject]@{ Name = $_.Name; Mac = [string]$_.MacAddress; Switch = [string]$_.SwitchName; Ips = @($_.IPAddresses | Where-Object { $_ }); Connected = [bool]$_.Connected; Legacy = [bool]$_.IsLegacy }
+})
+[pscustomobject]@{ Generation = [int]$vm.Generation; Disks = $disks; Nics = $nics }
+`;
+
+export const VM_STATS = String.raw`
+$vm = Get-VM -Id $p.id
+[pscustomobject]@{
+	CpuPercent = [int]$vm.CPUUsage
+	AssignedMB = [int64]($vm.MemoryAssigned / 1MB)
+	DemandMB = [int64]($vm.MemoryDemand / 1MB)
+	StartupMB = [int64]($vm.MemoryStartup / 1MB)
+}
+`;
+
+/** $p.device is "<ControllerType>:<ControllerNumber>:<ControllerLocation>"; an empty $p.path ejects. */
+export const SET_MEDIA = String.raw`
+$vm = Get-VM -Id $p.id
+$type, $number, $location = ([string]$p.device).Split(':')
+$dvd = Get-VMDvdDrive -VM $vm | Where-Object { $_.ControllerType.ToString() -eq $type -and $_.ControllerNumber -eq [int]$number -and $_.ControllerLocation -eq [int]$location }
+if (-not $dvd) { throw "DVD drive $($p.device) not found" }
+if ($p.path) {
+	if (-not (Test-Path -LiteralPath $p.path)) { throw "Image not found: $($p.path)" }
+	Set-VMDvdDrive -VMDvdDrive $dvd -Path ([string]$p.path)
+} else {
+	Set-VMDvdDrive -VMDvdDrive $dvd -Path $null
 }
 `;

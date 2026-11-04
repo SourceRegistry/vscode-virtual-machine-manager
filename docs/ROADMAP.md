@@ -18,7 +18,7 @@ Status: `todo` · `in progress` · `testing` · `merged`
 | # | Branch | Release | Status |
 |---|--------|---------|--------|
 | 1 | `fix/qemu-shutdown` | patch | testing |
-| 2 | `feat/vm-details-sdk` | minor | todo |
+| 2 | `feat/vm-details-sdk` | minor | testing (stacked on phase 1) |
 | 3 | `feat/vm-dashboard` | minor | todo |
 | 4 | `feat/host-dashboard` | minor | todo |
 | 5 | `feat/qemu-network` | minor | todo |
@@ -50,17 +50,24 @@ no `acpid`) ignores `system_powerdown`, and there is no timeout or escalation (`
 
 ## Phase 2: `feat/vm-details-sdk`
 
-- [ ] SDK additions (all optional):
-  - [ ] `getVmDetails()`: disks, CD drives, NICs, PCI/USB devices, port forwards
-  - [ ] `getVmStats()`: CPU, RAM, disk, net samples
-  - [ ] `getNodeStats()`
-  - [ ] device ops: `ejectMedia`, `insertMedia`, `attachDevice`, `detachDevice`
-  - [ ] `Capabilities.devices` flag set
-- [ ] QEMU: `query-block`, `query-blockstats`, `query-pci`, `query-chardev`, `query-balloon`, `query-cpus-fast`
-- [ ] QEMU: host CPU% / RSS of the QEMU process (`ps` on macOS/Linux, CIM on Windows)
-- [ ] Hyper-V: `Get-VMHardDiskDrive`, `Get-VMDvdDrive`, `Get-VMNetworkAdapter`, `Measure-VM`
-- [ ] Quick eject: command, tree inline button, "Change ISO" action
-- [ ] Tests for new SDK helpers and QEMU parsers
+Branched from `fix/qemu-shutdown` (phase 1 not merged yet): merge phase 1 first, then rebase this onto `main`.
+
+- [x] SDK additions (all optional, `VMM_API_VERSION` unchanged):
+  - [x] `getVmDetails()`: disks, CD drives, NICs, PCI devices, port forwards (`forwards` always empty until phase 5)
+  - [x] `getVmStats()`: cumulative counters, consumer derives rates
+  - [x] ~~`getNodeStats()`~~ not needed: `listNodes()` already carries CPU/RAM
+  - [x] `ejectMedia`, `insertMedia`; `attachDevice`/`detachDevice` deferred to phase 7 (USB/PCI)
+  - [x] `Capabilities.media` / `details` / `stats`, `VmInfo.mediaInserted`
+- [x] QEMU: `query-block`, `query-blockstats`, `query-pci`, guest agent `guest-network-get-interfaces` (NIC IPs when an agent answers)
+- [x] QEMU: host CPU% / RSS of the QEMU process (`/proc` on Linux, `ps` on macOS, PowerShell on Windows)
+- [x] QEMU: new VMs get a stored MAC (`mac` in `vm.json`); older VMs show QEMU's default `52:54:00:12:34:56`
+- [x] QEMU bug fix: `eject` / `blockdev-change-medium` need the device's QOM path (`qdev`) on QEMU 11. The old `id: 'cd0'` failed silently, so changing the ISO in settings of a running VM never worked
+- [x] Hyper-V: `Get-VMHardDiskDrive`, `Get-VMDvdDrive`, `Get-VMNetworkAdapter`, CPU/memory from `Get-VM`, `Set-VMDvdDrive`. Disk/net counters not included (Hyper-V needs perf counters, phase 3)
+- [x] Quick eject: `VM: Eject Media` / `VM: Change ISO…` commands, context menus (tree and overview), inline eject button on running VMs with media
+- [x] Tests: parsers against real QMP output, menus, Hyper-V mapping, opt-in end-to-end against real QEMU
+- [ ] **Hyper-V code is untested** (no Windows host): scripts in `extensions/hyperv/src/scripts.ts` (`VM_DETAILS`, `VM_STATS`, `SET_MEDIA`) need a run on Hyper-V
+- [ ] Windows `sampleProcess` (PowerShell per sample, ~0.3 s) untested; phase 3 should sample less often there
+- [ ] Manual check in VS Code: inline eject button, Change ISO dialog, status bar message
 
 ## Phase 3: `feat/vm-dashboard`
 

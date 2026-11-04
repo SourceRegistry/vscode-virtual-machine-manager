@@ -143,6 +143,18 @@
         "icon": "$(settings-gear)"
       },
       {
+        "command": "vmm.ejectMedia",
+        "title": "Eject Media",
+        "category": "VM",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "vmm.changeMedia",
+        "title": "Change ISO…",
+        "category": "VM",
+        "icon": "$(files)"
+      },
+      {
         "command": "vmm.deleteVm",
         "title": "Delete",
         "category": "VM",
@@ -270,6 +282,14 @@
         },
         {
           "command": "vmm.editVm",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.ejectMedia",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.changeMedia",
           "when": "vmm.hasVms"
         },
         {
@@ -430,6 +450,11 @@
           "group": "inline@3"
         },
         {
+          "command": "vmm.ejectMedia",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bejectable;/",
+          "group": "inline@4"
+        },
+        {
           "command": "vmm.start",
           "when": "view == vmm.clusters && viewItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
           "group": "1_power@1"
@@ -463,6 +488,16 @@
           "command": "vmm.openExternal",
           "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bexternal;/",
           "group": "2_connect@3"
+        },
+        {
+          "command": "vmm.ejectMedia",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bejectable;/",
+          "group": "2_media@1"
+        },
+        {
+          "command": "vmm.changeMedia",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bmedia;/",
+          "group": "2_media@2"
         },
         {
           "command": "vmm.editVm",
@@ -587,6 +622,16 @@
           "command": "vmm.openExternal",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bexternal;/",
           "group": "2_connect@3"
+        },
+        {
+          "command": "vmm.ejectMedia",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bejectable;/",
+          "group": "2_media@1"
+        },
+        {
+          "command": "vmm.changeMedia",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bmedia;/",
+          "group": "2_media@2"
         },
         {
           "command": "vmm.editVm",

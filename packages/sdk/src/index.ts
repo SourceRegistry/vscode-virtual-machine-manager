@@ -100,6 +100,12 @@ export interface Capabilities {
 	preview: boolean;
 	/** Can open the hypervisor's own viewer (e.g. vmconnect.exe). */
 	external: boolean;
+	/** Implements `ejectMedia` / `insertMedia` for CD/DVD drives. */
+	media?: boolean;
+	/** Implements `getVmDetails` (hardware inventory). */
+	details?: boolean;
+	/** Implements `getVmStats` (live usage counters). */
+	stats?: boolean;
 }
 
 export interface NodeInfo {
@@ -126,6 +132,93 @@ export interface VmInfo {
 	description?: string;
 	/** Narrows `Capabilities.consoles` for this VM (e.g. serial port not configured). */
 	consoles?: ConsoleKind[];
+	/** A CD/DVD drive of this VM holds media (an ISO): the core offers a quick eject. */
+	mediaInserted?: boolean;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hardware inventory and live statistics (optional provider features)
+// ---------------------------------------------------------------------------------------------
+
+export interface DiskDevice {
+	/** Stable id within the VM; the handle for `ejectMedia` / `insertMedia`. */
+	id: string;
+	kind: 'disk' | 'cdrom';
+	label: string;
+	/** Backing file. For a CD/DVD drive: the inserted image, undefined when the drive is empty. */
+	path?: string;
+	sizeBytes?: number;
+	/** e.g. `qcow2`, `vhdx`. */
+	format?: string;
+	/** e.g. `sata`, `virtio`, `scsi`, `ide`. */
+	bus?: string;
+	readOnly?: boolean;
+	/** Media can be swapped (CD/DVD drives). */
+	removable?: boolean;
+}
+
+export interface NicDevice {
+	id: string;
+	label: string;
+	model?: string;
+	mac?: string;
+	/** Attachment, e.g. `user` networking, a bridge or a Hyper-V switch name. */
+	network?: string;
+	ipAddresses?: string[];
+	connected?: boolean;
+}
+
+/** Another device the guest sees: PCI/PCIe (including passthrough), USB, serial… */
+export interface HostDevice {
+	id: string;
+	kind: 'pci' | 'usb' | 'other';
+	label: string;
+	/** e.g. PCI `00:02.0` or `vendor:product`. */
+	address?: string;
+	description?: string;
+}
+
+export interface PortForward {
+	protocol: 'tcp' | 'udp';
+	hostAddress?: string;
+	hostPort: number;
+	guestPort: number;
+}
+
+export interface VmDetails {
+	disks: DiskDevice[];
+	nics: NicDevice[];
+	devices: HostDevice[];
+	forwards: PortForward[];
+}
+
+/** Cumulative I/O counters of one disk since the VM started. */
+export interface DiskStats {
+	/** Matches `DiskDevice.id`. */
+	id: string;
+	readBytes: number;
+	writeBytes: number;
+	readOps: number;
+	writeOps: number;
+	/** Total time spent servicing reads/writes/flushes; (delta time / delta ops) is the average latency. */
+	readTimeNs?: number;
+	writeTimeNs?: number;
+	flushOps?: number;
+	flushTimeNs?: number;
+}
+
+/**
+ * One usage sample. Counters are cumulative so the consumer derives rates from two samples;
+ * `timestamp` (ms since the epoch) is when the provider took it.
+ */
+export interface VmStats {
+	timestamp: number;
+	/** 0..1 of the CPU allotted to the VM. */
+	cpuUsage?: number;
+	memoryUsedMB?: number;
+	memoryMB?: number;
+	disks?: DiskStats[];
+	network?: { rxBytes: number; txBytes: number };
 }
 
 export interface ClusterConfig {
@@ -234,6 +327,14 @@ export interface ClusterConnection extends Disposable {
 	getRdpTarget?(nodeId: string, vmId: string): Promise<RdpTarget>;
 	openPreview?(nodeId: string, vmId: string, signal: AbortSignal): AsyncIterable<PreviewFrame>;
 	openExternal?(nodeId: string, vmId: string): Promise<void>;
+	/** Hardware inventory of a VM (disks, CD drives, NICs, PCI/USB devices, port forwards). */
+	getVmDetails?(nodeId: string, vmId: string): Promise<VmDetails>;
+	/** One live usage sample; the core calls it repeatedly while a dashboard is open. */
+	getVmStats?(nodeId: string, vmId: string): Promise<VmStats>;
+	/** Empties a CD/DVD drive (`DiskDevice.id`). Works on running VMs; forces open a locked tray. */
+	ejectMedia?(nodeId: string, vmId: string, deviceId: string): Promise<void>;
+	/** Inserts an image into a CD/DVD drive, replacing the current one. */
+	insertMedia?(nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void>;
 	/** Fire to make the core refresh immediately. Without it the core polls. */
 	readonly onDidChange?: Event<ChangeEvent>;
 }

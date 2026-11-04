@@ -16,6 +16,8 @@ export interface VmDefinition {
 	diskBus: DiskBus;
 	cdrom?: string;
 	nic: NicModel;
+	/** MAC of the first NIC. Absent on VMs created before it was stored (QEMU's default then applies). */
+	mac?: string;
 	vga: VgaModel;
 	serial: boolean;
 	extraArgs?: string;
@@ -117,7 +119,7 @@ export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvi
 		args.push('-device', `ide-cd,drive=cd0,bus=ide.5,bootindex=${def.disks.length + 1}`);
 	}
 
-	args.push('-nic', def.nic === 'none' ? 'none' : `user,model=${def.nic}`);
+	args.push('-nic', def.nic === 'none' ? 'none' : `user,model=${def.nic}${def.mac ? `,mac=${def.mac}` : ''}`);
 	args.push('-vga', def.vga || 'std');
 	args.push('-device', 'qemu-xhci', '-device', 'usb-tablet');
 	args.push('-display', 'none');

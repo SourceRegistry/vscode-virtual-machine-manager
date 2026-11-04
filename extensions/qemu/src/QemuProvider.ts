@@ -15,6 +15,7 @@ import {
 	type ConsoleKind,
 	type ConsoleStream,
 	type DeleteOptions,
+	type DiskStats,
 	type Disposable,
 	type Event,
 	type FieldSchema,
@@ -25,13 +26,29 @@ import {
 	type PowerAction,
 	type ProviderContext,
 	type VmConfig,
+	type VmDetails,
 	type VmInfo,
-	type VmState
+	type VmState,
+	type VmStats
 } from '@vmm/sdk';
 import { buildArgs, defaultAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
 import { detectQemu, type QemuInstallation } from './detect';
 import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
+import { sampleProcess } from './hostProcess';
+import {
+	cpuUsageBetween,
+	hasMedia,
+	nicDevice,
+	parseBlockDevices,
+	parseBlockStats,
+	parsePciDevices,
+	removableQdev,
+	type GuestInterface,
+	type QmpBlock,
+	type QmpBlockStats,
+	type QmpPciBus
+} from './inspect';
 import { gracefulShutdown } from './shutdown';
 
 const execFileAsync = promisify(execFile);
@@ -161,8 +178,12 @@ export class QemuConnection implements ClusterConnection {
 		power: ['start', 'shutdown', 'reboot', 'stop'],
 		consoles: ['vnc', 'serial'],
 		preview: false,
-		external: false
+		external: false,
+		media: true,
+		details: true,
+		stats: true
 	};
+	private readonly cpuSamples = new Map<string, { at: number; cpuSeconds: number }>();
 	private readonly changes = new SimpleEmitter<ChangeEvent>();
 	readonly onDidChange = this.changes.event;
 	private readonly qmp = new Map<string, Promise<QmpClient>>();
@@ -298,6 +319,14 @@ export class QemuConnection implements ClusterConnection {
 				const runtime = await this.runtime(def.id);
 				const state = await this.state(def, runtime);
 				const consoles: ConsoleKind[] = def.serial ? ['vnc', 'serial'] : ['vnc'];
+				let mediaInserted = !!def.cdrom;
+				if (runtime && state !== 'stopped') {
+					try {
+						mediaInserted = hasMedia(await (await this.client(def.id, runtime)).execute<QmpBlock[]>('query-block'));
+					} catch {
+						// keep the definition's answer
+					}
+				}
 				return {
 					id: def.id,
 					name: def.name,
@@ -307,7 +336,8 @@ export class QemuConnection implements ClusterConnection {
 					uptimeSeconds: runtime ? Math.floor((Date.now() - runtime.startedAt) / 1000) : undefined,
 					description: def.notes,
 					os: `${def.firmware.toUpperCase()} · ${def.diskBus.toUpperCase()}`,
-					consoles
+					consoles,
+					mediaInserted
 				} satisfies VmInfo;
 			})
 		);
@@ -360,6 +390,7 @@ export class QemuConnection implements ClusterConnection {
 				diskBus: (values.diskBus as DiskBus) ?? 'sata',
 				cdrom: (values.cdrom as string | undefined) || undefined,
 				nic: (values.nic as NicModel) ?? 'e1000',
+				mac: randomMac(),
 				vga: (values.vga as VgaModel) ?? 'std',
 				serial: values.serial !== false,
 				notes: (values.notes as string | undefined) || undefined,
@@ -458,13 +489,141 @@ export class QemuConnection implements ClusterConnection {
 		const runtime = await this.runtime(vmId);
 		if (runtime) {
 			try {
-				const client = await this.client(vmId, runtime);
-				if (def.cdrom) await client.execute('blockdev-change-medium', { id: 'cd0', filename: def.cdrom, format: 'raw' });
-				else await client.execute('eject', { id: 'cd0', force: true });
+				await this.swapMedia(vmId, runtime, 'cd0', def.cdrom);
 			} catch (error) {
-				this.log.debug(`Changing the CD of ${def.name} at runtime failed: ${(error as Error).message}`);
+				this.log.warn(`Changing the CD of ${def.name} at runtime failed: ${(error as Error).message}`);
 			}
 		}
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Hardware inventory, statistics, media
+	// -----------------------------------------------------------------------------------------
+
+	async getVmDetails(_nodeId: string, vmId: string): Promise<VmDetails> {
+		const def = await this.definition(vmId);
+		const runtime = await this.runtime(vmId);
+		const context = { diskBus: def.diskBus };
+		let blocks: QmpBlock[] | undefined;
+		let pci: QmpPciBus[] = [];
+		if (runtime) {
+			try {
+				const client = await this.client(vmId, runtime);
+				blocks = await client.execute<QmpBlock[]>('query-block');
+				pci = await client.execute<QmpPciBus[]>('query-pci').catch(() => []);
+			} catch (error) {
+				this.log.debug(`Inspecting ${def.name} failed: ${(error as Error).message}`);
+			}
+		}
+		const disks = blocks ? parseBlockDevices(blocks, context) : await this.offlineDisks(def, context.diskBus);
+		let interfaces: GuestInterface[] | undefined;
+		if (runtime?.agentPort) {
+			interfaces = await this.guestInterfaces(runtime.agentPort);
+		}
+		return {
+			disks,
+			nics: nicDevice(def.nic, def.mac, interfaces, !!runtime),
+			devices: parsePciDevices(pci),
+			forwards: []
+		};
+	}
+
+	private async offlineDisks(def: VmDefinition, bus: string): Promise<VmDetails['disks']> {
+		const disks = await Promise.all(
+			def.disks.map(async (file, index) => {
+				const info = await this.imageInfo(file);
+				return {
+					id: `disk${index}`,
+					kind: 'disk' as const,
+					label: `Hard disk ${index + 1}`,
+					path: file,
+					sizeBytes: info?.['virtual-size'],
+					format: info?.format,
+					bus
+				};
+			})
+		);
+		const cd = def.cdrom ? await this.imageInfo(def.cdrom) : undefined;
+		return [
+			...disks,
+			{ id: 'cd0', kind: 'cdrom' as const, label: 'CD/DVD drive', path: def.cdrom, sizeBytes: cd?.['virtual-size'], format: cd?.format, bus: 'sata', readOnly: true, removable: true }
+		];
+	}
+
+	private async imageInfo(file: string): Promise<{ 'virtual-size'?: number; format?: string } | undefined> {
+		try {
+			const { stdout } = await execFileAsync(this.qemu.img, ['info', '--output=json', file], { windowsHide: true, timeout: 10_000 });
+			return JSON.parse(stdout) as { 'virtual-size'?: number; format?: string };
+		} catch {
+			return undefined;
+		}
+	}
+
+	private async guestInterfaces(port: number): Promise<GuestInterface[] | undefined> {
+		try {
+			const agent = await GuestAgentClient.connect(port, 1000);
+			try {
+				return await agent.execute<GuestInterface[]>('guest-network-get-interfaces');
+			} finally {
+				agent.close();
+			}
+		} catch {
+			return undefined;
+		}
+	}
+
+	async getVmStats(_nodeId: string, vmId: string): Promise<VmStats> {
+		const def = await this.definition(vmId);
+		const runtime = await this.runtime(vmId);
+		const at = Date.now();
+		if (!runtime) {
+			this.cpuSamples.delete(vmId);
+			return { timestamp: at, memoryMB: def.memoryMB };
+		}
+		const [process_, disks] = await Promise.all([
+			sampleProcess(runtime.pid),
+			this.client(vmId, runtime)
+				.then((c) => c.execute<QmpBlockStats[]>('query-blockstats'))
+				.then((list) => parseBlockStats(list))
+				.catch((): DiskStats[] | undefined => undefined)
+		]);
+		let cpuUsage: number | undefined;
+		if (process_) {
+			const current = { at, cpuSeconds: process_.cpuSeconds };
+			cpuUsage = cpuUsageBetween(this.cpuSamples.get(vmId), current, def.cpus);
+			this.cpuSamples.set(vmId, current);
+		}
+		return { timestamp: at, cpuUsage, memoryUsedMB: process_?.rssMB, memoryMB: def.memoryMB, disks };
+	}
+
+	async ejectMedia(_nodeId: string, vmId: string, deviceId: string): Promise<void> {
+		await this.changeMedia(vmId, deviceId, undefined);
+	}
+
+	async insertMedia(_nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void> {
+		if (!fs.existsSync(imagePath)) throw new ProviderError(`Image not found: ${imagePath}`, 'invalid');
+		await this.changeMedia(vmId, deviceId, imagePath);
+	}
+
+	/** Swaps the medium of the VM's CD/DVD drive and remembers it, so the next start matches. */
+	private async changeMedia(vmId: string, deviceId: string, image: string | undefined): Promise<void> {
+		const def = await this.definition(vmId);
+		if (deviceId !== 'cd0') throw new ProviderError(`${deviceId} is not a CD/DVD drive`, 'invalid');
+		const runtime = await this.runtime(vmId);
+		if (runtime) await this.swapMedia(vmId, runtime, deviceId, image);
+		def.cdrom = image;
+		await this.saveDefinition(def);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
+	private async swapMedia(vmId: string, runtime: VmRuntime, deviceId: string, image: string | undefined): Promise<void> {
+		const client = await this.client(vmId, runtime);
+		// `id` is the QOM path of the drive's device; the block device name is not accepted by QEMU 11.
+		const qdev = removableQdev(await client.execute<QmpBlock[]>('query-block'), deviceId);
+		if (!qdev) throw new ProviderError('The virtual machine has no CD/DVD drive', 'unavailable');
+		// Eject first (forced, so a tray the guest locked doesn't block it); harmless on an empty drive.
+		await client.execute('eject', { id: qdev, force: true });
+		if (image) await client.execute('blockdev-change-medium', { id: qdev, filename: image, format: 'raw' });
 	}
 
 	async deleteVm(_nodeId: string, vmId: string, options: DeleteOptions): Promise<void> {
@@ -650,6 +809,11 @@ function isAlive(pid: number): boolean {
 	} catch (error) {
 		return (error as NodeJS.ErrnoException).code === 'EPERM';
 	}
+}
+
+function randomMac(): string {
+	const byte = () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0');
+	return `52:54:00:${byte()}:${byte()}:${byte()}`;
 }
 
 function signal(pid: number, name: NodeJS.Signals): void {

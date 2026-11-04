@@ -106,6 +106,36 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s media actions', (menu) => {
+	const withMedia: Capabilities = { ...caps, media: true };
+
+	it('offers Change ISO whenever the provider supports media, Eject only with media inserted', () => {
+		const empty = commandsFor(menu, vmContextValue(vm('running'), withMedia));
+		expect(empty).toContain('vmm.changeMedia');
+		expect(empty).not.toContain('vmm.ejectMedia');
+		const loaded = commandsFor(menu, vmContextValue({ ...vm('running'), mediaInserted: true }, withMedia));
+		expect(loaded).toContain('vmm.ejectMedia');
+		expect(loaded.indexOf('vmm.ejectMedia')).toBeLessThan(loaded.indexOf('vmm.changeMedia'));
+	});
+
+	it('hides media actions for providers without media support', () => {
+		const commands = commandsFor(menu, vmContextValue({ ...vm('running'), mediaInserted: true }, caps));
+		expect(commands).not.toContain('vmm.ejectMedia');
+		expect(commands).not.toContain('vmm.changeMedia');
+	});
+});
+
+describe('tree inline eject', () => {
+	const withMedia: Capabilities = { ...caps, media: true };
+	const inline = (v: VmInfo) => commandsFor('view/item/context', vmContextValue(v, withMedia), { inline: true });
+
+	it('shows a one-click eject on running VMs holding media', () => {
+		expect(inline({ ...vm('running'), mediaInserted: true })).toContain('vmm.ejectMedia');
+		expect(inline(vm('running'))).not.toContain('vmm.ejectMedia');
+		expect(inline({ ...vm('stopped'), mediaInserted: true })).not.toContain('vmm.ejectMedia');
+	});
+});
+
 describe('tree inline actions', () => {
 	it('shows start on stopped and connect/shutdown on running VMs', () => {
 		expect(commandsFor('view/item/context', vmContextValue(vm('saved'), caps), { inline: true })).toEqual(['vmm.start']);
