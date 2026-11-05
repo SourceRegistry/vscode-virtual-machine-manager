@@ -112,6 +112,13 @@ Create the directory under `extensions/` and tag the commit its first version sh
 git tag vm-manager-<id>-v<version> <commit> && git push origin vm-manager-<id>-v<version>
 ```
 
+`main` is protected by the *Protect main* ruleset: changes land through a pull request whose
+*Test (ubuntu-latest)* and *Test (windows-latest)* checks pass, and nobody can force-push or delete the
+branch. The release job pushes its release commit (version, changelog) straight to `main`, which only
+a repository admin may do, so it authenticates with the `RELEASE_TOKEN` secret: a fine-grained personal
+access token of an admin with *Contents: read and write* on this repository. If it expires, the release
+job fails at checkout; create a new token and update the secret.
+
 Publishing uses Marketplace [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
 (GitHub OIDC, `vsce publish --oidc`), so no access token is stored. The publisher's policy must name
 owner `SourceRegistry`, repository `vscode-virtual-machine-manager`, workflow `release.yml` and environment

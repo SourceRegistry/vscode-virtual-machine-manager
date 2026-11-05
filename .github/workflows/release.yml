@@ -8,6 +8,11 @@
 #   Repository:       vscode-virtual-machine-manager
 #   Workflow:         release.yml
 #   Environment:      marketplace
+#
+# main is protected by a ruleset (pull request + passing "Test" checks, no direct pushes). The release
+# commit that semantic-release pushes needs a bypass, which the built-in GITHUB_TOKEN cannot get, so
+# the release job uses the RELEASE_TOKEN secret: a fine-grained personal access token of a repository
+# admin (this repository, Contents: read and write).
 name: Release
 
 on:
@@ -46,6 +51,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - uses: actions/setup-node@v5
         with:
@@ -57,7 +63,7 @@ jobs:
       - name: Release
         run: node scripts/release.mjs
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
   republish:
     if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
