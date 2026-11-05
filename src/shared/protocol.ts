@@ -7,6 +7,7 @@ import type {
 	FieldSchema,
 	FieldValues,
 	NodeInfo,
+	PortForward,
 	PowerAction,
 	PreviewFrame,
 	VmConfig,
@@ -120,6 +121,10 @@ export interface RpcMethods {
 	getDetails: { params: void; result: VmDetails | undefined };
 	/** `undefined` while the panel is hidden (no work done) or the provider has no statistics. */
 	getStats: { params: void; result: VmStats | undefined };
+	addForward: { params: { forward: PortForward }; result: void };
+	removeForward: { params: { forward: PortForward }; result: void };
+	/** Copies the ssh command or opens the forward in the browser. */
+	forwardAction: { params: { action: 'copySsh' | 'open'; forward: PortForward }; result: void };
 	// vm settings
 	getConfig: { params: void; result: VmConfig & { vm?: VmInfo } };
 	save: { params: { values: FieldValues }; result: { message: string } };

@@ -112,10 +112,10 @@ Stacked on `feat/vm-dashboard` (phases 1-3 not merged yet).
 
 ## Phase 5: `feat/qemu-network`
 
-- [ ] Port forwards: add / remove / list live via HMP `hostfwd_add` / `hostfwd_remove`, persisted in the definition
-- [ ] Per-forward actions: copy ssh command, open in browser; show host-reachable address (`10.0.2.2`)
-- [ ] Guest IPs: guest agent `guest-network-get-interfaces`, fallback to ARP/lease lookup by MAC
-- [ ] NIC editor: add/remove NICs, modes (user, bridge, vmnet on macOS)
+- [x] Port forwards: add / remove / list live via HMP `hostfwd_add` / `hostfwd_remove`, persisted in the definition (verified against real QEMU in the e2e)
+- [x] Per-forward actions: copy ssh command, open in browser; show host-reachable address (`10.0.2.2`)
+- [~] Guest IPs: guest agent `guest-network-get-interfaces` done (phase 2); ARP/lease fallback dropped for user networking (guest is not on the host LAN), UI hints the usual `10.0.2.15`. Revisit with bridge/vmnet NICs
+- [ ] NIC editor: add/remove NICs, modes (user, bridge, vmnet on macOS) — deferred, needs multi-NIC definition; model still editable in settings
 
 ## Phase 6: `feat/qemu-import`
 

@@ -3,10 +3,11 @@
  * (needs QEMU on PATH; uses TCG and an empty UEFI VM, so it needs no guest OS).
  */
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { QemuProvider } from '../src/QemuProvider';
+import { freePort, QemuProvider } from '../src/QemuProvider';
 
 describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 	let dir: string;
@@ -81,5 +82,33 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 
 		await connection.power('local', vmId, 'stop');
 		expect(await state()).toBe('stopped');
+	}, 60_000);
+
+	it('adds and removes a port forward on a running VM and remembers it', async () => {
+		const nicVm = await connection.createVm('local', { name: 'e2e-net', cpus: 1, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'e1000', serial: false });
+		const listening = (port: number) =>
+			new Promise<boolean>((resolve) => {
+				const socket = net.connect({ port, host: '127.0.0.1' });
+				socket.once('connect', () => (socket.destroy(), resolve(true)));
+				socket.once('error', () => resolve(false));
+			});
+		const hostPort = await freePort();
+		try {
+			await connection.power('local', nicVm.id, 'start');
+			await new Promise((r) => setTimeout(r, 1500));
+			expect(await listening(hostPort)).toBe(false);
+
+			const forward = { protocol: 'tcp' as const, hostPort, guestPort: 22 };
+			await connection.addPortForward!('local', nicVm.id, forward);
+			expect(await listening(hostPort)).toBe(true);
+			expect((await connection.getVmDetails!('local', nicVm.id)).forwards).toEqual([{ ...forward, hostAddress: '127.0.0.1' }]);
+			await expect(connection.addPortForward!('local', nicVm.id, forward)).rejects.toMatchObject({ code: 'invalid' });
+
+			await connection.removePortForward!('local', nicVm.id, forward);
+			expect(await listening(hostPort)).toBe(false);
+			expect((await connection.getVmDetails!('local', nicVm.id)).forwards).toEqual([]);
+		} finally {
+			await connection.power('local', nicVm.id, 'stop').catch(() => undefined);
+		}
 	}, 60_000);
 });

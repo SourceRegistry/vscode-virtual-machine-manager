@@ -111,6 +111,8 @@ export interface Capabilities {
 	details?: boolean;
 	/** Implements `getVmStats` (live usage counters). */
 	stats?: boolean;
+	/** Implements `addPortForward` / `removePortForward`. */
+	forwards?: boolean;
 }
 
 export interface NodeInfo {
@@ -342,6 +344,9 @@ export interface ClusterConnection extends Disposable {
 	ejectMedia?(nodeId: string, vmId: string, deviceId: string): Promise<void>;
 	/** Inserts an image into a CD/DVD drive, replacing the current one. */
 	insertMedia?(nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void>;
+	/** Forwards a host port to a guest port. Works on running VMs and is remembered for the next start. */
+	addPortForward?(nodeId: string, vmId: string, forward: PortForward): Promise<void>;
+	removePortForward?(nodeId: string, vmId: string, forward: PortForward): Promise<void>;
 	/** Fire to make the core refresh immediately. Without it the core polls. */
 	readonly onDidChange?: Event<ChangeEvent>;
 }

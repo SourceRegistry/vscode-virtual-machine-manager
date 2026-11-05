@@ -10,6 +10,7 @@
 	import Status from '#lib/client-lib/components/feedback/Status.svelte';
 	import { formatMemory, formatUptime, type Capabilities, type VmDetails, type VmInfo, type VmStats } from '@vmm/sdk';
 	import type { BootData, OverviewCommand } from '../../../shared/protocol';
+	import { browserUrl, GUEST_HOST_ADDRESS, sshCommand } from '../../../shared/forwards';
 	import {
 		column,
 		derivePoint,
@@ -56,6 +57,36 @@
 	const memoryTop = $derived(Math.max(vm?.memoryMB ?? 0, ...points.map((p) => p.memoryMB ?? 0), 1));
 
 	let actionError = $state<string | undefined>();
+
+	// Port forwards
+	let newProtocol = $state<'tcp' | 'udp'>('tcp');
+	let newHostPort = $state('');
+	let newGuestPort = $state('');
+	let forwardBusy = $state(false);
+	const canForward = $derived(!!caps?.forwards);
+
+	async function forwardCall(call: () => Promise<unknown>) {
+		forwardBusy = true;
+		actionError = undefined;
+		try {
+			await call();
+			await loadDetails();
+		} catch (error) {
+			actionError = (error as Error).message;
+		} finally {
+			forwardBusy = false;
+		}
+	}
+
+	function addForward(event: SubmitEvent) {
+		event.preventDefault();
+		const forward = { protocol: newProtocol, hostPort: Number(newHostPort), guestPort: Number(newGuestPort) };
+		void forwardCall(async () => {
+			await request('addForward', { forward });
+			newHostPort = '';
+			newGuestPort = '';
+		});
+	}
 
 	function run(command: OverviewCommand) {
 		if (!boot.ref) return;
@@ -308,7 +339,7 @@
 											<td>{n.label}{n.model ? ` (${n.model})` : ''}</td>
 											<td>{n.network ?? '–'}</td>
 											<td class="mono">{n.mac ?? '–'}</td>
-											<td>{n.ipAddresses?.length ? n.ipAddresses.join(', ') : running ? 'Unknown (needs a guest agent)' : '–'}</td>
+											<td>{n.ipAddresses?.length ? n.ipAddresses.join(', ') : running ? 'Unknown (needs a guest agent; user networking usually uses 10.0.2.15)' : '–'}</td>
 										</tr>
 									{/each}
 								</tbody>
@@ -316,16 +347,48 @@
 						{:else}
 							<p class="muted">No network adapters.</p>
 						{/if}
-						{#if details.forwards.length}
+						{#if details.forwards.length || canForward}
 							<h4>Port forwards</h4>
+						{/if}
+						{#if details.forwards.length}
 							<table class="grid">
-								<thead><tr><th>Protocol</th><th>Host</th><th>Guest</th></tr></thead>
+								<thead><tr><th>Protocol</th><th>Host</th><th>Guest</th><th></th></tr></thead>
 								<tbody>
-									{#each details.forwards as f (`${f.protocol}${f.hostPort}`)}
-										<tr><td>{f.protocol.toUpperCase()}</td><td>{f.hostAddress ?? '*'}:{f.hostPort}</td><td>{f.guestPort}</td></tr>
+									{#each details.forwards as f (`${f.protocol}${f.hostAddress}${f.hostPort}`)}
+										<tr>
+											<td>{f.protocol.toUpperCase()}</td>
+											<td class="mono">{f.hostAddress ?? '*'}:{f.hostPort}</td>
+											<td>{f.guestPort}</td>
+											<td class="actions">
+												{#if sshCommand(f)}
+													<Button transparent title="Copy ssh command" aria-label="Copy ssh command for port {f.hostPort}" onclick={() => forwardCall(() => request('forwardAction', { action: 'copySsh', forward: f }))}><Icon icon="terminal" /></Button>
+												{/if}
+												{#if browserUrl(f)}
+													<Button transparent title="Open in browser" aria-label="Open port {f.hostPort} in browser" onclick={() => forwardCall(() => request('forwardAction', { action: 'open', forward: f }))}><Icon icon="box-arrow-up-right" /></Button>
+												{/if}
+												{#if canForward}
+													<Button transparent disabled={forwardBusy} title="Remove forward" aria-label="Remove forward {f.hostPort}" onclick={() => forwardCall(() => request('removeForward', { forward: f }))}><Icon icon="trash" /></Button>
+												{/if}
+											</td>
+										</tr>
 									{/each}
 								</tbody>
 							</table>
+						{:else if canForward}
+							<p class="muted">No port forwards. Forward a host port to reach a service in the guest, e.g. SSH.</p>
+						{/if}
+						{#if canForward}
+							<form class="forward-form" onsubmit={addForward}>
+								<select bind:value={newProtocol} aria-label="Protocol">
+									<option value="tcp">TCP</option>
+									<option value="udp">UDP</option>
+								</select>
+								<input type="number" min="1" max="65535" placeholder="Host port" aria-label="Host port" bind:value={newHostPort} required />
+								<span aria-hidden="true">→</span>
+								<input type="number" min="1" max="65535" placeholder="Guest port" aria-label="Guest port" bind:value={newGuestPort} required />
+								<Button type="submit" disabled={forwardBusy}><Icon icon="plus-lg" margin="right" />Add</Button>
+							</form>
+							<p class="muted hint">Forwards listen on 127.0.0.1 only. From the guest, the host is reachable at <span class="mono">{GUEST_HOST_ADDRESS}</span>.</p>
 						{/if}
 					</Card>
 					{#if details.devices.length}
@@ -422,6 +485,29 @@
 	}
 	.error {
 		color: var(--vscode-errorForeground);
+	}
+	.forward-form {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+	.forward-form input,
+	.forward-form select {
+		background: var(--vscode-input-background);
+		color: var(--vscode-input-foreground);
+		border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, #8886));
+		border-radius: 3px;
+		padding: 0.25rem 0.4rem;
+		font: inherit;
+	}
+	.forward-form input {
+		width: 8rem;
+	}
+	.hint {
+		margin: 0.5rem 0 0;
+		font-size: 0.9em;
 	}
 	h4 {
 		margin: 1rem 0 0.25rem;

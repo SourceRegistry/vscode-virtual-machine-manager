@@ -1,3 +1,6 @@
+import type { PortForward } from '@vmm/sdk';
+import { hostfwdOptions } from './forwards';
+
 /** On-disk VM definition (`<vmDirectory>/<id>/vm.json`). Pure module: no I/O, unit tested. */
 
 export type DiskBus = 'virtio' | 'sata';
@@ -18,6 +21,8 @@ export interface VmDefinition {
 	nic: NicModel;
 	/** MAC of the first NIC. Absent on VMs created before it was stored (QEMU's default then applies). */
 	mac?: string;
+	/** Host → guest port forwards of the user-mode NIC. */
+	forwards?: PortForward[];
 	vga: VgaModel;
 	serial: boolean;
 	extraArgs?: string;
@@ -130,7 +135,7 @@ export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvi
 		args.push('-device', `ide-cd,drive=cd0,bus=ide.5,bootindex=${def.disks.length + 1}`);
 	}
 
-	args.push('-nic', def.nic === 'none' ? 'none' : `user,model=${def.nic}${def.mac ? `,mac=${def.mac}` : ''}`);
+	args.push('-nic', def.nic === 'none' ? 'none' : `user,model=${def.nic}${def.mac ? `,mac=${def.mac}` : ''}${hostfwdOptions(def.forwards)}`);
 	args.push('-vga', def.vga || 'std');
 	args.push('-device', 'qemu-xhci', '-device', 'usb-tablet');
 	args.push('-display', 'none');

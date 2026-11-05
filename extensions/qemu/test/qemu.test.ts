@@ -76,6 +76,11 @@ describe('buildArgs', () => {
 		expect(sata).toContain('ide-hd,drive=disk0,bus=ide.0,bootindex=1');
 		expect(sata.join(' ')).toContain('-serial none');
 	});
+
+	it('adds the stored port forwards to the NIC', () => {
+		const withForwards = buildArgs({ ...def, nic: 'e1000', forwards: [{ protocol: 'tcp', hostPort: 2222, guestPort: 22 }] }, runtime, { accelerators: ['tcg'], firmwareCode: '/fw/code.fd' });
+		expect(withForwards[withForwards.indexOf('-nic') + 1]).toMatch(/^user,model=e1000.*,hostfwd=tcp:127\.0\.0\.1:2222-:22$/);
+	});
 });
 
 describe('defaultAccelerators', () => {

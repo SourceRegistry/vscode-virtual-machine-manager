@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { OverviewCommand, VmRef } from '../../shared/protocol';
 import type { ConnectionManager } from '../clusters/ConnectionManager';
+import { browserUrl, sshCommand } from '../../shared/forwards';
 import { panelIcon, renderHtml, WebviewChannel, webviewOptions } from './WebviewHost';
 
 export const VM_DASHBOARD_VIEW_TYPE = 'vmm.vmDashboard';
@@ -66,6 +67,30 @@ export class VmDashboardPanel implements vscode.Disposable {
 			getDetails: async () => {
 				const connection = await manager.connect(ref.clusterId);
 				return connection.getVmDetails?.(ref.nodeId, ref.vmId);
+			},
+			addForward: async ({ forward }) => {
+				const connection = await manager.connect(ref.clusterId);
+				if (!connection.addPortForward) throw new Error('This hypervisor cannot forward ports');
+				await connection.addPortForward(ref.nodeId, ref.vmId, forward);
+				await manager.refresh(ref.clusterId);
+			},
+			removeForward: async ({ forward }) => {
+				const connection = await manager.connect(ref.clusterId);
+				if (!connection.removePortForward) throw new Error('This hypervisor cannot forward ports');
+				await connection.removePortForward(ref.nodeId, ref.vmId, forward);
+				await manager.refresh(ref.clusterId);
+			},
+			forwardAction: async ({ action, forward }) => {
+				if (action === 'copySsh') {
+					const command = sshCommand(forward);
+					if (!command) throw new Error('Only TCP forwards to guest port 22 have an ssh command');
+					await vscode.env.clipboard.writeText(command);
+					void vscode.window.showInformationMessage(`Copied: ${command}`);
+				} else {
+					const url = browserUrl(forward);
+					if (!url) throw new Error('This forward is not to a web port');
+					await vscode.env.openExternal(vscode.Uri.parse(url));
+				}
 			},
 			getStats: async () => {
 				if (!panel.visible) return undefined;

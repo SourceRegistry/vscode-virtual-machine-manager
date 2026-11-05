@@ -23,6 +23,7 @@ import {
 	type HypervisorProvider,
 	type Logger,
 	type NodeInfo,
+	type PortForward,
 	type PowerAction,
 	type ProviderContext,
 	type VmConfig,
@@ -51,6 +52,7 @@ import {
 	type QmpBlockStats,
 	type QmpPciBus
 } from './inspect';
+import { addCommand, hmpError, normalizeForward, removeCommand, sameHostSocket, validateForward } from './forwards';
 import { isPortConflict, SerialQueue } from './ports';
 import { gracefulShutdown } from './shutdown';
 
@@ -184,6 +186,7 @@ export class QemuConnection implements ClusterConnection {
 		external: false,
 		media: true,
 		details: true,
+		forwards: true,
 		stats: true
 	};
 	private readonly hostCpu = new CpuLoadSampler();
@@ -538,7 +541,7 @@ export class QemuConnection implements ClusterConnection {
 			disks,
 			nics: nicDevice(def.nic, def.mac, interfaces, !!runtime),
 			devices: parsePciDevices(pci),
-			forwards: []
+			forwards: def.forwards ?? []
 		};
 	}
 
@@ -617,6 +620,45 @@ export class QemuConnection implements ClusterConnection {
 	async insertMedia(_nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void> {
 		if (!fs.existsSync(imagePath)) throw new ProviderError(`Image not found: ${imagePath}`, 'invalid');
 		await this.changeMedia(vmId, deviceId, imagePath);
+	}
+
+	async addPortForward(_nodeId: string, vmId: string, forward: PortForward): Promise<void> {
+		const invalid = validateForward(forward);
+		if (invalid) throw new ProviderError(invalid, 'invalid');
+		const def = await this.definition(vmId);
+		if (def.nic === 'none') throw new ProviderError('The VM has no network adapter', 'invalid');
+		const rule = normalizeForward(forward);
+		if ((def.forwards ?? []).some((f) => sameHostSocket(f, rule))) {
+			throw new ProviderError(`Host port ${rule.hostPort}/${rule.protocol} is already forwarded`, 'invalid');
+		}
+		const runtime = await this.runtime(vmId);
+		if (runtime) await this.monitor(vmId, runtime, addCommand(rule), `Could not forward port ${rule.hostPort}`);
+		def.forwards = [...(def.forwards ?? []), rule];
+		await this.saveDefinition(def);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
+	async removePortForward(_nodeId: string, vmId: string, forward: PortForward): Promise<void> {
+		const def = await this.definition(vmId);
+		const rule = normalizeForward(forward);
+		const runtime = await this.runtime(vmId);
+		if (runtime) {
+			// Already gone in the running VM (e.g. the definition was edited): still drop it from the definition.
+			await this.monitor(vmId, runtime, removeCommand(rule), `Could not remove forward ${rule.hostPort}`).catch((error: Error) =>
+				this.log.warn(error.message)
+			);
+		}
+		def.forwards = (def.forwards ?? []).filter((f) => !sameHostSocket(f, rule));
+		await this.saveDefinition(def);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
+	/** Runs a human-monitor command through QMP; HMP prints errors as text. */
+	private async monitor(vmId: string, runtime: VmRuntime, commandLine: string, failure: string): Promise<void> {
+		const client = await this.client(vmId, runtime);
+		const output = await client.execute<string>('human-monitor-command', { 'command-line': commandLine });
+		const error = hmpError(output);
+		if (error) throw new ProviderError(`${failure}: ${error}`, 'failed');
 	}
 
 	/** Swaps the medium of the VM's CD/DVD drive and remembers it, so the next start matches. */
