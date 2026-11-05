@@ -153,6 +153,8 @@ export interface VmInfo {
 	memoryMB?: number;
 	uptimeSeconds?: number;
 	ipAddresses?: string[];
+	/** MAC addresses of the VM's network adapters; searchable in the VM picker. */
+	macAddresses?: string[];
 	os?: string;
 	description?: string;
 	/** A number or short id people know the VM by (the Proxmox VMID). Shown beside the name in the tree. */

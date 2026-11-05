@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Client } from 'pve-client';
-import { connectionOptions, hasDisplay, ProxmoxConnection, proxmoxConsoles } from '../src/ProxmoxProvider';
+import { connectionOptions, hasDisplay, macAddresses, ProxmoxConnection, proxmoxConsoles } from '../src/ProxmoxProvider';
 
 const cluster = { id: 'test', name: 'Test', providerId: 'proxmox', config: { endpoint: 'https://pve.test:8006', tokenId: 'user@pve!vscode' } };
 function fixture() {
@@ -124,5 +124,11 @@ describe('Proxmox provider', () => {
 		expect(open).toHaveBeenNthCalledWith(1, 'https://pve.test:8006/?console=kvm&novnc=1&vmid=101&node=pve&resize=off&cmd=');
 		expect(open).toHaveBeenNthCalledWith(2, 'https://pve.test:8006/?console=kvm&xtermjs=1&vmid=102&node=pve&cmd=');
 		expect(open).toHaveBeenNthCalledWith(3, 'https://pve.test:8006/?console=lxc&xtermjs=1&vmid=105&node=pve&cmd=');
+	});
+	it('reads MAC addresses from VM and container network config', () => {
+		expect(macAddresses({ net0: 'virtio=bc:24:11:aa:bb:cc,bridge=vmbr0', net1: 'e1000=BC:24:11:00:00:01,bridge=vmbr1', name: 'x' })).toEqual(['BC:24:11:AA:BB:CC', 'BC:24:11:00:00:01']);
+		expect(macAddresses({ net0: 'name=eth0,bridge=vmbr0,hwaddr=BC:24:11:12:34:56,ip=dhcp' })).toEqual(['BC:24:11:12:34:56']);
+		expect(macAddresses({ net0: 'virtio,bridge=vmbr0' })).toEqual([]);
+		expect(macAddresses(undefined)).toEqual([]);
 	});
 });

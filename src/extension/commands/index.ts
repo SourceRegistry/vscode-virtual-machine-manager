@@ -14,6 +14,7 @@ import { OverviewPanel } from '../webview/OverviewPanel';
 import { VmDashboardPanel } from '../webview/VmDashboardPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, log, showError } from '../util/log';
+import { matchesQuery } from '../../shared/vmSearch';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
 
 export const WALKTHROUGH_ID = 'sourceregistry.vm-manager#gettingStarted';
@@ -87,6 +88,42 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			{ placeHolder: placeholder, matchOnDetail: true }
 		);
 		return picked?.location;
+	}
+
+	/** Find a VM by name, id, IP or MAC across all clusters; picking one reveals it and opens its details. */
+	async function searchVms(): Promise<void> {
+		await loadAll();
+		const all = manager.allVms();
+		if (!all.length) {
+			void vscode.window.showInformationMessage('No virtual machines to search.');
+			return;
+		}
+		type SearchItem = vscode.QuickPickItem & { location: VmLocation };
+		const quickPick = vscode.window.createQuickPick<SearchItem>();
+		quickPick.placeholder = 'Search by name, ID, IP address or MAC address';
+		quickPick.matchOnDescription = quickPick.matchOnDetail = false;
+		const items: SearchItem[] = all.map((location) => {
+			const { vm } = location;
+			const addresses = [...(vm.ipAddresses ?? []), ...(vm.macAddresses ?? [])];
+			return {
+				label: `${vm.displayId ? `#${vm.displayId}  ` : ''}${vm.name}`,
+				description: stateLabel(vm.state),
+				detail: [`${location.cluster.cluster.name} › ${location.node.name}`, ...addresses].join('  ·  '),
+				location
+			};
+		});
+		const filter = () => { quickPick.items = items.filter((item) => matchesQuery(quickPick.value, item.location.vm, [item.location.cluster.cluster.name, item.location.node.name])); };
+		quickPick.onDidChangeValue(filter);
+		filter();
+		const picked = await new Promise<SearchItem | undefined>((resolve) => {
+			quickPick.onDidAccept(() => resolve(quickPick.selectedItems[0]));
+			quickPick.onDidHide(() => resolve(undefined));
+			quickPick.show();
+		});
+		quickPick.dispose();
+		if (!picked) return;
+		await tree.reveal({ kind: 'vm', ...picked.location.ref }).then(undefined, () => undefined);
+		VmDashboardPanel.show(context.extensionUri, manager, picked.location.ref);
 	}
 
 	async function resolveCluster(arg: Arg, placeholder: string): Promise<string | undefined> {
@@ -613,6 +650,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register('vmm.createVm', (arg) => createVm(arg)),
 		register('vmm.attachRunningVm', (arg) => attachRunningVm(arg)),
 		register('vmm.importFromFolder', (arg) => importFromFolder(arg)),
+		register('vmm.searchVms', () => searchVms()),
 		register('vmm.openVmDashboard', async (arg) => {
 			const location = await resolveVm(arg, 'Select a virtual machine to show the details of');
 			if (location) VmDashboardPanel.show(context.extensionUri, manager, location.ref);

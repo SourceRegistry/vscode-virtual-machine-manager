@@ -415,6 +415,7 @@ export class QemuConnection implements ClusterConnection {
 					memoryMB: def.memoryMB,
 					uptimeSeconds: runtime ? Math.floor((Date.now() - runtime.startedAt) / 1000) : undefined,
 					description: def.notes,
+					macAddresses: def.mac ? [def.mac] : undefined,
 					os: `${guestArch(def) === 'x86_64' && isNative(guestArch(def)) ? '' : `${guestArch(def)}${isNative(guestArch(def)) ? '' : ' (emulated)'} · `}${def.firmware.toUpperCase()} · ${(guestArch(def) === 'aarch64' ? 'virtio' : def.diskBus).toUpperCase()}`,
 					consoles,
 					mediaInserted,

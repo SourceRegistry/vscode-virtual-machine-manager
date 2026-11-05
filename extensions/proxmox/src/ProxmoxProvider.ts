@@ -29,6 +29,15 @@ export function serialDevice(config: object): 'serial0' | 'serial1' | 'serial2' 
 	return (['serial0', 'serial1', 'serial2', 'serial3'] as const).find((key) => (config as Record<string, unknown>)[key] === 'socket');
 }
 
+/** MAC addresses from `net0..netN` (`virtio=BC:24:..,bridge=..` for a VM, `hwaddr=..` for a container). */
+export function macAddresses(config: object | undefined): string[] {
+	if (!config) return [];
+	return Object.entries(config as Record<string, unknown>)
+		.filter(([key]) => /^net\d+$/.test(key))
+		.flatMap(([, value]) => /\b((?:[0-9a-f]{2}:){5}[0-9a-f]{2})\b/i.exec(String(value))?.[1] ?? [])
+		.map((mac) => mac.toUpperCase());
+}
+
 const schema: FieldSchema[] = [
 	{ key: 'name', label: 'Name', type: 'text', required: true },
 	{ key: 'cores', label: 'CPU cores', type: 'number', default: 2, min: 1, max: 128, required: true },
@@ -192,7 +201,8 @@ export class ProxmoxConnection implements ClusterConnection {
 		return Promise.all([...vms.map((v) => ({ ...v, container: false })), ...containers.map((v) => ({ ...v, container: true }))]
 			.filter((v) => !v.template).map(async (v): Promise<VmInfo> => {
 				const config = v.container ? undefined : await api.qemu.vmid(v.vmid).config.get().then((c) => c as object, () => undefined);
-				return ({ id: String(v.vmid), displayId: String(v.vmid), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
+				const macs = macAddresses(v.container ? await api.lxc.id(v.vmid).config.get().then((c) => c as object, () => undefined) : config);
+				return ({ id: String(v.vmid), displayId: String(v.vmid), ...(macs.length ? { macAddresses: macs } : {}), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
 			}));
 	}
 	async getCreateSchema(node: string): Promise<FieldSchema[]> {

@@ -107,6 +107,12 @@
         "icon": "$(plug)"
       },
       {
+        "command": "vmm.searchVms",
+        "title": "Search Virtual Machines…",
+        "category": "VM",
+        "icon": "$(search)"
+      },
+      {
         "command": "vmm.refresh",
         "title": "Refresh",
         "category": "VM",
@@ -286,6 +292,10 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "vmm.searchVms",
+          "when": "vmm.hasVms"
+        },
+        {
           "command": "vmm.editCluster",
           "when": "vmm.hasClusters"
         },
@@ -406,9 +416,14 @@
           "group": "navigation@2"
         },
         {
+          "command": "vmm.searchVms",
+          "when": "view == vmm.clusters && vmm.hasVms",
+          "group": "navigation@3"
+        },
+        {
           "command": "vmm.refresh",
           "when": "view == vmm.clusters && vmm.hasClusters",
-          "group": "navigation@3"
+          "group": "navigation@4"
         },
         {
           "command": "vmm.installProviders",
