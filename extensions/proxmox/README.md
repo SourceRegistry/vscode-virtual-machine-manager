@@ -1,0 +1,22 @@
+# VM Manager – Proxmox VE
+
+Proxmox VE provider for [VM Manager](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager), using [pve-client](https://github.com/AlexanderSlaa/pve-client).
+
+Add a cluster of type **Proxmox VE**, enter the HTTPS origin (for example `https://pve.example.com:8006`), API token ID (`user@pve!vscode`), and token secret. The secret is saved in VS Code SecretStorage. TLS verification is enabled by default; the connection form allows disabling it for a trusted server with a self-signed certificate.
+
+Create a token under **Datacenter → Permissions → API Tokens** in Proxmox. Grant its user and token the permissions needed for the operations you intend to perform, scoped to the relevant nodes, VMs, storage and networks. Privilege-separated tokens need their own ACLs as well as the user's permissions. See the [Proxmox API documentation](https://pve.proxmox.com/wiki/Proxmox_VE_API).
+
+Supported:
+
+- Discover nodes, QEMU VMs and LXC containers across a cluster.
+- Create VMs with CPU, memory, a SCSI disk, a bridged VirtIO NIC and an optional existing ISO volume.
+- Edit name, CPU cores, memory, description and start-at-boot settings.
+- Start, shut down, reboot, force stop and reset, with task completion checks.
+- View CPU, memory, disk throughput, network throughput, reported storage usage and uptime in the VM dashboard. Samples combine per-guest status with a shared, briefly cached cluster resource snapshot. IOPS and disk latency are shown only when a provider supplies those counters.
+- Open graphical VNC and serial terminal consoles inside VS Code. Consoles use the configured API token, which needs effective VM.Console permission. Some older Proxmox versions reject tokens on console endpoints; the extension reports that rejection without prompting for a separate password. Serial terminals require a `serial0: socket` device and a guest OS configured for serial console output.
+- Open the VM in the Proxmox web UI (browser sign-in required).
+- Delete VMs and their owned disks. Disk-preserving deletion is rejected.
+
+LXC creation, templates, ISO upload, snapshots, migration and hardware passthrough are not included. Create ISO volumes through Proxmox first. Some settings require a guest restart; Proxmox manages pending changes. Long tasks may continue on the server after the extension's two-minute wait expires; inspect Proxmox task status before retrying.
+
+Build from the repository root with `node esbuild.mjs --only proxmox`. Package with `node scripts/package.mjs proxmox`.

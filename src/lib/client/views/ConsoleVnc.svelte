@@ -16,8 +16,10 @@
 	let scale = $state(boot.settings?.scaleViewport ?? true);
 	let rfb: RFB | undefined;
 	let channel: PostMessageChannel | undefined;
+	let password: string | undefined;
 
 	function createSession() {
+		password = undefined;
 		rfb?.disconnect();
 		channel = new PostMessageChannel();
 		rfb = new RFB(screen, channel, { shared: true });
@@ -26,6 +28,9 @@
 		rfb.focusOnClick = true;
 		rfb.background = 'var(--vscode-editor-background)';
 		const current = rfb;
+		rfb.addEventListener('credentialsrequired', () => {
+			if (rfb === current && password) current.sendCredentials({ password });
+		});
 		rfb.addEventListener('connect', () => {
 			if (rfb === current) current.focus();
 		});
@@ -63,6 +68,9 @@
 	onMount(() => {
 		const unsubscribe = onMessage((msg) => {
 			switch (msg.kind) {
+				case 'console.credentials':
+					password = msg.password;
+					break;
 				case 'console.status':
 					status = msg.status;
 					message = msg.message;

@@ -130,6 +130,7 @@ class ConsoleSession implements vscode.Disposable {
 				return;
 			}
 			this.stream = stream;
+			if (stream.credentials) await this.channel.post({ kind: 'console.credentials', password: stream.credentials.password });
 			stream.stream.on('data', (chunk: Buffer) => {
 				void this.channel.post({ kind: 'console.data', data: new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength) });
 			});

@@ -5,7 +5,7 @@
  *
  *   cluster;status=<status>;
  *   node;status=<status>;[create;][adopt;][import;]
- *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial, external, media, ejectable, details, edit, delete
+ *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial (only without a display), external, media, ejectable, details, edit, delete
  *
  * While a power operation runs, `state` is the transitional state and only the actions allowed
  * during it are listed (see operations.ts), plus `busy`.
@@ -31,8 +31,10 @@ export function vmContextValue(vm: VmInfo & { operation?: PowerAction }, caps: C
 		flags.push(...(running ? powers.filter((action) => allowedDuring(running, action)) : powers));
 		if (running) flags.push('busy');
 		const consoles = vm.consoles ?? caps.consoles;
-		if (consoles.includes('vnc') || consoles.includes('rdp') || caps.preview) flags.push('graphical');
-		if (consoles.includes('serial')) flags.push('serial');
+		const graphical = consoles.includes('vnc') || consoles.includes('rdp') || caps.preview;
+		if (graphical) flags.push('graphical');
+		// With a display the terminal is a detail (serial0…): offer it only when it is all there is.
+		if (consoles.includes('serial') && !graphical) flags.push('serial');
 		if (caps.external) flags.push('external');
 		if (caps.details || caps.stats) flags.push('details');
 		if (caps.media) {

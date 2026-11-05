@@ -12,6 +12,13 @@ const stats = (timestamp: number, disk: Partial<NonNullable<VmStats['disks']>[nu
 });
 
 describe('derivePoint', () => {
+	it('derives aggregate disk and network rates without inventing IOPS', () => {
+		const a: VmStats = { timestamp: 1000, uptimeSeconds: 20, diskIo: { readBytes: 100, writeBytes: 200 }, network: { rxBytes: 300, txBytes: 400 } };
+		const b: VmStats = { timestamp: 3000, uptimeSeconds: 22, diskIo: { readBytes: 500, writeBytes: 800 }, network: { rxBytes: 1100, txBytes: 1400 }, diskUsage: { usedBytes: 1024, capacityBytes: 4096 } };
+		expect(derivePoint(a, b)).toMatchObject({ readBps: 200, writeBps: 300, rxBps: 400, txBps: 500, diskUsedBytes: 1024, diskCapacityBytes: 4096, readIops: null, readLatencyMs: null, uptimeSeconds: 22 });
+		expect(derivePoint(a, { ...b, uptimeSeconds: 1 })).toMatchObject({ readBps: null, rxBps: null });
+		expect(derivePoint(b, a)).toMatchObject({ readBps: null, rxBps: null });
+	});
 	it('has no rates for the first sample', () => {
 		const p = derivePoint(undefined, stats(10_000));
 		expect(p).toMatchObject({ t: 10, cpu: 0.5, memoryUsedMB: 512, memoryMB: 2048, readBps: null, writeLatencyMs: null });

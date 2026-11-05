@@ -14,7 +14,7 @@
 Manage your virtual machines without leaving VS Code. See every machine at a glance, start and stop
 them, change their settings and work in their consoles in an editor tab, next to your code.
 
-* **One place for all your hypervisors**: Hyper-V and QEMU today, more to come.
+* **One place for all your hypervisors**: Hyper-V, QEMU and Proxmox VE.
 * **Consoles in the editor**: the machine's screen or its serial console in a tab, which you can
   drag to another window.
 * **Looks like VS Code**: everything follows your theme and uses the views, menus and command
@@ -28,6 +28,7 @@ them, change their settings and work in their consoles in an editor tab, next to
    | Provider | For |
    |---|---|
    | [VM Manager – Hyper-V](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-hyperv) | Hyper-V on this Windows machine |
+   | VM Manager – Proxmox VE | Remote Proxmox VE clusters over HTTPS |
    | [VM Manager – QEMU](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-qemu) | QEMU machines on Windows, Linux and macOS |
 
    Proxmox VE, XCP-ng, VMware and Nutanix are planned.

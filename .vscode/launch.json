@@ -8,7 +8,8 @@
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
         "--extensionDevelopmentPath=${workspaceFolder}/extensions/hyperv",
-        "--extensionDevelopmentPath=${workspaceFolder}/extensions/qemu"
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/qemu",
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/proxmox"
       ],
       "outFiles": ["${workspaceFolder}/dist/**/*.js", "${workspaceFolder}/extensions/*/dist/**/*.js"],
       "preLaunchTask": "build"

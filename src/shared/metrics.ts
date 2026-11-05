@@ -21,6 +21,11 @@ export interface MetricPoint {
 	/** Average service time of the requests completed in the interval. */
 	readLatencyMs: number | null;
 	writeLatencyMs: number | null;
+	rxBps: number | null;
+	txBps: number | null;
+	diskUsedBytes: number | null;
+	diskCapacityBytes: number | null;
+	uptimeSeconds: number | null;
 }
 
 interface DiskTotals {
@@ -62,11 +67,23 @@ export function derivePoint(previous: VmStats | undefined, current: VmStats): Me
 		readIops: null,
 		writeIops: null,
 		readLatencyMs: null,
-		writeLatencyMs: null
+		writeLatencyMs: null,
+		rxBps: null,
+		txBps: null,
+		diskUsedBytes: current.diskUsage?.usedBytes ?? null,
+		diskCapacityBytes: current.diskUsage?.capacityBytes ?? null,
+		uptimeSeconds: current.uptimeSeconds ?? null
 	};
 	const before = diskTotals(previous?.disks);
 	const now = diskTotals(current.disks);
 	const seconds = previous ? (current.timestamp - previous.timestamp) / 1000 : 0;
+	const restarted = previous?.uptimeSeconds !== undefined && current.uptimeSeconds !== undefined && current.uptimeSeconds < previous.uptimeSeconds;
+	if (seconds <= 0 || restarted) return point;
+	const rate = (before: number | undefined, now: number | undefined) => before !== undefined && now !== undefined && now >= before ? (now - before) / seconds : null;
+	point.rxBps = rate(previous?.network?.rxBytes, current.network?.rxBytes);
+	point.txBps = rate(previous?.network?.txBytes, current.network?.txBytes);
+	point.readBps = rate(previous?.diskIo?.readBytes, current.diskIo?.readBytes);
+	point.writeBps = rate(previous?.diskIo?.writeBytes, current.diskIo?.writeBytes);
 	if (!before || !now || seconds <= 0) return point;
 
 	const dRb = now.readBytes - before.readBytes;

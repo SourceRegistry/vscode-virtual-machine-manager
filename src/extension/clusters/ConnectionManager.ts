@@ -192,7 +192,7 @@ export class ConnectionManager implements vscode.Disposable {
 						if (node.status === 'offline') return { ...node, vms: [] };
 						try {
 							const vms = await connection.listVms(node.id);
-							vms.sort((a, b) => a.name.localeCompare(b.name));
+							vms.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 							return { ...node, vms };
 						} catch (error) {
 							log.warn(`Listing VMs of ${node.name} failed: ${errorMessage(error)}`);
@@ -200,7 +200,9 @@ export class ConnectionManager implements vscode.Disposable {
 						}
 					})
 				);
-				rt.nodes = snapshots;
+				// Providers may return nodes in a different order on every poll.
+				// Sort before publishing so the tree and overview keep the same order.
+				rt.nodes = snapshots.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 				this.applyOperations(rt.cluster.id, false);
 				rt.loaded = true;
 				if (rt.status !== 'connected') this.setStatus(rt, 'connected');

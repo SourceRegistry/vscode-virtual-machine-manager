@@ -1,0 +1,47 @@
+{
+  "name": "vm-manager-proxmox",
+  "displayName": "VM Manager – Proxmox VE",
+  "description": "Manage Proxmox VE virtual machines, nodes, power actions and metrics from VS Code.",
+  "version": "0.2.0",
+  "publisher": "sourceregistry",
+  "icon": "media/icon.png",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SourceRegistry/vscode-virtual-machine-manager.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "proxmox",
+    "virtual machine",
+    "vm-manager-provider"
+  ],
+  "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "sourceregistry.vm-manager"
+  ],
+  "activationEvents": [],
+  "contributes": {
+    "vmManager.providers": [
+      {
+        "id": "proxmox",
+        "displayName": "Proxmox VE",
+        "description": "Remote Proxmox VE clusters over HTTPS"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "cd ../.. && node esbuild.mjs --only proxmox"
+  },
+  "dependencies": {
+    "@vmm/sdk": "*",
+    "pve-client": "^1.5.0",
+    "ws": "^8.22.1"
+  }
+}

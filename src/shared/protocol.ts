@@ -173,6 +173,7 @@ export type HostToWebview =
 	| { kind: 'event'; name: 'vm'; payload: VmInfo | undefined }
 	| { kind: 'console.status'; status: ConsoleStatus; message?: string }
 	| { kind: 'console.data'; data: Uint8Array }
+	| { kind: 'console.credentials'; password: string }
 	| { kind: 'console.command'; command: 'ctrlAltDel' | 'toggleScaling' }
 	/** Type `text` as key presses (consoles without a clipboard channel). */
 	| { kind: 'console.type'; text: string }

@@ -20,6 +20,7 @@
 	import { OPERATION_LABEL, allowedDuring } from '../../../shared/operations';
 	import { formatPercent } from '../../../shared/metrics';
 	import { originLabel } from '../../../shared/origin';
+	import { primaryAction } from '../../../shared/primaryAction';
 	import {
 		eligibleFor,
 		filterRows,
@@ -450,8 +451,9 @@
 											{#if vm.operation}<span class="muted">{OPERATION_LABEL[vm.operation]}</span>{/if}
 										</td>
 										<td>
-											{#if caps?.details || caps?.stats}
-												<button type="button" class="link" onclick={() => run('vmm.openVmDashboard', target)} title="Show details">{vm.name}</button>
+											{#if primaryAction(vm, caps)}
+												{@const primary = primaryAction(vm, caps)!}
+												<button type="button" class="link" onclick={() => run(primary, target)} title={primary === 'vmm.connectSerial' ? 'Open terminal' : 'Show details'}>{vm.name}</button>
 											{:else}
 												<strong>{vm.name}</strong>
 											{/if}

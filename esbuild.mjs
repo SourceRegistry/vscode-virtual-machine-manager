@@ -3,7 +3,7 @@
 //
 //   node esbuild.mjs                 build all
 //   node esbuild.mjs --watch         rebuild on change
-//   node esbuild.mjs --only hyperv   build one target (core | hyperv | qemu)
+//   node esbuild.mjs --only hyperv   build one target (core | hyperv | qemu | proxmox)
 import * as esbuild from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -17,6 +17,7 @@ const production = !watch && process.env.NODE_ENV !== 'development';
 const targets = {
 	core: { entry: 'src/extension/extension.ts', out: 'dist/extension.js' },
 	hyperv: { entry: 'extensions/hyperv/src/extension.ts', out: 'extensions/hyperv/dist/extension.js' },
+	proxmox: { entry: 'extensions/proxmox/src/extension.ts', out: 'extensions/proxmox/dist/extension.js' },
 	qemu: { entry: 'extensions/qemu/src/extension.ts', out: 'extensions/qemu/dist/extension.js' }
 };
 

@@ -76,6 +76,8 @@
 	let previous: VmStats | undefined;
 
 	const running = $derived(vm?.state === 'running');
+	const availableConsoles = $derived(vm?.consoles ?? caps?.consoles ?? []);
+	const hasDisplay = $derived(availableConsoles.includes('vnc') || availableConsoles.includes('rdp') || !!caps?.preview);
 	const latest = $derived(points[points.length - 1]);
 	const ips = $derived(
 		[...(vm?.ipAddresses ?? []), ...(details?.nics.flatMap((n) => n.ipAddresses ?? []) ?? [])].filter((ip, i, all) => all.indexOf(ip) === i)
@@ -83,6 +85,12 @@
 
 	const cpuData = $derived(column(points, ['cpu']));
 	const memoryData = $derived(column(points, ['memoryUsedMB']));
+	const networkData = $derived(column(points, ['rxBps', 'txBps']));
+	const diskUsageData = $derived(column(points, ['diskUsedBytes']));
+	const hasNetworkStats = $derived(points.some((p) => p.rxBps !== null || p.txBps !== null));
+	const hasDiskUsage = $derived(points.some((p) => p.diskUsedBytes !== null));
+	const hasIops = $derived(points.some((p) => p.readIops !== null || p.writeIops !== null));
+	const hasLatency = $derived(points.some((p) => p.readLatencyMs !== null || p.writeLatencyMs !== null));
 	const throughputData = $derived(column(points, ['readBps', 'writeBps']));
 	const iopsData = $derived(column(points, ['readIops', 'writeIops']));
 	const latencyData = $derived(column(points, ['readLatencyMs', 'writeLatencyMs']));
@@ -240,8 +248,11 @@
 				{#if vm.state !== 'stopped'}
 					<Button transparent onclick={() => run('vmm.stop')}><Icon icon="x-octagon" margin="right" />Power off</Button>
 				{/if}
-				{#if !vm.consoles || vm.consoles.length}
-					<Button transparent onclick={() => run('vmm.connectGraphical')}><Icon icon="display" margin="right" />Console</Button>
+				{#if hasDisplay}
+					<Button transparent disabled={!running} onclick={() => run('vmm.connectGraphical')}><Icon icon="display" margin="right" />Display</Button>
+				{/if}
+				{#if availableConsoles.includes('serial')}
+					<Button transparent disabled={!running} onclick={() => run('vmm.connectSerial')}><Icon icon="terminal" margin="right" />Terminal</Button>
 				{/if}
 				<Button transparent onclick={() => run('vmm.editVm')}><Icon icon="gear" margin="right" />Settings</Button>
 				{#if actionError}<span class="error">{actionError}</span>{/if}
@@ -251,9 +262,11 @@
 
 		<Section>
 			<div class="tiles">
-				<div class="tile"><span class="k">Uptime</span><span class="v">{running ? formatUptime(vm.uptimeSeconds) : '–'}</span></div>
+				<div class="tile"><span class="k">Uptime</span><span class="v">{running ? formatUptime(latest?.uptimeSeconds ?? vm.uptimeSeconds) : '–'}</span></div>
 				<div class="tile"><span class="k">Processors</span><span class="v">{vm.cpus ?? '–'}</span></div>
 				<div class="tile"><span class="k">Memory</span><span class="v">{formatMemory(vm.memoryMB)}</span></div>
+				<div class="tile"><span class="k">Network I/O</span><span class="v">{latest?.rxBps != null ? `${formatRate(latest.rxBps)} ↓ ${formatRate(latest.txBps)} ↑` : '–'}</span></div>
+				<div class="tile"><span class="k">Storage</span><span class="v">{formatBytes(latest?.diskUsedBytes)} / {formatBytes(latest?.diskCapacityBytes)}</span></div>
 				<div class="tile"><span class="k">IP address</span><span class="v">{ips[0] ?? '–'}</span></div>
 				<div class="tile"><span class="k">CPU</span><span class="v">{running ? formatPercent(latest?.cpu) : '–'}</span></div>
 				<div class="tile">
@@ -271,6 +284,12 @@
 			{:else}
 				{#if statsError}<p class="error">Statistics unavailable: {statsError}</p>{/if}
 				<div class="charts">
+					{#if hasNetworkStats}
+						<Card><LineChart title="Network throughput" series={[{ key: 'rx', label: 'Received' }, { key: 'tx', label: 'Sent' }]} data={networkData} format={formatRate} yFloor={64 * 1024} binary /></Card>
+					{/if}
+					{#if hasDiskUsage}
+						<Card><LineChart title="Storage used" series={[{ key: 'storage', label: 'Used' }]} data={diskUsageData} format={formatBytes} yMax={latest?.diskCapacityBytes ?? undefined} binary /></Card>
+					{/if}
 					<Card>
 						<LineChart title="CPU" subtitle="of {vm.cpus ?? '?'} vCPU" series={[{ key: 'cpu', label: 'Usage' }]} data={cpuData} format={formatPercent} yMax={1} />
 					</Card>
@@ -296,6 +315,8 @@
 								binary
 							/>
 						</Card>
+					{/if}
+					{#if hasIops}
 						<Card>
 							<LineChart
 								title="Disk operations"
@@ -305,6 +326,8 @@
 								yFloor={10}
 							/>
 						</Card>
+					{/if}
+					{#if hasLatency}
 						<Card>
 							<LineChart
 								title="Disk latency"
@@ -326,7 +349,7 @@
 					<div class="scroll">
 						<table class="grid">
 							<thead>
-								<tr><th>Time</th><th>CPU</th><th>Memory</th><th>Read</th><th>Write</th><th>Read IOPS</th><th>Write IOPS</th><th>Read latency</th><th>Write latency</th></tr>
+								<tr><th>Time</th><th>CPU</th><th>Memory</th><th>Read</th><th>Write</th><th>Read IOPS</th><th>Write IOPS</th><th>Read latency</th><th>Write latency</th><th>Network in</th><th>Network out</th><th>Storage used</th></tr>
 							</thead>
 							<tbody>
 								{#each rows as p (p.t)}
@@ -336,6 +359,7 @@
 										<td>{formatRate(p.readBps)}</td><td>{formatRate(p.writeBps)}</td>
 										<td>{formatIops(p.readIops)}</td><td>{formatIops(p.writeIops)}</td>
 										<td>{formatLatency(p.readLatencyMs)}</td><td>{formatLatency(p.writeLatencyMs)}</td>
+										<td>{formatRate(p.rxBps)}</td><td>{formatRate(p.txBps)}</td><td>{formatBytes(p.diskUsedBytes)}</td>
 									</tr>
 								{/each}
 							</tbody>

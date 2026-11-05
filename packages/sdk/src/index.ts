@@ -301,6 +301,11 @@ export interface DiskStats {
  */
 export interface VmStats {
 	timestamp: number;
+	uptimeSeconds?: number;
+	/** Aggregate cumulative disk byte counters when per-device I/O is unavailable. */
+	diskIo?: { readBytes: number; writeBytes: number };
+	/** Reported guest storage usage; may be unavailable for QEMU guests. */
+	diskUsage?: { usedBytes?: number; capacityBytes?: number };
 	/** 0..1 of the CPU allotted to the VM. */
 	cpuUsage?: number;
 	memoryUsedMB?: number;
@@ -347,6 +352,8 @@ export interface DeleteOptions {
  */
 export interface ConsoleStream {
 	stream: Duplex;
+	/** Ephemeral VNC proxy credentials; never persisted by the core. */
+	credentials?: { password: string };
 	dispose(): void;
 }
 
