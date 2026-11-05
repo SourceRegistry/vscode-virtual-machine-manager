@@ -189,6 +189,8 @@
 		return {
 			graphical: kinds.includes('vnc') || !!caps?.preview || !!caps?.external,
 			serial: kinds.includes('serial'),
+			// Only a terminal (an LXC container): the quick action opens it. A display always wins.
+			terminalOnly: kinds.includes('serial') && !kinds.includes('vnc') && !kinds.includes('rdp') && !caps?.preview,
 			external: !!caps?.external
 		};
 	}
@@ -471,7 +473,11 @@
 										<td><span class="mono">{vm.ipAddresses?.join(', ') || '–'}</span></td>
 										<td class="actions">
 											<Flexbox justify="flex-end" align="center" gap="0.25rem">
-												{#if vm.state === 'running' && consoles.graphical}
+												{#if vm.state === 'running' && consoles.terminalOnly}
+													<Button size="sm" transparent title="Open terminal" aria-label="Open terminal" onclick={() => run('vmm.connectSerial', target)}>
+														<Icon icon="terminal" />
+													</Button>
+												{:else if vm.state === 'running' && consoles.graphical}
 													<Button size="sm" transparent title="Connect" aria-label="Connect graphical console" onclick={() => run('vmm.connectGraphical', target)}>
 														<Icon icon="display" />
 													</Button>

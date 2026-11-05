@@ -166,6 +166,24 @@ describe('tree inline eject', () => {
 	});
 });
 
+describe('tree inline console action', () => {
+	const noPreview: Capabilities = { ...caps, consoles: ['vnc', 'serial'], preview: false };
+	const inline = (v: VmInfo) => commandsFor('view/item/context', vmContextValue(v, noPreview), { inline: true });
+
+	it('shows the terminal in place of the display for a resource that only has a terminal', () => {
+		expect(inline({ ...vm('running'), consoles: ['serial'] })).toEqual(['vmm.connectSerial', 'vmm.shutdown']);
+	});
+
+	it('lets the display win when both exist', () => {
+		expect(inline({ ...vm('running'), consoles: ['vnc', 'serial'] })).toEqual(['vmm.connectGraphical', 'vmm.shutdown']);
+	});
+
+	it('shows nothing for a stopped terminal-only resource, and still offers it in the context menu', () => {
+		expect(inline({ ...vm('stopped'), consoles: ['serial'] })).toEqual(['vmm.start']);
+		expect(commandsFor('view/item/context', vmContextValue({ ...vm('running'), consoles: ['serial'] }, noPreview))).toContain('vmm.connectSerial');
+	});
+});
+
 describe('tree inline actions', () => {
 	it('shows start on stopped and connect/shutdown on running VMs', () => {
 		expect(commandsFor('view/item/context', vmContextValue(vm('saved'), caps), { inline: true })).toEqual(['vmm.start']);

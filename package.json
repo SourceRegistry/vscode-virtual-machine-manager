@@ -488,6 +488,11 @@
           "group": "inline@2"
         },
         {
+          "command": "vmm.connectSerial",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bterminal;/",
+          "group": "inline@2"
+        },
+        {
           "command": "vmm.shutdown",
           "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bshutdown;/",
           "group": "inline@3"
