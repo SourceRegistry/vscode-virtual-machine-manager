@@ -3,6 +3,7 @@
 	import Button from '#lib/client-lib/components/actions/Button.svelte';
 	import Icon from '#lib/client-lib/components/icons/Icon.svelte';
 	import type { FieldSchema, FieldValues } from '@vmm/sdk';
+	import { toasts } from '#lib/client-lib/components/toast/index.js';
 	import { request } from '../rpc/bridge';
 
 	/**
@@ -12,8 +13,26 @@
 	let {
 		fields,
 		values = $bindable(),
-		disabled = false
-	}: { fields: FieldSchema[]; values: FieldValues; disabled?: boolean } = $props();
+		disabled = false,
+		onejected
+	}: { fields: FieldSchema[]; values: FieldValues; disabled?: boolean; onejected?: (key: string) => void } = $props();
+
+	let ejecting = $state<string | undefined>();
+
+	/** Ejects at once (it is a live action, not a form edit) and clears the field. */
+	async function eject(field: FieldSchema) {
+		if (!field.mediaDevice) return;
+		ejecting = field.key;
+		try {
+			await request('ejectMedia', { deviceId: field.mediaDevice });
+			values[field.key] = undefined;
+			onejected?.(field.key);
+		} catch (error) {
+			toasts.push({ message: (error as Error).message, icon: 'exclamation-triangle-fill', variant: 'danger' });
+		} finally {
+			ejecting = undefined;
+		}
+	}
 
 	function label(field: FieldSchema): string {
 		return field.unit ? `${field.label} (${field.unit})` : field.label;
@@ -92,6 +111,19 @@
 						>
 							<Icon icon="folder2-open" />
 						</Button>
+						{#if field.mediaDevice && values[field.key]}
+							<Button
+								type="button"
+								class="eject"
+								transparent
+								disabled={disabled || ejecting === field.key}
+								title="Eject"
+								aria-label="Eject {field.label}"
+								onclick={() => eject(field)}
+							>
+								<Icon icon="eject-fill" />
+							</Button>
+						{/if}
 					{/if}
 				{/snippet}
 			</Input>
@@ -120,7 +152,7 @@
 	/* Label, description and messages span the row; the input and the browse button share one. */
 	.path-field :global(.form-input) {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr) auto auto;
 		column-gap: 0.25rem;
 		align-items: center;
 	}
@@ -135,5 +167,9 @@
 
 	.path-field :global(.form-input > .browse) {
 		grid-column: 2;
+	}
+
+	.path-field :global(.form-input > .eject) {
+		grid-column: 3;
 	}
 </style>

@@ -58,6 +58,12 @@ export class VmSettingsPanel implements vscode.Disposable {
 				if (name) panel.title = `${name} — Settings`;
 				return { message: 'Settings saved' };
 			},
+			ejectMedia: async ({ deviceId }) => {
+				const connection = await manager.connect(ref.clusterId);
+				if (!connection.ejectMedia) throw new Error('This hypervisor cannot eject media');
+				await connection.ejectMedia(ref.nodeId, ref.vmId, deviceId);
+				await manager.refresh(ref.clusterId);
+			},
 			browse: async ({ directory, title, current, filters }) => {
 				const uris = await vscode.window.showOpenDialog({
 					canSelectFiles: !directory,

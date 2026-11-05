@@ -54,6 +54,13 @@
 		}
 	}
 
+	/** An eject already happened on the host, so it is no longer an unsaved change. */
+	function markEjected(key: string) {
+		const baseline = JSON.parse(saved) as FieldValues;
+		delete baseline[key];
+		saved = JSON.stringify(baseline);
+	}
+
 	function revert() {
 		values = { ...JSON.parse(saved), ...Object.fromEntries(schema.filter((f) => f.readonly).map((f) => [f.key, values[f.key]])) };
 	}
@@ -110,7 +117,7 @@
 			{#each groups as [group, fields] (group)}
 				<Section title={group}>
 					<Card>
-						<SchemaForm {fields} bind:values disabled={saving} />
+						<SchemaForm {fields} bind:values disabled={saving} onejected={markEjected} />
 					</Card>
 				</Section>
 			{/each}

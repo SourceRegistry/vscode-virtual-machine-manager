@@ -76,6 +76,11 @@ export interface FieldSchema {
 	readonly?: boolean;
 	/** Section heading used by the webview settings editor. */
 	group?: string;
+	/**
+	 * `file` fields only: the id of the CD/DVD drive (`DiskDevice.id`) this field mounts. The settings
+	 * editor then offers an eject button while the field holds an image.
+	 */
+	mediaDevice?: string;
 	/** Hide in the quick (native) create flow; still shown in the full settings editor. */
 	advanced?: boolean;
 }

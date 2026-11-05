@@ -427,7 +427,7 @@ export class QemuConnection implements ClusterConnection {
 			{ key: 'cpuModel', label: 'CPU model', type: 'text', required: true, group: 'Hardware', description: 'QEMU -cpu value, e.g. max, host, qemu64' },
 			{ key: 'disks', label: 'Disks', type: 'text', readonly: true, group: 'Storage' },
 			{ key: 'diskBus', label: 'Disk controller', type: 'select', required: true, options: DISK_BUS_OPTIONS, group: 'Storage', description: restart },
-			{ key: 'cdrom', label: 'CD/DVD (ISO)', type: 'file', filters: { 'Disk images': ['iso', 'img'] }, group: 'Storage', description: restart },
+			{ key: 'cdrom', label: 'CD/DVD (ISO)', type: 'file', filters: { 'Disk images': ['iso', 'img'] }, mediaDevice: 'cd0', group: 'Storage' },
 			{ key: 'nic', label: 'Network adapter', type: 'select', required: true, options: NIC_OPTIONS, group: 'Network', description: restart },
 			{ key: 'vga', label: 'Display adapter', type: 'select', required: true, options: VGA_OPTIONS, group: 'Display', description: restart },
 			{ key: 'serial', label: 'Serial console', type: 'checkbox', group: 'Display', description: restart },

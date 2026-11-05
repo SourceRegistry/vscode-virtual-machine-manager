@@ -106,6 +106,7 @@ export interface RpcMethods {
 	// vm settings
 	getConfig: { params: void; result: VmConfig & { vm?: VmInfo } };
 	save: { params: { values: FieldValues }; result: { message: string } };
+	ejectMedia: { params: { deviceId: string }; result: void };
 	browse: {
 		params: { directory: boolean; title: string; current?: string; filters?: Record<string, string[]> };
 		result: string | undefined;
