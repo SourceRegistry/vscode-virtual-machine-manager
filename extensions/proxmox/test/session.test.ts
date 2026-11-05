@@ -46,6 +46,16 @@ describe('Proxmox session store', () => {
 		expect(v.peek()).toBeUndefined();
 	});
 
+	it('never reuses, and prunes, a session left by another VS Code run', async () => {
+		const v = vault();
+		await new SessionStore(v, 'run-1').set('c', base, fresh);
+		const next = new SessionStore(v, 'run-2');
+		expect(await next.get('c', base, 'u@pam')).toBeUndefined();
+		expect(await new SessionStore(v, 'run-1').get('c', base, 'u@pam')).toMatchObject({ ticket: 'T' });
+		await next.prune();
+		expect(v.peek()).toBeUndefined();
+	});
+
 	it('never holds a password', async () => {
 		const v = vault();
 		await new SessionStore(v).set('c', base, fresh);
@@ -111,7 +121,11 @@ describe('Proxmox connection options by method', () => {
 	});
 	it('accepts a session without a saved password', () => {
 		expect(connectionOptions(cluster({ authMethod: 'password', username: 'root' }), {})).toMatchObject({ method: 'password', username: 'root@pam', password: undefined });
-		expect(connectionOptions(cluster({ authMethod: 'password', username: 'a', realm: 'ldap' }), { password: 'p' })).toMatchObject({ username: 'a@ldap', password: 'p' });
+		expect(connectionOptions(cluster({ authMethod: 'password', username: 'a', realm: 'ldap', rememberPassword: true }), { password: 'p' })).toMatchObject({ username: 'a@ldap', password: 'p' });
+	});
+	it('ignores a stored password unless the cluster remembers it', () => {
+		expect(connectionOptions(cluster({ authMethod: 'password', username: 'a' }), { password: 'old' })).toMatchObject({ password: undefined });
+		expect(connectionOptions(cluster({ authMethod: 'password', username: 'a', rememberPassword: false }), { password: 'old' })).toMatchObject({ password: undefined });
 		expect(() => connectionOptions(cluster({ authMethod: 'password' }), {})).toThrow();
 	});
 	it('validates the OpenID realm and port', () => {

@@ -50,7 +50,7 @@
 	}
 </script>
 
-{#each fields.filter((f) => isFieldVisible(f, values)) as field (field.key)}
+{#each fields.filter((f) => isFieldVisible(f, values, fields)) as field (field.key)}
 	{#if field.type === 'select'}
 		<Input
 			type="select"

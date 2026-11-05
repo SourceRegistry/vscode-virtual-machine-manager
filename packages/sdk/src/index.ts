@@ -88,8 +88,11 @@ export interface FieldSchema {
 }
 
 /** Whether a field applies given the current values. Hidden fields are neither asked nor validated. */
-export function isFieldVisible(field: FieldSchema, values: FieldValues): boolean {
+export function isFieldVisible(field: FieldSchema, values: FieldValues, schema?: FieldSchema[], depth = 0): boolean {
 	if (!field.showWhen) return true;
+	// With the schema at hand a field also needs the field that controls it to apply (a chain of conditions).
+	const controller = schema?.find((f) => f.key === field.showWhen!.key);
+	if (controller && depth < 8 && !isFieldVisible(controller, values, schema, depth + 1)) return false;
 	const current = values[field.showWhen.key] ?? field.showWhen.default;
 	const wanted = field.showWhen.equals;
 	return Array.isArray(wanted) ? wanted.includes(current) : wanted === current;
@@ -564,7 +567,7 @@ export function validateValue(field: FieldSchema, value: FieldValue): string | u
 
 export function validateValues(schema: FieldSchema[], values: FieldValues): { key: string; message: string } | undefined {
 	for (const field of schema) {
-		if (!isFieldVisible(field, values)) continue;
+		if (!isFieldVisible(field, values, schema)) continue;
 		const message = validateValue(field, values[field.key]);
 		if (message) return { key: field.key, message };
 	}

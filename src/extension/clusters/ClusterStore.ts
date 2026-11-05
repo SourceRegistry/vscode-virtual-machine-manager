@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
-import type { ClusterConfig, FieldSchema, FieldValues, SecretBag } from '@vmm/sdk';
+import { isFieldVisible, type ClusterConfig, type FieldSchema, type FieldValues, type SecretBag } from '@vmm/sdk';
 import { CONSOLE_CREDENTIALS_KEY, secretStorageKey, splitSecrets } from './secrets';
 
 export { secretStorageKey, splitSecrets };
@@ -53,11 +53,14 @@ export class ClusterStore implements vscode.Disposable {
 		const existing = this.get(id);
 		if (!existing) throw new Error('Cluster not found');
 		const { config, secrets } = splitSecrets(input.schema, input.values);
+		// A secret whose field no longer applies (e.g. a saved password after "remember" was turned off) is deleted.
+		const applies = new Set(input.schema.filter((f) => isFieldVisible(f, input.values, input.schema)).map((f) => f.key));
 		const keep = Object.entries(secrets)
 			.filter(([, v]) => v === undefined)
 			.map(([k]) => k)
-			.filter((k) => existing.secretKeys.includes(k));
+			.filter((k) => existing.secretKeys.includes(k) && applies.has(k));
 		const secretKeys = await this.writeSecrets(id, secrets, keep);
+		for (const key of existing.secretKeys) if (!secretKeys.includes(key)) await this.context.secrets.delete(secretStorageKey(id, key));
 		const updated: StoredCluster = { ...existing, name: input.name, config, secretKeys };
 		await this.save(this.all().map((c) => (c.id === id ? updated : c)));
 		return updated;

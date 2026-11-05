@@ -76,4 +76,15 @@ describe('conditional fields', () => {
 		expect(validateValues([method, token, login], { authMethod: 'password', user: 'root' })).toBeUndefined();
 		expect(validateValues([method, token, login], { authMethod: 'password' })?.key).toBe('user');
 	});
+
+	it('hides a field whose controlling field is itself hidden', () => {
+		const remember = { key: 'remember', label: 'Remember', type: 'checkbox' as const, showWhen: { key: 'authMethod', equals: 'password' } };
+		const pass = { key: 'pass', label: 'Pass', type: 'password' as const, secret: true, showWhen: { key: 'remember', equals: true } };
+		const schema = [method, remember, pass];
+		expect(isFieldVisible(pass, { authMethod: 'password', remember: true }, schema)).toBe(true);
+		expect(isFieldVisible(pass, { authMethod: 'token', remember: true }, schema)).toBe(false);
+		expect(isFieldVisible(pass, { authMethod: 'password', remember: false }, schema)).toBe(false);
+		expect(splitSecrets(schema, { authMethod: 'token', remember: true, pass: 'x' })).toEqual({ config: { authMethod: 'token' }, secrets: { pass: undefined } });
+		expect(splitSecrets(schema, { authMethod: 'password', remember: true, pass: 'x' }).secrets).toEqual({ pass: 'x' });
+	});
 });

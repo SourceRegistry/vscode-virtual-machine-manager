@@ -115,22 +115,24 @@ export interface SessionVault {
 	write(value: string | undefined): PromiseLike<void>;
 }
 
-interface StoredEntry extends Session { baseUrl: string }
+interface StoredEntry extends Session { baseUrl: string; /** The VS Code launch that created it. */ launch?: string }
 
 /** Persists live sessions (never passwords) so a reconnect or reload does not ask for the second factor again. */
 export class SessionStore {
-	constructor(private readonly vault: SessionVault) {}
+	/** `launch` identifies this VS Code run: a session left by another run (a crash, a killed window) is never reused. */
+	constructor(private readonly vault: SessionVault, private readonly launch?: string) {}
+	private mine(entry: StoredEntry): boolean { return !this.launch || entry.launch === this.launch; }
 	private async all(): Promise<Record<string, StoredEntry>> {
 		try { return JSON.parse((await this.vault.read()) ?? '{}') as Record<string, StoredEntry>; } catch { return {}; }
 	}
 	async get(clusterId: string, baseUrl: string, username?: string): Promise<Session | undefined> {
 		const entry = (await this.all())[clusterId];
-		if (!entry || entry.baseUrl !== baseUrl || (username && entry.username.toLowerCase() !== username.toLowerCase()) || !sessionFresh(entry)) return undefined;
+		if (!entry || entry.baseUrl !== baseUrl || (username && entry.username.toLowerCase() !== username.toLowerCase()) || !sessionFresh(entry) || !this.mine(entry)) return undefined;
 		return { ticket: entry.ticket, csrf: entry.csrf, username: entry.username, issued: entry.issued };
 	}
 	async set(clusterId: string, baseUrl: string, session: Session): Promise<void> {
 		const all = await this.all();
-		all[clusterId] = { ...session, baseUrl };
+		all[clusterId] = { ...session, baseUrl, launch: this.launch };
 		await this.vault.write(JSON.stringify(all));
 	}
 	async remove(clusterId: string): Promise<void> {
@@ -144,7 +146,7 @@ export class SessionStore {
 	/** Drops sessions that can no longer work (left behind by a crash). */
 	async prune(): Promise<void> {
 		const all = await this.all();
-		const kept = Object.fromEntries(Object.entries(all).filter(([, entry]) => sessionFresh(entry)));
+		const kept = Object.fromEntries(Object.entries(all).filter(([, entry]) => sessionFresh(entry) && this.mine(entry)));
 		if (Object.keys(kept).length !== Object.keys(all).length) await this.vault.write(Object.keys(kept).length ? JSON.stringify(kept) : undefined);
 	}
 }

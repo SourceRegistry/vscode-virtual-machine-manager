@@ -15,8 +15,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	const store = new SessionStore({
 		read: () => context.secrets.get(SESSION_SECRET),
 		write: async (value) => { if (value === undefined) await context.secrets.delete(SESSION_SECRET); else await context.secrets.store(SESSION_SECRET, value); }
-	});
-	// A crash can leave sessions behind; drop the ones that can no longer work.
+	}, vscode.env.sessionId);
+	// A crash or a killed window can leave sessions behind; drop those of earlier runs.
 	await store.prune().catch(() => {});
 	provider = new ProxmoxProvider({
 		store,

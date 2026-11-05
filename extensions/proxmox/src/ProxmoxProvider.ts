@@ -65,7 +65,7 @@ export function connectionOptions(cluster: ClusterConfig, secrets: SecretBag): C
 		const name = String(cluster.config.username ?? '').trim();
 		if (!name || /\s/.test(name)) throw new ProviderError('Provide a user name, for example root or alice@pve.', 'invalid');
 		if (secrets.password && /[\r\n]/.test(secrets.password)) throw new ProviderError('Invalid password.', 'invalid');
-		return { ...common, method, username: qualifiedUser(name, String(cluster.config.realm ?? '')), password: secrets.password || undefined };
+		return { ...common, method, username: qualifiedUser(name, String(cluster.config.realm ?? '')), password: cluster.config.rememberPassword === true ? secrets.password || undefined : undefined };
 	}
 	if (method === 'openid') {
 		const realm = String(cluster.config.realm ?? '').trim();
@@ -96,7 +96,8 @@ export class ProxmoxProvider implements HypervisorProvider {
 		{ key: 'tokenSecret', showWhen: { key: 'authMethod', default: 'token', equals: 'token' }, label: 'API token secret', type: 'password', secret: true, group: 'API token' },
 		{ key: 'username', showWhen: { key: 'authMethod', default: 'token', equals: 'password' }, label: 'User name', type: 'text', placeholder: 'root or alice@ldap', description: 'Add @realm, or set the realm below.', group: 'Session' },
 		{ key: 'realm', showWhen: { key: 'authMethod', default: 'token', equals: ['password', 'openid'] }, label: 'Realm', type: 'text', placeholder: 'pam', description: 'Default pam. For OpenID: the name of the OpenID realm.', group: 'Session' },
-		{ key: 'password', showWhen: { key: 'authMethod', default: 'token', equals: 'password' }, label: 'Password', type: 'password', secret: true, description: 'Optional. Leave empty to be asked at every sign-in; a two-factor code is always asked.', group: 'Session' },
+		{ key: 'rememberPassword', showWhen: { key: 'authMethod', default: 'token', equals: 'password' }, label: 'Remember password', type: 'checkbox', default: false, description: 'Off: you are asked for the password at every sign-in. On: it is kept in the OS keychain.', group: 'Session' },
+		{ key: 'password', showWhen: { key: 'rememberPassword', equals: true }, label: 'Password', type: 'password', secret: true, description: 'A two-factor code is always asked.', group: 'Session' },
 		{ key: 'oidcPort', showWhen: { key: 'authMethod', default: 'token', equals: 'openid' }, label: 'OpenID callback port', type: 'number', default: 8189, min: 1024, max: 65535, description: 'The identity provider must allow http://localhost:<port>/ as redirect.', group: 'Session' },
 		{ key: 'verifyTls', label: 'Verify TLS certificate', type: 'checkbox', default: true, description: 'Disable only for a trusted server with a self-signed certificate.' }
 	];
