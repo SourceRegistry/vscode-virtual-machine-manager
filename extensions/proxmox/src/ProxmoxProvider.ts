@@ -298,7 +298,7 @@ export class ProxmoxConnection implements ClusterConnection {
 	}
 	async openExternal(node: string, id: string): Promise<void> {
 		this.vm(node, id);
-		await this.openUrl(`${this.baseUrl}/#v1:0:=${this.isContainer(node, id) ? 'lxc' : 'qemu'}%2F${encodeURIComponent(id)}:4`);
+		await this.openUrl(`${this.baseUrl}/#v1:0:=${this.isContainer(node, id) ? 'lxc' : 'qemu'}%2F${encodeURIComponent(id)}:4:::::8:=consolejs:`);
 	}
 	dispose(): void { this.abort.abort(); for (const console of this.consoles) console.dispose(); this.consoles.clear(); this.client.events.stopListening(); this.cleanup(); }
 }
