@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { connectionOptions } from '../src/ProxmoxProvider';
-import { openIdLogin, qualifiedUser, SessionStore, type Session, type SessionUi } from '../src/session';
+import { openIdLogin, qualifiedUser, SessionStore, withParam, type Session, type SessionUi } from '../src/session';
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify({ data }), { status });
 const bodyOf = (init?: RequestInit) => Object.fromEntries(new URLSearchParams(String(init?.body)));
@@ -69,6 +69,16 @@ describe('Proxmox OpenID login', () => {
 		expect(prompts.openUrl).toHaveBeenCalledWith('https://idp.test/auth?x=1');
 		expect(calls[0]!.body['redirect-url']).toBe(`http://localhost:${port}/`);
 		expect(calls[1]).toMatchObject({ path: '/access/openid/login', body: { code: 'CODE', state: 'STATE', 'redirect-url': `http://localhost:${port}/` } });
+	});
+
+	it('forces a fresh login at the identity provider after a sign-out', async () => {
+		const port = 20000 + Math.floor(Math.random() * 1000);
+		const transport = vi.fn(async (input: unknown) => String(input).includes('auth-url') ? json('https://idp.test/auth?client_id=x') : json({ ticket: 'T', CSRFPreventionToken: 'C', username: 'u@oidc' })) as unknown as typeof fetch;
+		const prompts = ui();
+		prompts.openUrl.mockImplementation(async () => { void fetch(`http://localhost:${port}/?code=C&state=S`); });
+		await openIdLogin(transport, base, 'oidc', port, prompts, AbortSignal.timeout(10_000), true);
+		expect(prompts.openUrl).toHaveBeenCalledWith('https://idp.test/auth?client_id=x&prompt=login');
+		expect(withParam('https://a.test/x?prompt=none', 'prompt', 'login')).toBe('https://a.test/x?prompt=login');
 	});
 
 	it('rejects an identity provider error', async () => {

@@ -101,11 +101,19 @@ export class ProxmoxProvider implements HypervisorProvider {
 		{ key: 'verifyTls', label: 'Verify TLS certificate', type: 'checkbox', default: true, description: 'Disable only for a trusted server with a self-signed certificate.' }
 	];
 	constructor(private readonly host: ProxmoxHost) {}
+	/** Clusters the user signed out of: the next sign-in asks for everything again, saved password included. */
+	private readonly askAgain = new Set<string>();
 	async connect(cluster: ClusterConfig, secrets: SecretBag): Promise<ProxmoxConnection> {
-		const options = connectionOptions(cluster, secrets);
+		let options = connectionOptions(cluster, secrets);
+		const again = this.askAgain.has(cluster.id) && options.method !== 'token';
+		if (again && options.method === 'password') {
+			const entered = await this.host.prompt({ title: 'Proxmox sign-in', prompt: 'User name (add @realm for another realm)', value: options.username });
+			if (!entered?.trim()) throw new ProviderError('Sign-in cancelled.', 'permission');
+			options = { ...options, username: qualifiedUser(entered.trim(), String(cluster.config.realm ?? '')), password: undefined };
+		}
 		const agent = new Agent({ rejectUnauthorized: options.verifyTls, timeout: 30_000 });
 		const transport = proxmoxFetch(agent, options.verifyTls);
-		const open = (client: Client) => new ProxmoxConnection(client, options.baseUrl, (url) => this.host.openUrl(url), () => agent.destroy(), options.verifyTls, options.method === 'token' ? undefined : () => this.host.store.remove(cluster.id));
+		const open = (client: Client) => new ProxmoxConnection(client, options.baseUrl, (url) => this.host.openUrl(url), () => agent.destroy(), options.verifyTls, options.method === 'token' ? undefined : async () => { await this.host.store.remove(cluster.id); this.askAgain.add(cluster.id); });
 		const base = { baseUrl: options.baseUrl, agent, fetch: transport };
 		try {
 			if (options.method === 'token') {
@@ -115,13 +123,14 @@ export class ProxmoxProvider implements HypervisorProvider {
 			const stored = options.method === 'password' ? await this.host.store.get(cluster.id, options.baseUrl, options.username) : undefined;
 			for (const reuse of stored ? [true, false] : [false]) {
 				// The password (if any) is only used for the login; the working client holds just the ticket.
-				const session = reuse ? stored! : await this.login(options, base);
+				const session = reuse ? stored! : await this.login(options, again, base);
 				const client = new Client({ ...base, session });
 				client.onSession((next) => void this.host.store.set(cluster.id, options.baseUrl, next).catch(() => {}));
 				const connection = open(client);
 				try {
 					await connection.listNodes();
 					await this.host.store.set(cluster.id, options.baseUrl, client.session ?? session);
+					this.askAgain.delete(cluster.id);
 					return connection;
 				} catch (error) {
 					connection.dispose();
@@ -132,8 +141,8 @@ export class ProxmoxProvider implements HypervisorProvider {
 			throw new ProviderError('Could not sign in to Proxmox.', 'permission');
 		} catch (error) { agent.destroy(); throw error; }
 	}
-	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, base: { baseUrl: string; agent: Agent; fetch: typeof fetch }): Promise<PveSession> {
-		if (options.method === 'openid') return openIdLogin(base.fetch, options.baseUrl, options.realm, options.port, this.host, AbortSignal.timeout(5 * 60 * 1000));
+	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, again: boolean, base: { baseUrl: string; agent: Agent; fetch: typeof fetch }): Promise<PveSession> {
+		if (options.method === 'openid') return openIdLogin(base.fetch, options.baseUrl, options.realm, options.port, this.host, AbortSignal.timeout(5 * 60 * 1000), again);
 		const password = options.password ?? await this.host.prompt({ title: `Proxmox sign-in for ${options.username}`, prompt: 'Password', password: true });
 		if (!password) throw new ProviderError('Sign-in cancelled.', 'permission');
 		const client = new Client({

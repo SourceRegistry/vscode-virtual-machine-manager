@@ -21,7 +21,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	provider = new ProxmoxProvider({
 		store,
 		openUrl: (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
-		prompt: (options) => vscode.window.showInputBox({ title: options.title, prompt: options.prompt, password: options.password, placeHolder: options.placeholder, ignoreFocusOut: true })
+		prompt: (options) => vscode.window.showInputBox({ title: options.title, prompt: options.prompt, password: options.password, placeHolder: options.placeholder, value: options.value, ignoreFocusOut: true })
 	});
 	context.subscriptions.push(api.registerProvider(provider) as vscode.Disposable);
 }

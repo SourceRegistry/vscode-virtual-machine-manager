@@ -12,7 +12,7 @@ export type Session = PveSession;
 /** Interaction the provider needs from the host; kept abstract so this module has no vscode dependency. */
 export interface SessionUi {
 	/** Asks the user for a value. Resolves undefined when they cancel. */
-	prompt(options: { title: string; prompt: string; password?: boolean; placeholder?: string }): PromiseLike<string | undefined>;
+	prompt(options: { title: string; prompt: string; password?: boolean; placeholder?: string; value?: string }): PromiseLike<string | undefined>;
 	openUrl(url: string): PromiseLike<unknown>;
 }
 
@@ -84,14 +84,21 @@ export function receiveOpenIdRedirect(port: number, signal: AbortSignal, timeout
 	return { redirectUrl, result };
 }
 
+export function withParam(url: string, key: string, value: string): string {
+	const parsed = new URL(url);
+	parsed.searchParams.set(key, value);
+	return parsed.toString();
+}
+
 /** Browser sign-in through a Proxmox OpenID realm. The identity provider must allow `http://localhost:<port>/` as a redirect. */
-export async function openIdLogin(fetchImpl: typeof fetch, baseUrl: string, realm: string, port: number, ui: SessionUi, signal: AbortSignal): Promise<Session> {
+export async function openIdLogin(fetchImpl: typeof fetch, baseUrl: string, realm: string, port: number, ui: SessionUi, signal: AbortSignal, forceLogin = false): Promise<Session> {
 	const { redirectUrl, result } = receiveOpenIdRedirect(port, signal);
 	result.catch(() => {});
 	// Listening starts synchronously with the call above; the auth URL names the redirect we listen on.
 	const authUrl = await call<string>(fetchImpl, baseUrl, '/access/openid/auth-url', { realm, 'redirect-url': redirectUrl });
 	if (!/^https?:\/\//.test(authUrl)) throw new ProviderError('Proxmox returned an invalid OpenID address.', 'failed');
-	await ui.openUrl(authUrl);
+	// After an explicit sign-out the identity provider's own browser session would sign straight back in.
+	await ui.openUrl(forceLogin ? withParam(authUrl, 'prompt', 'login') : authUrl);
 	const { code, state } = await result;
 	return toSession(await call<TicketReply>(fetchImpl, baseUrl, '/access/openid/login', { code, state, 'redirect-url': redirectUrl }));
 }
