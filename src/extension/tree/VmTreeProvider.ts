@@ -182,6 +182,14 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		if (vm.state === 'running' && vm.ipAddresses?.length) parts.push(vm.ipAddresses[0]);
 		item.description = parts.join(' · ');
 		item.contextValue = vmContextValue(vm, caps);
+		// Clicking a VM opens its details (providers without inventory/stats keep a plain, selectable row).
+		if (caps?.details || caps?.stats) {
+			item.command = {
+				command: 'vmm.openVmDashboard',
+				title: 'Show Details',
+				arguments: [{ clusterId: ref.clusterId, nodeId: ref.nodeId, vmId: ref.vmId }]
+			};
+		}
 		const md = new vscode.MarkdownString(
 			`**${escapeMd(vm.name)}** — ${label}\n\n` +
 				`| | |\n|---|---|\n` +
