@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { readFileSync } from 'node:fs';
 import { CORE_EXTENSION_ID, VMM_API_VERSION, type VmManagerApi } from '@vmm/sdk';
 import { ProxmoxProvider } from './ProxmoxProvider';
 import { SessionStore } from './session';
@@ -20,6 +21,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	await store.prune().catch(() => {});
 	provider = new ProxmoxProvider({
 		store,
+		browserLogin: api.browserLogin?.bind(api),
+		providerIcon: `data:image/png;base64,${readFileSync(context.asAbsolutePath('media/icon.png')).toString('base64')}`,
 		openUrl: (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
 		prompt: (options) => vscode.window.showInputBox({ title: options.title, prompt: options.prompt, password: options.password, placeHolder: options.placeholder, value: options.value, ignoreFocusOut: true })
 	});

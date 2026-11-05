@@ -1,7 +1,5 @@
-import { createServer } from 'node:http';
 import type { PveSession } from 'pve-client';
-import { ProviderError } from '@vmm/sdk';
-import { oidcPage } from './oidcPage';
+import { ProviderError, type VmManagerApi } from '@vmm/sdk';
 
 /** Proxmox tickets live two hours; renew well before that. */
 export const TICKET_LIFETIME_MS = 2 * 60 * 60 * 1000;
@@ -12,6 +10,8 @@ export type Session = PveSession;
 
 /** Interaction the provider needs from the host; kept abstract so this module has no vscode dependency. */
 export interface SessionUi {
+	browserLogin?: VmManagerApi['browserLogin'];
+	providerIcon?: string;
 	/** Asks the user for a value. Resolves undefined when they cancel. */
 	prompt(options: { title: string; prompt: string; password?: boolean; placeholder?: string; value?: string }): PromiseLike<string | undefined>;
 	openUrl(url: string): PromiseLike<unknown>;
@@ -52,44 +52,6 @@ export function sessionFresh(session: Session, now = Date.now()): boolean {
 	return now - (session.issued ?? 0) < TICKET_LIFETIME_MS - 5 * 60 * 1000;
 }
 
-/** Waits for the identity provider's redirect on a loopback port and resolves with its `code` and `state`. */
-export function receiveOpenIdRedirect(port: number, signal: AbortSignal, timeoutMs = 5 * 60 * 1000): { redirectUrl: string; result: Promise<{ code: string; state: string }> } {
-	const redirectUrl = `http://localhost:${port}/`;
-	const result = new Promise<{ code: string; state: string }>((resolve, reject) => {
-		const server = createServer((req, res) => {
-			const url = new URL(req.url ?? '/', redirectUrl);
-			const code = url.searchParams.get('code');
-			const state = url.searchParams.get('state');
-			const error = url.searchParams.get('error');
-			if (!code && !state && !error) { res.writeHead(404).end(); return; }
-			res.writeHead(200, {
-				'Content-Type': 'text/html; charset=utf-8',
-				'Cache-Control': 'no-store',
-				'Referrer-Policy': 'no-referrer',
-				'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
-			});
-			res.end(oidcPage(!!(code && state)));
-			done(code && state ? undefined : new ProviderError(`The identity provider refused the sign-in${error ? ` (${error})` : ''}.`, 'permission'), code && state ? { code, state } : undefined);
-		});
-		const timer = setTimeout(() => done(new ProviderError('OpenID sign-in timed out.', 'timeout')), timeoutMs);
-		const abort = () => done(new ProviderError('OpenID sign-in cancelled.', 'permission'));
-		let finished = false;
-		function done(error?: Error, value?: { code: string; state: string }) {
-			if (finished) return;
-			finished = true;
-			clearTimeout(timer);
-			signal.removeEventListener('abort', abort);
-			server.close();
-			server.closeAllConnections();
-			error ? reject(error) : resolve(value!);
-		}
-		signal.addEventListener('abort', abort);
-		server.once('error', (e: NodeJS.ErrnoException) => done(new ProviderError(e.code === 'EADDRINUSE' ? `Port ${port} is in use. Choose another OpenID callback port.` : `OpenID callback failed: ${e.message}`, 'unavailable')));
-		server.listen(port, '127.0.0.1');
-	});
-	return { redirectUrl, result };
-}
-
 export function withParam(url: string, key: string, value: string): string {
 	const parsed = new URL(url);
 	parsed.searchParams.set(key, value);
@@ -98,15 +60,15 @@ export function withParam(url: string, key: string, value: string): string {
 
 /** Browser sign-in through a Proxmox OpenID realm. The identity provider must allow `http://localhost:<port>/` as a redirect. */
 export async function openIdLogin(fetchImpl: typeof fetch, baseUrl: string, realm: string, port: number, ui: SessionUi, signal: AbortSignal, forceLogin = false): Promise<Session> {
-	const { redirectUrl, result } = receiveOpenIdRedirect(port, signal);
-	result.catch(() => {});
-	// Listening starts synchronously with the call above; the auth URL names the redirect we listen on.
-	const authUrl = await call<string>(fetchImpl, baseUrl, '/access/openid/auth-url', { realm, 'redirect-url': redirectUrl });
-	if (!/^https?:\/\//.test(authUrl)) throw new ProviderError('Proxmox returned an invalid OpenID address.', 'failed');
-	// After an explicit sign-out the identity provider's own browser session would sign straight back in.
-	await ui.openUrl(forceLogin ? withParam(authUrl, 'prompt', 'login') : authUrl);
-	const { code, state } = await result;
-	return toSession(await call<TicketReply>(fetchImpl, baseUrl, '/access/openid/login', { code, state, 'redirect-url': redirectUrl }));
+	if (!ui.browserLogin) throw new ProviderError('Update VM Manager to use shared browser sign-in.', 'unavailable');
+	return ui.browserLogin({
+		providerName: 'Proxmox VE', providerIcon: ui.providerIcon, port, signal,
+		getAuthorizationUrl: async (redirectUrl) => {
+			const authUrl = await call<string>(fetchImpl, baseUrl, '/access/openid/auth-url', { realm, 'redirect-url': redirectUrl });
+			return forceLogin ? withParam(authUrl, 'prompt', 'login') : authUrl;
+		},
+		exchange: async ({ code, state, redirectUrl }) => toSession(await call<TicketReply>(fetchImpl, baseUrl, '/access/openid/login', { code, state, 'redirect-url': redirectUrl }))
+	});
 }
 
 /** Where sessions are kept; the host backs it with the OS keychain. */

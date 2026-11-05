@@ -1,10 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { BrowserLoginService } from '../../../src/extension/auth/BrowserLogin';
 import { describe, expect, it, vi } from 'vitest';
 import { connectionOptions, ProxmoxProvider } from '../src/ProxmoxProvider';
 import { openIdLogin, qualifiedUser, SessionStore, withParam, type Session, type SessionUi } from '../src/session';
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify({ data }), { status });
 const bodyOf = (init?: RequestInit) => Object.fromEntries(new URLSearchParams(String(init?.body)));
-const ui = (answer?: string): SessionUi & { prompt: ReturnType<typeof vi.fn>; openUrl: ReturnType<typeof vi.fn> } => ({ prompt: vi.fn().mockResolvedValue(answer), openUrl: vi.fn().mockResolvedValue(undefined) });
+const ui = (answer?: string): SessionUi & { prompt: ReturnType<typeof vi.fn>; openUrl: ReturnType<typeof vi.fn> } => {
+	const result = { prompt: vi.fn().mockResolvedValue(answer), openUrl: vi.fn().mockResolvedValue(undefined) };
+	const browser = new BrowserLoginService({ template: readFileSync('media/auth/callback.html', 'utf8'), icon: 'data:image/png;base64,AA==', editorUrl: 'vscode://', openUrl: (url) => result.openUrl(url) });
+	return { ...result, browserLogin: (options) => browser.login(options) };
+};
 const base = 'https://pve.test:8006';
 
 describe('Proxmox session login', () => {

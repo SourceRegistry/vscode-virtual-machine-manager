@@ -490,9 +490,23 @@ export interface HypervisorProvider {
 	connect(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<ClusterConnection>;
 }
 
+/** Core-owned browser callback UI; providers retain their authorization and token exchange logic. */
+export interface BrowserLoginOptions<T> {
+	providerName: string;
+	/** Optional PNG data URI (for example the provider extension's Marketplace icon). */
+	providerIcon?: string;
+	port: number;
+	signal?: AbortSignal;
+	getAuthorizationUrl(redirectUrl: string): Promise<string>;
+	/** Validate/exchange the response before the core displays success. Never log codes or tokens. */
+	exchange(response: { code: string; state: string; redirectUrl: string }): Promise<T>;
+}
+
 export interface VmManagerApi {
 	readonly apiVersion: number;
 	registerProvider(provider: HypervisorProvider): Disposable;
+	/** Available in core versions that provide shared browser sign-in. */
+	browserLogin?<T>(options: BrowserLoginOptions<T>): Promise<T>;
 }
 
 /** Shape of an entry in `contributes["vmManager.providers"]` of a provider extension. */
