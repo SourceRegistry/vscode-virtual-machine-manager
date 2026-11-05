@@ -3,31 +3,23 @@
 // for a short-lived Marketplace credential, so no personal access token is stored anywhere.
 //
 // Runs in .github/workflows/release.yml (the workflow named in the publisher's Trusted Publishing
-// policy). The core goes first because the providers declare it as an extension dependency.
+// policy). Without arguments the core goes first because the providers declare it as an extension dependency.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { findPackage, packages, root, vsixPath } from './packages.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const vsce = path.join(root, 'node_modules', '@vscode', 'vsce', 'vsce');
-const manifest = (dir) => JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+// `node scripts/publish.mjs qemu` publishes one extension (by id or release tag), no argument all of them.
+const only = process.argv[2];
 
-const dirs = [
-	root,
-	...readdirSync(path.join(root, 'extensions'))
-		.map((d) => path.join(root, 'extensions', d))
-		.filter((dir) => existsSync(path.join(dir, 'package.json')))
-];
-
-const packages = dirs.map((dir) => {
-	const { name, version } = manifest(dir);
-	const file = path.join(root, 'out', `${name}-${version}.vsix`);
+const files = (only ? [findPackage(only)] : packages).map((pkg) => {
+	const file = vsixPath(pkg);
 	if (!existsSync(file)) throw new Error(`Missing package ${path.relative(root, file)}: run "npm run package" first.`);
 	return file;
 });
 
-for (const file of packages) {
+for (const file of files) {
 	console.log(`Publishing ${path.relative(root, file)}…`);
 	// --skip-duplicate: re-running a release after a partial failure only publishes what is missing.
 	execFileSync(process.execPath, [vsce, 'publish', '--oidc', '--packagePath', file, '--skip-duplicate'], {

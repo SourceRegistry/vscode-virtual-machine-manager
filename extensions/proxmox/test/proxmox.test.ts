@@ -131,4 +131,13 @@ describe('Proxmox provider', () => {
 		expect(macAddresses({ net0: 'virtio,bridge=vmbr0' })).toEqual([]);
 		expect(macAddresses(undefined)).toEqual([]);
 	});
+	it('offers sign-out only for a session, and forgets it when asked', async () => {
+		const { client } = fixture();
+		const forget = vi.fn().mockResolvedValue(undefined);
+		const withSession = new ProxmoxConnection(client as unknown as Client, 'https://pve.test:8006', vi.fn(), () => {}, true, forget);
+		expect(withSession.capabilities.signOut).toBe(true);
+		await withSession.signOut();
+		expect(forget).toHaveBeenCalledOnce();
+		expect(fixture().connection.capabilities.signOut).toBeUndefined();
+	});
 });

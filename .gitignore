@@ -154,7 +154,6 @@ vite.config.ts.timestamp-*
 
 # copied by scripts/package.mjs
 extensions/*/LICENSE
-extensions/*/CHANGELOG.md
 
 # IDEA
 .vscode

@@ -640,6 +640,14 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			const clusterId = await resolveCluster(arg, 'Select the cluster to reconnect');
 			if (clusterId) await inView(() => manager.reconnect(clusterId));
 		}),
+		register('vmm.cancelConnect', (arg) => {
+			const clusterId = asClusterId(arg);
+			if (clusterId) manager.cancelConnect(clusterId);
+		}),
+		register('vmm.signOut', async (arg) => {
+			const clusterId = await resolveCluster(arg, 'Select the cluster to sign out of');
+			if (clusterId) await inView(() => manager.signOut(clusterId));
+		}),
 		register('vmm.refresh', (arg) => inView(() => manager.refresh(asClusterId(arg)))),
 		register('vmm.openOverview', () => OverviewPanel.show(context.extensionUri, manager)),
 		register('vmm.installProviders', (providerId) =>

@@ -1,6 +1,5 @@
-import { createServer } from 'node:http';
 import type { PveSession } from 'pve-client';
-import { ProviderError } from '@vmm/sdk';
+import { ProviderError, type VmManagerApi } from '@vmm/sdk';
 
 /** Proxmox tickets live two hours; renew well before that. */
 export const TICKET_LIFETIME_MS = 2 * 60 * 60 * 1000;
@@ -11,8 +10,10 @@ export type Session = PveSession;
 
 /** Interaction the provider needs from the host; kept abstract so this module has no vscode dependency. */
 export interface SessionUi {
+	browserLogin?: VmManagerApi['browserLogin'];
+	providerIcon?: string;
 	/** Asks the user for a value. Resolves undefined when they cancel. */
-	prompt(options: { title: string; prompt: string; password?: boolean; placeholder?: string }): PromiseLike<string | undefined>;
+	prompt(options: { title: string; prompt: string; password?: boolean; placeholder?: string; value?: string }): PromiseLike<string | undefined>;
 	openUrl(url: string): PromiseLike<unknown>;
 }
 
@@ -51,49 +52,23 @@ export function sessionFresh(session: Session, now = Date.now()): boolean {
 	return now - (session.issued ?? 0) < TICKET_LIFETIME_MS - 5 * 60 * 1000;
 }
 
-/** Waits for the identity provider's redirect on a loopback port and resolves with its `code` and `state`. */
-export function receiveOpenIdRedirect(port: number, signal: AbortSignal, timeoutMs = 5 * 60 * 1000): { redirectUrl: string; result: Promise<{ code: string; state: string }> } {
-	const redirectUrl = `http://localhost:${port}/`;
-	const result = new Promise<{ code: string; state: string }>((resolve, reject) => {
-		const server = createServer((req, res) => {
-			const url = new URL(req.url ?? '/', redirectUrl);
-			const code = url.searchParams.get('code');
-			const state = url.searchParams.get('state');
-			const error = url.searchParams.get('error');
-			if (!code && !state && !error) { res.writeHead(404).end(); return; }
-			res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-			res.end(code && state ? 'Signed in. You can close this tab and return to VS Code.' : 'Sign-in failed. Return to VS Code.');
-			done(code && state ? undefined : new ProviderError(`The identity provider refused the sign-in${error ? ` (${error})` : ''}.`, 'permission'), code && state ? { code, state } : undefined);
-		});
-		const timer = setTimeout(() => done(new ProviderError('OpenID sign-in timed out.', 'timeout')), timeoutMs);
-		const abort = () => done(new ProviderError('OpenID sign-in cancelled.', 'permission'));
-		let finished = false;
-		function done(error?: Error, value?: { code: string; state: string }) {
-			if (finished) return;
-			finished = true;
-			clearTimeout(timer);
-			signal.removeEventListener('abort', abort);
-			server.close();
-			server.closeAllConnections();
-			error ? reject(error) : resolve(value!);
-		}
-		signal.addEventListener('abort', abort);
-		server.once('error', (e: NodeJS.ErrnoException) => done(new ProviderError(e.code === 'EADDRINUSE' ? `Port ${port} is in use. Choose another OpenID callback port.` : `OpenID callback failed: ${e.message}`, 'unavailable')));
-		server.listen(port, '127.0.0.1');
-	});
-	return { redirectUrl, result };
+export function withParam(url: string, key: string, value: string): string {
+	const parsed = new URL(url);
+	parsed.searchParams.set(key, value);
+	return parsed.toString();
 }
 
 /** Browser sign-in through a Proxmox OpenID realm. The identity provider must allow `http://localhost:<port>/` as a redirect. */
-export async function openIdLogin(fetchImpl: typeof fetch, baseUrl: string, realm: string, port: number, ui: SessionUi, signal: AbortSignal): Promise<Session> {
-	const { redirectUrl, result } = receiveOpenIdRedirect(port, signal);
-	result.catch(() => {});
-	// Listening starts synchronously with the call above; the auth URL names the redirect we listen on.
-	const authUrl = await call<string>(fetchImpl, baseUrl, '/access/openid/auth-url', { realm, 'redirect-url': redirectUrl });
-	if (!/^https?:\/\//.test(authUrl)) throw new ProviderError('Proxmox returned an invalid OpenID address.', 'failed');
-	await ui.openUrl(authUrl);
-	const { code, state } = await result;
-	return toSession(await call<TicketReply>(fetchImpl, baseUrl, '/access/openid/login', { code, state, 'redirect-url': redirectUrl }));
+export async function openIdLogin(fetchImpl: typeof fetch, baseUrl: string, realm: string, port: number, ui: SessionUi, signal: AbortSignal, forceLogin = false): Promise<Session> {
+	if (!ui.browserLogin) throw new ProviderError('Update VM Manager to use shared browser sign-in.', 'unavailable');
+	return ui.browserLogin({
+		providerName: 'Proxmox VE', providerIcon: ui.providerIcon, port, signal,
+		getAuthorizationUrl: async (redirectUrl) => {
+			const authUrl = await call<string>(fetchImpl, baseUrl, '/access/openid/auth-url', { realm, 'redirect-url': redirectUrl });
+			return forceLogin ? withParam(authUrl, 'prompt', 'login') : authUrl;
+		},
+		exchange: async ({ code, state, redirectUrl }) => toSession(await call<TicketReply>(fetchImpl, baseUrl, '/access/openid/login', { code, state, 'redirect-url': redirectUrl }))
+	});
 }
 
 /** Where sessions are kept; the host backs it with the OS keychain. */
@@ -102,22 +77,24 @@ export interface SessionVault {
 	write(value: string | undefined): PromiseLike<void>;
 }
 
-interface StoredEntry extends Session { baseUrl: string }
+interface StoredEntry extends Session { baseUrl: string; /** The VS Code launch that created it. */ launch?: string }
 
 /** Persists live sessions (never passwords) so a reconnect or reload does not ask for the second factor again. */
 export class SessionStore {
-	constructor(private readonly vault: SessionVault) {}
+	/** `launch` identifies this VS Code run: a session left by another run (a crash, a killed window) is never reused. */
+	constructor(private readonly vault: SessionVault, private readonly launch?: string) {}
+	private mine(entry: StoredEntry): boolean { return !this.launch || entry.launch === this.launch; }
 	private async all(): Promise<Record<string, StoredEntry>> {
 		try { return JSON.parse((await this.vault.read()) ?? '{}') as Record<string, StoredEntry>; } catch { return {}; }
 	}
-	async get(clusterId: string, baseUrl: string, username: string): Promise<Session | undefined> {
+	async get(clusterId: string, baseUrl: string, username?: string): Promise<Session | undefined> {
 		const entry = (await this.all())[clusterId];
-		if (!entry || entry.baseUrl !== baseUrl || entry.username.toLowerCase() !== username.toLowerCase() || !sessionFresh(entry)) return undefined;
+		if (!entry || entry.baseUrl !== baseUrl || (username && entry.username.toLowerCase() !== username.toLowerCase()) || !sessionFresh(entry) || !this.mine(entry)) return undefined;
 		return { ticket: entry.ticket, csrf: entry.csrf, username: entry.username, issued: entry.issued };
 	}
 	async set(clusterId: string, baseUrl: string, session: Session): Promise<void> {
 		const all = await this.all();
-		all[clusterId] = { ...session, baseUrl };
+		all[clusterId] = { ...session, baseUrl, launch: this.launch };
 		await this.vault.write(JSON.stringify(all));
 	}
 	async remove(clusterId: string): Promise<void> {
@@ -131,7 +108,7 @@ export class SessionStore {
 	/** Drops sessions that can no longer work (left behind by a crash). */
 	async prune(): Promise<void> {
 		const all = await this.all();
-		const kept = Object.fromEntries(Object.entries(all).filter(([, entry]) => sessionFresh(entry)));
+		const kept = Object.fromEntries(Object.entries(all).filter(([, entry]) => sessionFresh(entry) && this.mine(entry)));
 		if (Object.keys(kept).length !== Object.keys(all).length) await this.vault.write(Object.keys(kept).length ? JSON.stringify(kept) : undefined);
 	}
 }

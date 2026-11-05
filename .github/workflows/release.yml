@@ -1,12 +1,18 @@
-# Releases on every push to main: semantic-release derives the version from the Conventional
-# Commits since the last tag, updates CHANGELOG.md and the package versions, publishes the core and
-# provider extensions to the VS Code Marketplace and creates a GitHub release with the VSIX files.
+# Releases on every push to main. Every extension (the core and each provider) is released on its own:
+# semantic-release derives its next version from the Conventional Commits that touched it since its
+# last tag, updates its CHANGELOG.md and version, publishes it to the VS Code Marketplace and creates
+# a GitHub release with its VSIX. Extensions without releasable commits are left alone.
 #
 # Marketplace Trusted Publishing policy (publisher → Trusted Publishing):
 #   Repository owner: SourceRegistry
 #   Repository:       vscode-virtual-machine-manager
 #   Workflow:         release.yml
 #   Environment:      marketplace
+#
+# main is protected by a ruleset (pull request + passing "Test" checks, no direct pushes). The release
+# commit that semantic-release pushes needs a bypass, which the built-in GITHUB_TOKEN cannot get, so
+# the release job uses the RELEASE_TOKEN secret: a fine-grained personal access token of a repository
+# admin (this repository, Contents: read and write).
 name: Release
 
 on:
@@ -15,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Re-publish an existing release tag (e.g. v1.2.0) to the Marketplace. Leave empty to run a normal release.
+        description: Re-publish an existing release tag (e.g. v1.2.0 or vm-manager-qemu-v1.2.0) to the Marketplace. Leave empty to run a normal release.
         required: false
         default: ''
 
@@ -45,6 +51,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - uses: actions/setup-node@v5
         with:
@@ -54,9 +61,9 @@ jobs:
       - run: npm ci
 
       - name: Release
-        run: npx semantic-release
+        run: node scripts/release.mjs
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
   republish:
     if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
@@ -78,8 +85,16 @@ jobs:
 
       - run: npm ci
 
+      - name: Build
+        run: npm run build
+
+      # The tag names the extension (core: v1.2.0, provider: vm-manager-qemu-v1.2.0).
       - name: Package
-        run: npm run package
+        run: node scripts/package.mjs "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
 
       - name: Publish to the Marketplace
-        run: node scripts/publish.mjs
+        run: node scripts/publish.mjs "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}

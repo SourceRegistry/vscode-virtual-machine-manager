@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { VMM_API_VERSION, type HypervisorProvider, type VmManagerApi } from '@vmm/sdk';
+import { readFileSync } from 'node:fs';
+import { BrowserLoginService } from './auth/BrowserLogin';
+import { VMM_API_VERSION, VMM_MIN_API_VERSION, type HypervisorProvider, type VmManagerApi } from '@vmm/sdk';
 import { ClusterStore } from './clusters/ClusterStore';
 import { ConnectionManager } from './clusters/ConnectionManager';
 import { registerCommands } from './commands';
@@ -15,6 +17,12 @@ import { OverviewPanel } from './webview/OverviewPanel';
 export function activate(context: vscode.ExtensionContext): VmManagerApi {
 	initLog(context);
 
+	const browserLogin = new BrowserLoginService({
+		template: readFileSync(context.asAbsolutePath('media/auth/callback.html'), 'utf8'),
+		icon: `data:image/png;base64,${readFileSync(context.asAbsolutePath('media/icon.png')).toString('base64')}`,
+		editorUrl: `${vscode.env.uriScheme}://`,
+		openUrl: (url) => vscode.env.openExternal(vscode.Uri.parse(url))
+	});
 	const registry = new ProviderRegistry();
 	const store = new ClusterStore(context);
 	const manager = new ConnectionManager(context, store, registry);
@@ -24,6 +32,7 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 	const statusBar = new VmStatusBar(manager);
 
 	context.subscriptions.push(
+		browserLogin,
 		registry,
 		store,
 		manager,
@@ -50,7 +59,9 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 
 	return {
 		apiVersion: VMM_API_VERSION,
-		registerProvider: (provider: HypervisorProvider) => registry.register(provider)
+		minApiVersion: VMM_MIN_API_VERSION,
+		registerProvider: (provider: HypervisorProvider) => registry.register(provider),
+		browserLogin: (options) => browserLogin.login(options)
 	};
 }
 

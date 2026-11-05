@@ -107,6 +107,18 @@
         "icon": "$(plug)"
       },
       {
+        "command": "vmm.cancelConnect",
+        "title": "Cancel Sign-in",
+        "category": "VM",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "vmm.signOut",
+        "title": "Sign Out",
+        "category": "VM",
+        "icon": "$(sign-out)"
+      },
+      {
         "command": "vmm.searchVms",
         "title": "Search Virtual Machines…",
         "category": "VM",
@@ -292,6 +304,18 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "vmm.cancelConnect",
+          "when": "false"
+        },
+        {
+          "command": "vmm.forgetConsoleCredentials",
+          "when": "vmm.hasRdpClusters"
+        },
+        {
+          "command": "vmm.signOut",
+          "when": "false"
+        },
+        {
           "command": "vmm.searchVms",
           "when": "vmm.hasVms"
         },
@@ -438,6 +462,21 @@
       ],
       "view/item/context": [
         {
+          "command": "vmm.cancelConnect",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;status=connecting;/",
+          "group": "inline@7"
+        },
+        {
+          "command": "vmm.cancelConnect",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;status=connecting;/",
+          "group": "1_connection@3"
+        },
+        {
+          "command": "vmm.signOut",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;.*\\bsignout;/",
+          "group": "inline@8"
+        },
+        {
           "command": "vmm.refresh",
           "when": "view == vmm.clusters && viewItem =~ /^cluster;/",
           "group": "inline@9"
@@ -446,6 +485,11 @@
           "command": "vmm.reconnectCluster",
           "when": "view == vmm.clusters && viewItem =~ /^cluster;/",
           "group": "1_connection@1"
+        },
+        {
+          "command": "vmm.signOut",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;.*\\bsignout;/",
+          "group": "1_connection@2"
         },
         {
           "command": "vmm.editCluster",
@@ -459,7 +503,7 @@
         },
         {
           "command": "vmm.forgetConsoleCredentials",
-          "when": "view == vmm.clusters && viewItem =~ /^cluster;/",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;.*\\brdp;/",
           "group": "2_manage@3"
         },
         {
@@ -627,9 +671,19 @@
       ],
       "webview/context": [
         {
+          "command": "vmm.cancelConnect",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;status=connecting;/",
+          "group": "1_connection@3"
+        },
+        {
           "command": "vmm.reconnectCluster",
           "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;/",
           "group": "1_connection@1"
+        },
+        {
+          "command": "vmm.signOut",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;.*\\bsignout;/",
+          "group": "1_connection@2"
         },
         {
           "command": "vmm.editCluster",
@@ -643,7 +697,7 @@
         },
         {
           "command": "vmm.forgetConsoleCredentials",
-          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;/",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;.*\\brdp;/",
           "group": "2_manage@3"
         },
         {

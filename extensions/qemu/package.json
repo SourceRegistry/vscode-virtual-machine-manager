@@ -34,7 +34,8 @@
       {
         "id": "qemu",
         "displayName": "QEMU",
-        "description": "QEMU virtual machines managed by VS Code on this machine"
+        "description": "QEMU virtual machines managed by VS Code on this machine",
+        "apiVersion": 1
       }
     ],
     "commands": [

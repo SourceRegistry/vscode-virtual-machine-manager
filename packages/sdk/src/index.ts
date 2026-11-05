@@ -10,7 +10,17 @@
  */
 import type { Duplex } from 'node:stream';
 
+/**
+ * Version of the API between the core and provider extensions. Bump it whenever `VmManagerApi` or
+ * `HypervisorProvider` gains something a provider may rely on (providers built against an older
+ * core cannot use it) or loses/changes something (see `VMM_MIN_API_VERSION`).
+ */
 export const VMM_API_VERSION = 1;
+/**
+ * Oldest provider API version this core still supports. Raise it only for a breaking change; until
+ * then providers built against any version in `VMM_MIN_API_VERSION..VMM_API_VERSION` keep working.
+ */
+export const VMM_MIN_API_VERSION = 1;
 export const CORE_EXTENSION_ID = 'sourceregistry.vm-manager';
 /** `package.json` key a provider extension uses to announce the providers it contributes. */
 export const PROVIDER_CONTRIBUTION_KEY = 'vmManager.providers';
@@ -88,8 +98,11 @@ export interface FieldSchema {
 }
 
 /** Whether a field applies given the current values. Hidden fields are neither asked nor validated. */
-export function isFieldVisible(field: FieldSchema, values: FieldValues): boolean {
+export function isFieldVisible(field: FieldSchema, values: FieldValues, schema?: FieldSchema[], depth = 0): boolean {
 	if (!field.showWhen) return true;
+	// With the schema at hand a field also needs the field that controls it to apply (a chain of conditions).
+	const controller = schema?.find((f) => f.key === field.showWhen!.key);
+	if (controller && depth < 8 && !isFieldVisible(controller, values, schema, depth + 1)) return false;
 	const current = values[field.showWhen.key] ?? field.showWhen.default;
 	const wanted = field.showWhen.equals;
 	return Array.isArray(wanted) ? wanted.includes(current) : wanted === current;
@@ -105,6 +118,8 @@ export type VmState = 'running' | 'stopped' | 'paused' | 'saved' | 'starting' | 
 export type NodeStatus = 'online' | 'offline' | 'unknown';
 
 export interface Capabilities {
+	/** The connection holds a sign-in session the user can end (`ClusterConnection.signOut`). */
+	signOut?: boolean;
 	create: boolean;
 	edit: boolean;
 	delete: boolean;
@@ -343,6 +358,14 @@ export interface ProviderContext {
 	/** Directory reserved for this provider + cluster (created on demand by the provider). */
 	storagePath: string;
 	log: Logger;
+	/**
+	 * `false` for a connection the extension starts by itself (opening the view, a refresh): the provider
+	 * must not prompt or open a browser, and throws `ProviderError(…, 'authRequired')` when it cannot
+	 * connect without. `true` when the user asked to connect. Absent = interactive.
+	 */
+	interactive?: boolean;
+	/** Aborted when the user cancels the connection attempt (e.g. a sign-in waiting on a browser). */
+	signal?: AbortSignal;
 }
 
 export interface ChangeEvent {
@@ -423,6 +446,8 @@ export interface PreviewFrame {
 
 export interface ClusterConnection extends Disposable {
 	readonly capabilities: Capabilities;
+	/** Ends the sign-in session and forgets whatever was stored for it. The core then drops the connection. */
+	signOut?(): Promise<void>;
 	listNodes(): Promise<NodeInfo[]>;
 	listVms(nodeId: string): Promise<VmInfo[]>;
 	getCreateSchema(nodeId: string): Promise<FieldSchema[]>;
@@ -475,9 +500,26 @@ export interface HypervisorProvider {
 	connect(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<ClusterConnection>;
 }
 
+/** Core-owned browser callback UI; providers retain their authorization and token exchange logic. */
+export interface BrowserLoginOptions<T> {
+	providerName: string;
+	/** Optional PNG data URI (for example the provider extension's Marketplace icon). */
+	providerIcon?: string;
+	port: number;
+	signal?: AbortSignal;
+	getAuthorizationUrl(redirectUrl: string): Promise<string>;
+	/** Validate/exchange the response before the core displays success. Never log codes or tokens. */
+	exchange(response: { code: string; state: string; redirectUrl: string }): Promise<T>;
+}
+
 export interface VmManagerApi {
+	/** Newest API version this core implements. */
 	readonly apiVersion: number;
+	/** Oldest provider API version this core still supports; cores without it require an exact match. */
+	readonly minApiVersion?: number;
 	registerProvider(provider: HypervisorProvider): Disposable;
+	/** Available in core versions that provide shared browser sign-in. */
+	browserLogin?<T>(options: BrowserLoginOptions<T>): Promise<T>;
 }
 
 /** Shape of an entry in `contributes["vmManager.providers"]` of a provider extension. */
@@ -485,6 +527,37 @@ export interface ProviderContribution {
 	id: string;
 	displayName: string;
 	description?: string;
+	/** `VMM_API_VERSION` the provider was built against. Lets the core refuse an incompatible provider before activating it. */
+	apiVersion?: number;
+}
+
+export interface ApiCompatibility {
+	ok: boolean;
+	/** Which side must be updated; set when `ok` is false. */
+	update?: 'core' | 'provider';
+	/** User-facing explanation; set when `ok` is false. */
+	message?: string;
+}
+
+/**
+ * Decides whether a provider built against `providerApi` can run on a core offering
+ * `minApiVersion..apiVersion`. A provider newer than the core may use API the core lacks; a provider
+ * older than the core's minimum relies on API the core removed.
+ */
+export function checkApiCompatibility(
+	name: string,
+	providerApi: number | undefined,
+	core: { apiVersion: number; minApiVersion?: number }
+): ApiCompatibility {
+	if (providerApi === undefined) return { ok: true }; // not declared: nothing to compare
+	const min = core.minApiVersion ?? core.apiVersion;
+	if (providerApi > core.apiVersion) {
+		return { ok: false, update: 'core', message: `${name} needs a newer VM Manager (it uses API version ${providerApi}, VM Manager provides ${core.apiVersion}). Update VM Manager.` };
+	}
+	if (providerApi < min) {
+		return { ok: false, update: 'provider', message: `${name} is too old for this VM Manager (it uses API version ${providerApi}, VM Manager supports ${min} to ${core.apiVersion}). Update ${name}.` };
+	}
+	return { ok: true };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -498,7 +571,7 @@ export class ProviderError extends Error {
 	 */
 	constructor(
 		message: string,
-		readonly code: 'notFound' | 'unsupported' | 'permission' | 'unavailable' | 'invalid' | 'timeout' | 'failed' = 'failed'
+		readonly code: 'notFound' | 'unsupported' | 'permission' | 'unavailable' | 'invalid' | 'timeout' | 'authRequired' | 'failed' = 'failed'
 	) {
 		super(message);
 		this.name = 'ProviderError';
@@ -552,7 +625,7 @@ export function validateValue(field: FieldSchema, value: FieldValue): string | u
 
 export function validateValues(schema: FieldSchema[], values: FieldValues): { key: string; message: string } | undefined {
 	for (const field of schema) {
-		if (!isFieldVisible(field, values)) continue;
+		if (!isFieldVisible(field, values, schema)) continue;
 		const message = validateValue(field, values[field.key]);
 		if (message) return { key: field.key, message };
 	}

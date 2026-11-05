@@ -33,7 +33,8 @@
       {
         "id": "hyperv",
         "displayName": "Hyper-V",
-        "description": "Microsoft Hyper-V on this Windows machine"
+        "description": "Microsoft Hyper-V on this Windows machine",
+        "apiVersion": 1
       }
     ],
     "commands": [

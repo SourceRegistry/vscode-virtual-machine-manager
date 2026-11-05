@@ -97,6 +97,7 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 			await this.manager.ensureLoaded(element.clusterId);
 			const rt = this.manager.cluster(element.clusterId);
 			if (!rt) return [];
+			if (rt.signedOut) return [{ kind: 'message', clusterId: rt.cluster.id, id: 'signedOut' }];
 			if (rt.status === 'error' || rt.status === 'missingProvider') {
 				return [{ kind: 'message', clusterId: rt.cluster.id, id: rt.status }];
 			}
@@ -136,7 +137,7 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		const statusText = clusterStatusText(rt.status);
 		item.description = rt.status === 'connected' ? providerName : `${providerName} · ${statusText}`;
 		item.iconPath = clusterIcon(rt.status, this.registry.get(rt.cluster.providerId)?.icon);
-		item.contextValue = clusterContextValue(rt.status);
+		item.contextValue = clusterContextValue(rt.status, rt.connection?.capabilities);
 		const tooltip = new vscode.MarkdownString(`**${escapeMd(rt.cluster.name)}**\n\n${providerName} — ${statusText}`);
 		if (rt.error) tooltip.appendMarkdown(`\n\n$(error) ${escapeMd(rt.error)}`);
 		tooltip.supportThemeIcons = true;
@@ -215,6 +216,13 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 			item.iconPath = new vscode.ThemeIcon('extensions');
 			item.command = { command: 'vmm.installProviders', title: 'Install Provider', arguments: [rt.cluster.providerId] };
 			item.id = `msg:${clusterId}:missing`;
+			return item;
+		}
+		if (rt?.signedOut) {
+			const item = new vscode.TreeItem(rt.cancelled ? 'Sign-in cancelled — click to try again' : rt.signInRequired ? 'Sign in required — click to sign in' : 'Signed out — click to sign in');
+			item.iconPath = new vscode.ThemeIcon('sign-in');
+			item.command = { command: 'vmm.reconnectCluster', title: 'Sign In', arguments: [{ kind: 'cluster', clusterId }] };
+			item.id = `msg:${clusterId}:signedOut`;
 			return item;
 		}
 		const item = new vscode.TreeItem(`Connection failed — click to retry`);

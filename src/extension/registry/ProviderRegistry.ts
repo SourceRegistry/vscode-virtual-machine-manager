@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import {
 	PROVIDER_CONTRIBUTION_KEY,
+	VMM_API_VERSION,
+	VMM_MIN_API_VERSION,
+	checkApiCompatibility,
 	type HypervisorProvider,
 	type ProviderContribution
 } from '@vmm/sdk';
@@ -9,6 +12,8 @@ import { log } from '../util/log';
 export interface AvailableProvider extends ProviderContribution {
 	extensionId: string;
 	registered: boolean;
+	/** Why the provider cannot run with this core (version mismatch); unset when it can. */
+	incompatible?: string;
 }
 
 /**
@@ -56,7 +61,8 @@ export class ProviderRegistry implements vscode.Disposable {
 					...entry,
 					displayName: entry.displayName ?? entry.id,
 					extensionId: ext.id,
-					registered: this.providers.has(entry.id)
+					registered: this.providers.has(entry.id),
+					incompatible: checkApiCompatibility(entry.displayName ?? entry.id, entry.apiVersion, { apiVersion: VMM_API_VERSION, minApiVersion: VMM_MIN_API_VERSION }).message
 				});
 			}
 		}
@@ -83,6 +89,11 @@ export class ProviderRegistry implements vscode.Disposable {
 		if (existing) return existing;
 		const declared = this.available().find((p) => p.id === id);
 		if (!declared || declared.extensionId === 'builtin') return undefined;
+		if (declared.incompatible) {
+			log.error(declared.incompatible);
+			void vscode.window.showErrorMessage(declared.incompatible);
+			return undefined;
+		}
 		const ext = vscode.extensions.getExtension(declared.extensionId);
 		if (!ext) return undefined;
 		try {

@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { coerceValues, fieldDefaults, formatMemory, formatUptime, isFieldVisible, validateValues, type FieldSchema } from '@vmm/sdk';
+import { readdirSync, readFileSync } from 'node:fs';
+import {
+	PROVIDER_CONTRIBUTION_KEY,
+	VMM_API_VERSION,
+	VMM_MIN_API_VERSION,
+	checkApiCompatibility,
+	coerceValues,
+	fieldDefaults,
+	formatMemory,
+	formatUptime,
+	isFieldVisible,
+	validateValues,
+	type FieldSchema
+} from '@vmm/sdk';
 import { secretStorageKey, splitSecrets } from '../src/extension/clusters/secrets';
 
 const schema: FieldSchema[] = [
@@ -75,5 +88,50 @@ describe('conditional fields', () => {
 	it('does not validate hidden required fields', () => {
 		expect(validateValues([method, token, login], { authMethod: 'password', user: 'root' })).toBeUndefined();
 		expect(validateValues([method, token, login], { authMethod: 'password' })?.key).toBe('user');
+	});
+
+	it('hides a field whose controlling field is itself hidden', () => {
+		const remember = { key: 'remember', label: 'Remember', type: 'checkbox' as const, showWhen: { key: 'authMethod', equals: 'password' } };
+		const pass = { key: 'pass', label: 'Pass', type: 'password' as const, secret: true, showWhen: { key: 'remember', equals: true } };
+		const schema = [method, remember, pass];
+		expect(isFieldVisible(pass, { authMethod: 'password', remember: true }, schema)).toBe(true);
+		expect(isFieldVisible(pass, { authMethod: 'token', remember: true }, schema)).toBe(false);
+		expect(isFieldVisible(pass, { authMethod: 'password', remember: false }, schema)).toBe(false);
+		expect(splitSecrets(schema, { authMethod: 'token', remember: true, pass: 'x' })).toEqual({ config: { authMethod: 'token' }, secrets: { pass: undefined } });
+		expect(splitSecrets(schema, { authMethod: 'password', remember: true, pass: 'x' }).secrets).toEqual({ pass: 'x' });
+	});
+});
+
+describe('API compatibility', () => {
+	const core = { apiVersion: 3, minApiVersion: 2 };
+
+	it('accepts providers within the core range', () => {
+		expect(checkApiCompatibility('X', 2, core).ok).toBe(true);
+		expect(checkApiCompatibility('X', 3, core).ok).toBe(true);
+	});
+
+	it('rejects a provider newer than the core', () => {
+		expect(checkApiCompatibility('X', 4, core)).toMatchObject({ ok: false, update: 'core' });
+	});
+
+	it('rejects a provider older than the core minimum', () => {
+		expect(checkApiCompatibility('X', 1, core)).toMatchObject({ ok: false, update: 'provider' });
+	});
+
+	it('requires an exact match from cores that do not announce a minimum', () => {
+		expect(checkApiCompatibility('X', 1, { apiVersion: 2 }).ok).toBe(false);
+		expect(checkApiCompatibility('X', 2, { apiVersion: 2 }).ok).toBe(true);
+	});
+
+	it('accepts providers that declare no version', () => {
+		expect(checkApiCompatibility('X', undefined, core).ok).toBe(true);
+	});
+
+	it('keeps the declared version of every bundled provider in sync with the SDK', () => {
+		expect(VMM_MIN_API_VERSION).toBeLessThanOrEqual(VMM_API_VERSION);
+		for (const name of readdirSync('extensions')) {
+			const manifest = JSON.parse(readFileSync(`extensions/${name}/package.json`, 'utf8'));
+			for (const provider of manifest.contributes[PROVIDER_CONTRIBUTION_KEY]) expect(provider.apiVersion).toBe(VMM_API_VERSION);
+		}
 	});
 });

@@ -97,12 +97,8 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 
 	it('offers create on nodes and management on clusters', () => {
 		expect(commandsFor(menu, nodeContextValue('online', caps))).toContain('vmm.createVm');
-		expect(commandsFor(menu, clusterContextValue('connected'))).toEqual([
-			'vmm.reconnectCluster',
-			'vmm.editCluster',
-			'vmm.removeCluster',
-			'vmm.forgetConsoleCredentials'
-		]);
+		expect(commandsFor(menu, clusterContextValue('connected'))).toEqual(['vmm.reconnectCluster', 'vmm.editCluster', 'vmm.removeCluster']);
+		expect(commandsFor(menu, clusterContextValue('connected', { ...caps, consoles: ['rdp'] }))).toEqual(['vmm.reconnectCluster', 'vmm.editCluster', 'vmm.removeCluster', 'vmm.forgetConsoleCredentials']);
 	});
 });
 
@@ -191,5 +187,63 @@ describe('tree inline actions', () => {
 			'vmm.connectGraphical',
 			'vmm.shutdown'
 		]);
+	});
+});
+
+describe('sign out', () => {
+	const signedIn = clusterContextValue('connected', { ...caps, signOut: true });
+
+	it('is offered only for a connected cluster whose provider has a session', () => {
+		expect(commandsFor('view/item/context', signedIn)).toContain('vmm.signOut');
+		expect(commandsFor('view/item/context', signedIn, { inline: true })).toContain('vmm.signOut');
+		expect(commandsFor('webview/context', signedIn)).toContain('vmm.signOut');
+		for (const value of [clusterContextValue('connected', caps), clusterContextValue('connected'), clusterContextValue('disconnected', { ...caps, signOut: true }), clusterContextValue('error')]) {
+			expect(commandsFor('view/item/context', value)).not.toContain('vmm.signOut');
+			expect(commandsFor('webview/context', value)).not.toContain('vmm.signOut');
+		}
+	});
+
+	it('keeps the other cluster menu items working with the extra flag', () => {
+		expect(commandsFor('view/item/context', signedIn)).toEqual(expect.arrayContaining(['vmm.reconnectCluster', 'vmm.editCluster', 'vmm.removeCluster']));
+		expect(commandsFor('view/item/context', clusterContextValue('missingProvider'), { inline: true })).toContain('vmm.installProviders');
+	});
+});
+
+describe('forget console sign-in', () => {
+	const rdp: Capabilities = { ...caps, consoles: ['rdp', 'serial'] };
+
+	it('is offered only for clusters whose provider opens RDP consoles', () => {
+		for (const menu of ['view/item/context', 'webview/context']) {
+			expect(commandsFor(menu, clusterContextValue('connected', rdp))).toContain('vmm.forgetConsoleCredentials');
+			expect(commandsFor(menu, clusterContextValue('connected', caps))).not.toContain('vmm.forgetConsoleCredentials');
+			expect(commandsFor(menu, clusterContextValue('connected', { ...caps, consoles: ['vnc', 'serial'] }))).not.toContain('vmm.forgetConsoleCredentials');
+		}
+	});
+});
+
+describe('cancel sign-in', () => {
+	it('is offered on a cluster that is still connecting, and only then', () => {
+		const connecting = clusterContextValue('connecting');
+		expect(commandsFor('view/item/context', connecting, { inline: true })).toContain('vmm.cancelConnect');
+		for (const menu of ['view/item/context', 'webview/context']) {
+			expect(commandsFor(menu, connecting)).toContain('vmm.cancelConnect');
+			for (const status of ['connected', 'disconnected', 'error'] as const) {
+				expect(commandsFor(menu, clusterContextValue(status))).not.toContain('vmm.cancelConnect');
+			}
+		}
+		for (const status of ['connected', 'disconnected', 'error'] as const) {
+			expect(commandsFor('view/item/context', clusterContextValue(status), { inline: true })).not.toContain('vmm.cancelConnect');
+		}
+	});
+});
+
+describe('overview menu', () => {
+	// Same check as the VS Code integration test, so a missing entry fails fast and locally.
+	it('mirrors the tree menu: same commands, same state rules, same order', () => {
+		const tree = menus['view/item/context']
+			.filter((m) => !m.group.startsWith('inline'))
+			.map((m) => [m.command, m.when.replace('view == vmm.clusters && viewItem', '')]);
+		const overview = menus['webview/context'].map((m) => [m.command, m.when.replace('webviewId == vmm.overview && vmmItem', '')]);
+		expect(overview).toEqual(tree);
 	});
 });

@@ -24,6 +24,13 @@ export interface ClusterRuntime {
 	connecting?: Promise<ClusterConnection>;
 	refreshing?: Promise<void>;
 	changeSubscription?: vscode.Disposable;
+	/** The user ended the session: do not reconnect (and ask for credentials) until they ask. */
+	signedOut?: boolean;
+	/** The user cancelled a connection attempt; shown as such until they try again. */
+	cancelled?: boolean;
+	/** An automatic connect needed the user (password, 2FA, browser): wait for them to ask. */
+	signInRequired?: boolean;
+	abort?: AbortController;
 }
 
 export interface VmLocation {
@@ -123,7 +130,7 @@ export class ConnectionManager implements vscode.Disposable {
 	// -----------------------------------------------------------------------------------------
 
 	/** Connects (once) and returns the live connection. Throws with a user-facing message. */
-	async connect(clusterId: string): Promise<ClusterConnection> {
+	async connect(clusterId: string, interactive = false): Promise<ClusterConnection> {
 		const rt = this.runtimes.get(clusterId);
 		if (!rt) throw new Error('Cluster not found');
 		if (rt.connection) return rt.connection;
@@ -136,56 +143,112 @@ export class ConnectionManager implements vscode.Disposable {
 				this.setStatus(rt, 'missingProvider', `Provider "${rt.cluster.providerId}" is not installed`);
 				throw new Error(rt.error);
 			}
+			const abort = (rt.abort = new AbortController());
 			try {
 				const secrets = await this.store.secrets(rt.cluster);
-				const connection = await provider.connect(rt.cluster, secrets, {
+				const attempt = provider.connect(rt.cluster, secrets, {
 					storagePath: this.storagePath(rt.cluster),
-					log: scopedLogger(`${provider.id}:${rt.cluster.name}`)
+					log: scopedLogger(`${provider.id}:${rt.cluster.name}`),
+					signal: abort.signal,
+					interactive
 				});
+				// A provider that is waiting on the user cannot always be interrupted: stop waiting for it anyway.
+				const cancelled = new Promise<never>((_, reject) => abort.signal.addEventListener('abort', () => reject(new Error('Connection cancelled.')), { once: true }));
+				// If the provider finishes after the user cancelled, nobody owns that connection any more.
+				attempt.then((late) => { if (abort.signal.aborted) late.dispose(); }, () => {});
+				const connection = await Promise.race([attempt, cancelled]);
 				rt.connection = connection;
 				rt.changeSubscription = connection.onDidChange?.(() => void this.refresh(clusterId));
 				this.setStatus(rt, 'connected');
 				return connection;
 			} catch (error) {
+				if ((error as { code?: string }).code === 'authRequired') {
+					// Not a failure: the provider needs the user. Wait until they click connect.
+					rt.signedOut = true;
+					rt.signInRequired = true;
+					this.setStatus(rt, 'disconnected');
+					throw error;
+				}
+				if (abort.signal.aborted) {
+					// Cancelled by the user: not a failure. Stay idle until they connect again.
+					rt.signedOut = true;
+					rt.cancelled = true;
+					this.setStatus(rt, 'disconnected');
+					throw error;
+				}
 				this.setStatus(rt, 'error', errorMessage(error));
 				throw error;
 			}
 		})().finally(() => {
 			rt.connecting = undefined;
+			rt.abort = undefined;
 		});
 		return rt.connecting;
 	}
 
 	async ensureLoaded(clusterId: string): Promise<void> {
 		const rt = this.runtimes.get(clusterId);
-		if (!rt || rt.loaded || rt.status === 'error' || rt.status === 'missingProvider') return;
-		await this.refresh(clusterId);
+		if (!rt || rt.loaded || rt.signedOut || rt.status === 'error' || rt.status === 'missingProvider') return;
+		// Opening the view must never prompt: a provider that needs the user reports it instead.
+		await this.refreshRuntime(rt);
 	}
 
 	/** Refresh one cluster, or every cluster that has been loaded before. */
 	async refresh(clusterId?: string): Promise<void> {
 		if (clusterId) {
 			const rt = this.runtimes.get(clusterId);
-			if (rt) await this.refreshRuntime(rt);
+			if (rt) {
+				rt.signedOut = false;
+				rt.cancelled = false;
+				rt.signInRequired = false;
+				await this.refreshRuntime(rt, true);
+			}
 			return;
 		}
-		await Promise.all(this.clusters().map((rt) => this.refreshRuntime(rt)));
+		await Promise.all(this.clusters().filter((rt) => !rt.signedOut).map((rt) => this.refreshRuntime(rt)));
+	}
+
+	/** Stops a connection attempt that is still running (typically a sign-in waiting for the user). */
+	cancelConnect(clusterId: string): void {
+		this.runtimes.get(clusterId)?.abort?.abort();
+	}
+
+	/** Ends the provider's sign-in session, drops the connection and stays disconnected until asked to connect. */
+	async signOut(clusterId: string): Promise<void> {
+		const rt = this.runtimes.get(clusterId);
+		if (!rt) return;
+		try {
+			await rt.connection?.signOut?.();
+		} catch (error) {
+			log.warn(`Signing out of ${rt.cluster.name} failed: ${errorMessage(error)}`);
+		}
+		this.disconnect(rt);
+		rt.nodes = [];
+		rt.loaded = false;
+		rt.signedOut = true;
+		rt.cancelled = false;
+		rt.signInRequired = false;
+		this.setStatus(rt, 'disconnected');
+		this.updateContextKeys();
 	}
 
 	async reconnect(clusterId: string): Promise<void> {
 		const rt = this.runtimes.get(clusterId);
 		if (!rt) return;
+		rt.signedOut = false;
+		rt.cancelled = false;
+		rt.signInRequired = false;
 		this.disconnect(rt);
 		rt.loaded = false;
 		this.setStatus(rt, 'disconnected');
-		await this.refreshRuntime(rt);
+		await this.refreshRuntime(rt, true);
 	}
 
-	private async refreshRuntime(rt: ClusterRuntime): Promise<void> {
+	private async refreshRuntime(rt: ClusterRuntime, interactive = false): Promise<void> {
 		if (rt.refreshing) return rt.refreshing;
 		rt.refreshing = (async () => {
 			try {
-				const connection = await this.connect(rt.cluster.id);
+				const connection = await this.connect(rt.cluster.id, interactive);
 				const nodes = await connection.listNodes();
 				const snapshots = await Promise.all(
 					nodes.map(async (node): Promise<NodeSnapshot> => {
@@ -209,6 +272,7 @@ export class ConnectionManager implements vscode.Disposable {
 				this.emitter.fire(rt.cluster.id);
 				this.updateContextKeys();
 			} catch (error) {
+				if (rt.signedOut) return;
 				rt.loaded = true;
 				if (rt.status !== 'missingProvider') this.setStatus(rt, 'error', errorMessage(error));
 				log.warn(`Refreshing ${rt.cluster.name} failed: ${errorMessage(error)}`);
@@ -375,6 +439,8 @@ export class ConnectionManager implements vscode.Disposable {
 	private updateContextKeys(): void {
 		void vscode.commands.executeCommand('setContext', 'vmm.hasClusters', this.store.all().length > 0);
 		void vscode.commands.executeCommand('setContext', 'vmm.hasVms', this.allVms().length > 0);
+		// Remembered console credentials only exist for providers that open RDP consoles (Hyper-V).
+		void vscode.commands.executeCommand('setContext', 'vmm.hasRdpClusters', this.clusters().some((rt) => rt.connection?.capabilities.consoles.includes('rdp')));
 	}
 
 	dispose(): void {

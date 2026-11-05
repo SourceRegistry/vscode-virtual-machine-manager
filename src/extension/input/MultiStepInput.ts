@@ -117,7 +117,7 @@ export async function collectFields(
 	const values: FieldValues = { ...initial };
 	const offset = options.stepOffset ?? 0;
 	// Which fields apply can change as the user answers (a sign-in method shows its own fields).
-	const applicable = () => asked.filter((f) => isFieldVisible(f, values));
+	const applicable = () => asked.filter((f) => isFieldVisible(f, values, fields));
 	let index = 0;
 	while (index < applicable().length) {
 		const steps = applicable();

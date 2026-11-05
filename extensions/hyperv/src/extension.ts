@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { CORE_EXTENSION_ID, VMM_API_VERSION, type VmManagerApi } from '@vmm/sdk';
+import { CORE_EXTENSION_ID, VMM_API_VERSION, checkApiCompatibility, type VmManagerApi } from '@vmm/sdk';
 import { HyperVProvider } from './HyperVProvider';
 import { PowerShellSession } from './PowerShellSession';
 import { PREREQUISITES } from './scripts';
@@ -8,10 +8,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	const core = vscode.extensions.getExtension<VmManagerApi>(CORE_EXTENSION_ID);
 	if (!core) throw new Error('VM Manager is not installed');
 	const api = core.isActive ? core.exports : await core.activate();
-	if (api.apiVersion !== VMM_API_VERSION) {
-		void vscode.window.showWarningMessage(
-			`VM Manager – Hyper-V expects API version ${VMM_API_VERSION} but VM Manager provides ${api.apiVersion}. Update both extensions.`
-		);
+	const compatibility = checkApiCompatibility('Hyper-V provider', VMM_API_VERSION, api);
+	if (!compatibility.ok) {
+		void vscode.window.showErrorMessage(compatibility.message!);
+		throw new Error(compatibility.message);
 	}
 	context.subscriptions.push(
 		api.registerProvider(new HyperVProvider()) as vscode.Disposable,
