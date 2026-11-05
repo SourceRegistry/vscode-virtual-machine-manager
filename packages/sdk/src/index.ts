@@ -345,6 +345,12 @@ export interface ProviderContext {
 	/** Directory reserved for this provider + cluster (created on demand by the provider). */
 	storagePath: string;
 	log: Logger;
+	/**
+	 * `false` for a connection the extension starts by itself (opening the view, a refresh): the provider
+	 * must not prompt or open a browser, and throws `ProviderError(…, 'authRequired')` when it cannot
+	 * connect without. `true` when the user asked to connect. Absent = interactive.
+	 */
+	interactive?: boolean;
 	/** Aborted when the user cancels the connection attempt (e.g. a sign-in waiting on a browser). */
 	signal?: AbortSignal;
 }
@@ -504,7 +510,7 @@ export class ProviderError extends Error {
 	 */
 	constructor(
 		message: string,
-		readonly code: 'notFound' | 'unsupported' | 'permission' | 'unavailable' | 'invalid' | 'timeout' | 'failed' = 'failed'
+		readonly code: 'notFound' | 'unsupported' | 'permission' | 'unavailable' | 'invalid' | 'timeout' | 'authRequired' | 'failed' = 'failed'
 	) {
 		super(message);
 		this.name = 'ProviderError';

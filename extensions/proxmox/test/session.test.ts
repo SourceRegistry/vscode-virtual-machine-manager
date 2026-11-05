@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { connectionOptions } from '../src/ProxmoxProvider';
+import { connectionOptions, ProxmoxProvider } from '../src/ProxmoxProvider';
 import { openIdLogin, qualifiedUser, SessionStore, withParam, type Session, type SessionUi } from '../src/session';
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify({ data }), { status });
@@ -119,5 +119,34 @@ describe('Proxmox connection options by method', () => {
 		expect(() => connectionOptions(cluster({ authMethod: 'openid', realm: 'oidc', oidcPort: 80 }), {})).toThrow();
 		expect(() => connectionOptions(cluster({ authMethod: 'openid' }), {})).toThrow();
 		expect(() => connectionOptions(cluster({ authMethod: 'saml' }), {})).toThrow();
+	});
+});
+
+describe('Proxmox automatic connect', () => {
+	const cluster = (config: Record<string, unknown>) => ({ id: 'c', name: 'C', providerId: 'proxmox', config: { endpoint: 'https://pve.test:8006', ...config } });
+	const context = (interactive: boolean) => ({ storagePath: '', log: { info() {}, warn() {}, error() {}, debug() {} }, interactive });
+	function provider() {
+		const host = { prompt: vi.fn().mockResolvedValue('x'), openUrl: vi.fn().mockResolvedValue(undefined), store: { get: vi.fn().mockResolvedValue(undefined), set: vi.fn(), remove: vi.fn(), clear: vi.fn() } };
+		return { host, provider: new ProxmoxProvider(host as never) };
+	}
+
+	it('asks for sign-in instead of prompting when a password session has no password', async () => {
+		const { host, provider: p } = provider();
+		await expect(p.connect(cluster({ authMethod: 'password', username: 'root' }), {}, context(false))).rejects.toMatchObject({ code: 'authRequired' });
+		expect(host.prompt).not.toHaveBeenCalled();
+	});
+
+	it('does not open a browser for OpenID', async () => {
+		const { host, provider: p } = provider();
+		await expect(p.connect(cluster({ authMethod: 'openid', realm: 'oidc' }), {}, context(false))).rejects.toMatchObject({ code: 'authRequired' });
+		expect(host.openUrl).not.toHaveBeenCalled();
+		expect(host.prompt).not.toHaveBeenCalled();
+	});
+
+	it('still prompts when the user asked to connect', async () => {
+		const { host, provider: p } = provider();
+		// The prompt answers, then the (unreachable) server fails: what matters is that the user was asked.
+		await p.connect(cluster({ authMethod: 'password', username: 'root' }), {}, context(true)).catch(() => {});
+		expect(host.prompt).toHaveBeenCalled();
 	});
 });

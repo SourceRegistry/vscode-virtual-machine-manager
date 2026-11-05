@@ -105,9 +105,12 @@ export class ProxmoxProvider implements HypervisorProvider {
 	private readonly askAgain = new Set<string>();
 	async connect(cluster: ClusterConfig, secrets: SecretBag, context?: ProviderContext): Promise<ProxmoxConnection> {
 		let options = connectionOptions(cluster, secrets);
+		// An automatic connect (opening the view) must never prompt or open a browser: report that sign-in is needed.
+		const needsUser = async (): Promise<never> => { throw new ProviderError('Sign in required.', 'authRequired'); };
+		const ui: SessionUi = context?.interactive === false ? { prompt: needsUser, openUrl: needsUser } : this.host;
 		const again = this.askAgain.has(cluster.id) && options.method !== 'token';
 		if (again && options.method === 'password') {
-			const entered = await this.host.prompt({ title: 'Proxmox sign-in', prompt: 'User name (add @realm for another realm)', value: options.username });
+			const entered = await ui.prompt({ title: 'Proxmox sign-in', prompt: 'User name (add @realm for another realm)', value: options.username });
 			if (!entered?.trim()) throw new ProviderError('Sign-in cancelled.', 'permission');
 			options = { ...options, username: qualifiedUser(entered.trim(), String(cluster.config.realm ?? '')), password: undefined };
 		}
@@ -120,10 +123,10 @@ export class ProxmoxProvider implements HypervisorProvider {
 				const connection = open(new Client({ ...base, apiToken: options.apiToken }));
 				try { await connection.listNodes(); return connection; } catch (error) { connection.dispose(); throw error; }
 			}
-			const stored = options.method === 'password' ? await this.host.store.get(cluster.id, options.baseUrl, options.username) : undefined;
+			const stored = await this.host.store.get(cluster.id, options.baseUrl, options.method === 'password' ? options.username : undefined);
 			for (const reuse of stored ? [true, false] : [false]) {
 				// The password (if any) is only used for the login; the working client holds just the ticket.
-				const session = reuse ? stored! : await this.login(options, again, context?.signal, base);
+				const session = reuse ? stored! : await this.login(options, again, context?.signal, ui, base);
 				const client = new Client({ ...base, session });
 				client.onSession((next) => void this.host.store.set(cluster.id, options.baseUrl, next).catch(() => {}));
 				const connection = open(client);
@@ -141,13 +144,15 @@ export class ProxmoxProvider implements HypervisorProvider {
 			throw new ProviderError('Could not sign in to Proxmox.', 'permission');
 		} catch (error) { agent.destroy(); throw error; }
 	}
-	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, again: boolean, signal: AbortSignal | undefined, base: { baseUrl: string; agent: Agent; fetch: typeof fetch }): Promise<PveSession> {
-		if (options.method === 'openid') return openIdLogin(base.fetch, options.baseUrl, options.realm, options.port, this.host, AbortSignal.any([AbortSignal.timeout(5 * 60 * 1000), ...(signal ? [signal] : [])]), again);
-		const password = options.password ?? await this.host.prompt({ title: `Proxmox sign-in for ${options.username}`, prompt: 'Password', password: true });
+	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, again: boolean, signal: AbortSignal | undefined, ui: SessionUi, base: { baseUrl: string; agent: Agent; fetch: typeof fetch }): Promise<PveSession> {
+		// Do not even start the callback listener or ask Proxmox for the identity provider's address.
+		if (options.method === 'openid' && ui !== this.host) throw new ProviderError('Sign in required.', 'authRequired');
+		if (options.method === 'openid') return openIdLogin(base.fetch, options.baseUrl, options.realm, options.port, ui, AbortSignal.any([AbortSignal.timeout(5 * 60 * 1000), ...(signal ? [signal] : [])]), again);
+		const password = options.password ?? await ui.prompt({ title: `Proxmox sign-in for ${options.username}`, prompt: 'Password', password: true });
 		if (!password) throw new ProviderError('Sign-in cancelled.', 'permission');
 		const client = new Client({
 			...base, username: options.username, password,
-			tfa: async (challenge) => this.host.prompt({ title: `Proxmox sign-in for ${challenge.username}`, prompt: 'Two-factor code (authenticator app, or a recovery key)', placeholder: '123456' })
+			tfa: async (challenge) => ui.prompt({ title: `Proxmox sign-in for ${challenge.username}`, prompt: 'Two-factor code (authenticator app, or a recovery key)', placeholder: '123456' })
 		});
 		try { await client.login(); } catch (error) {
 			if (/HTTP (401|403)/.test(String(error))) throw new ProviderError('Proxmox rejected the sign-in. Check the user name, realm, password and authentication code.', 'permission');

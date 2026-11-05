@@ -219,7 +219,7 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 			return item;
 		}
 		if (rt?.signedOut) {
-			const item = new vscode.TreeItem(rt.cancelled ? 'Sign-in cancelled — click to try again' : 'Signed out — click to sign in');
+			const item = new vscode.TreeItem(rt.cancelled ? 'Sign-in cancelled — click to try again' : rt.signInRequired ? 'Sign in required — click to sign in' : 'Signed out — click to sign in');
 			item.iconPath = new vscode.ThemeIcon('sign-in');
 			item.command = { command: 'vmm.reconnectCluster', title: 'Sign In', arguments: [{ kind: 'cluster', clusterId }] };
 			item.id = `msg:${clusterId}:signedOut`;

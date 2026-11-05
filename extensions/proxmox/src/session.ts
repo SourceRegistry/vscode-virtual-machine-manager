@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import type { PveSession } from 'pve-client';
 import { ProviderError } from '@vmm/sdk';
+import { oidcPage } from './oidcPage';
 
 /** Proxmox tickets live two hours; renew well before that. */
 export const TICKET_LIFETIME_MS = 2 * 60 * 60 * 1000;
@@ -61,8 +62,13 @@ export function receiveOpenIdRedirect(port: number, signal: AbortSignal, timeout
 			const state = url.searchParams.get('state');
 			const error = url.searchParams.get('error');
 			if (!code && !state && !error) { res.writeHead(404).end(); return; }
-			res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-			res.end(code && state ? 'Signed in. You can close this tab and return to VS Code.' : 'Sign-in failed. Return to VS Code.');
+			res.writeHead(200, {
+				'Content-Type': 'text/html; charset=utf-8',
+				'Cache-Control': 'no-store',
+				'Referrer-Policy': 'no-referrer',
+				'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+			});
+			res.end(oidcPage(!!(code && state)));
 			done(code && state ? undefined : new ProviderError(`The identity provider refused the sign-in${error ? ` (${error})` : ''}.`, 'permission'), code && state ? { code, state } : undefined);
 		});
 		const timer = setTimeout(() => done(new ProviderError('OpenID sign-in timed out.', 'timeout')), timeoutMs);
@@ -117,9 +123,9 @@ export class SessionStore {
 	private async all(): Promise<Record<string, StoredEntry>> {
 		try { return JSON.parse((await this.vault.read()) ?? '{}') as Record<string, StoredEntry>; } catch { return {}; }
 	}
-	async get(clusterId: string, baseUrl: string, username: string): Promise<Session | undefined> {
+	async get(clusterId: string, baseUrl: string, username?: string): Promise<Session | undefined> {
 		const entry = (await this.all())[clusterId];
-		if (!entry || entry.baseUrl !== baseUrl || entry.username.toLowerCase() !== username.toLowerCase() || !sessionFresh(entry)) return undefined;
+		if (!entry || entry.baseUrl !== baseUrl || (username && entry.username.toLowerCase() !== username.toLowerCase()) || !sessionFresh(entry)) return undefined;
 		return { ticket: entry.ticket, csrf: entry.csrf, username: entry.username, issued: entry.issued };
 	}
 	async set(clusterId: string, baseUrl: string, session: Session): Promise<void> {

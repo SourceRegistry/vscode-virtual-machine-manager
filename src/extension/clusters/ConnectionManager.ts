@@ -28,6 +28,8 @@ export interface ClusterRuntime {
 	signedOut?: boolean;
 	/** The user cancelled a connection attempt; shown as such until they try again. */
 	cancelled?: boolean;
+	/** An automatic connect needed the user (password, 2FA, browser): wait for them to ask. */
+	signInRequired?: boolean;
 	abort?: AbortController;
 }
 
@@ -128,7 +130,7 @@ export class ConnectionManager implements vscode.Disposable {
 	// -----------------------------------------------------------------------------------------
 
 	/** Connects (once) and returns the live connection. Throws with a user-facing message. */
-	async connect(clusterId: string): Promise<ClusterConnection> {
+	async connect(clusterId: string, interactive = false): Promise<ClusterConnection> {
 		const rt = this.runtimes.get(clusterId);
 		if (!rt) throw new Error('Cluster not found');
 		if (rt.connection) return rt.connection;
@@ -147,7 +149,8 @@ export class ConnectionManager implements vscode.Disposable {
 				const attempt = provider.connect(rt.cluster, secrets, {
 					storagePath: this.storagePath(rt.cluster),
 					log: scopedLogger(`${provider.id}:${rt.cluster.name}`),
-					signal: abort.signal
+					signal: abort.signal,
+					interactive
 				});
 				// A provider that is waiting on the user cannot always be interrupted: stop waiting for it anyway.
 				const cancelled = new Promise<never>((_, reject) => abort.signal.addEventListener('abort', () => reject(new Error('Connection cancelled.')), { once: true }));
@@ -159,6 +162,13 @@ export class ConnectionManager implements vscode.Disposable {
 				this.setStatus(rt, 'connected');
 				return connection;
 			} catch (error) {
+				if ((error as { code?: string }).code === 'authRequired') {
+					// Not a failure: the provider needs the user. Wait until they click connect.
+					rt.signedOut = true;
+					rt.signInRequired = true;
+					this.setStatus(rt, 'disconnected');
+					throw error;
+				}
 				if (abort.signal.aborted) {
 					// Cancelled by the user: not a failure. Stay idle until they connect again.
 					rt.signedOut = true;
@@ -179,7 +189,8 @@ export class ConnectionManager implements vscode.Disposable {
 	async ensureLoaded(clusterId: string): Promise<void> {
 		const rt = this.runtimes.get(clusterId);
 		if (!rt || rt.loaded || rt.signedOut || rt.status === 'error' || rt.status === 'missingProvider') return;
-		await this.refresh(clusterId);
+		// Opening the view must never prompt: a provider that needs the user reports it instead.
+		await this.refreshRuntime(rt);
 	}
 
 	/** Refresh one cluster, or every cluster that has been loaded before. */
@@ -189,7 +200,8 @@ export class ConnectionManager implements vscode.Disposable {
 			if (rt) {
 				rt.signedOut = false;
 				rt.cancelled = false;
-				await this.refreshRuntime(rt);
+				rt.signInRequired = false;
+				await this.refreshRuntime(rt, true);
 			}
 			return;
 		}
@@ -215,6 +227,7 @@ export class ConnectionManager implements vscode.Disposable {
 		rt.loaded = false;
 		rt.signedOut = true;
 		rt.cancelled = false;
+		rt.signInRequired = false;
 		this.setStatus(rt, 'disconnected');
 		this.updateContextKeys();
 	}
@@ -224,17 +237,18 @@ export class ConnectionManager implements vscode.Disposable {
 		if (!rt) return;
 		rt.signedOut = false;
 		rt.cancelled = false;
+		rt.signInRequired = false;
 		this.disconnect(rt);
 		rt.loaded = false;
 		this.setStatus(rt, 'disconnected');
-		await this.refreshRuntime(rt);
+		await this.refreshRuntime(rt, true);
 	}
 
-	private async refreshRuntime(rt: ClusterRuntime): Promise<void> {
+	private async refreshRuntime(rt: ClusterRuntime, interactive = false): Promise<void> {
 		if (rt.refreshing) return rt.refreshing;
 		rt.refreshing = (async () => {
 			try {
-				const connection = await this.connect(rt.cluster.id);
+				const connection = await this.connect(rt.cluster.id, interactive);
 				const nodes = await connection.listNodes();
 				const snapshots = await Promise.all(
 					nodes.map(async (node): Promise<NodeSnapshot> => {
@@ -258,7 +272,7 @@ export class ConnectionManager implements vscode.Disposable {
 				this.emitter.fire(rt.cluster.id);
 				this.updateContextKeys();
 			} catch (error) {
-				if (rt.cancelled) return;
+				if (rt.signedOut) return;
 				rt.loaded = true;
 				if (rt.status !== 'missingProvider') this.setStatus(rt, 'error', errorMessage(error));
 				log.warn(`Refreshing ${rt.cluster.name} failed: ${errorMessage(error)}`);
