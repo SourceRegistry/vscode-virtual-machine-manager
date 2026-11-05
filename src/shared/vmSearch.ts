@@ -15,10 +15,23 @@ export function searchableText(vm: VmInfo, extra: string[] = []): string {
 		.join('\n');
 }
 
-/** Every whitespace-separated word of the query must occur somewhere. An empty query matches all. */
+/**
+ * Every whitespace-separated word of the query must match. `#105` matches ids that start with 105;
+ * anything else is a substring of the name, id, an IP, a MAC (any separators), the cluster or the node.
+ * An empty query matches all.
+ */
 export function matchesQuery(query: string, vm: VmInfo, extra: string[] = []): boolean {
 	const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 	if (!words.length) return true;
 	const text = searchableText(vm, extra);
-	return words.every((word) => text.includes(word) || (/^[0-9a-f:.-]+$/.test(word) && text.includes(word.replace(/[:.-]/g, ''))));
+	const ids = [vm.id, vm.displayId].filter((v): v is string => !!v).map((v) => v.toLowerCase());
+	return words.every((word) => {
+		if (word.startsWith('#')) {
+			const wanted = word.slice(1);
+			return !wanted || ids.some((id) => id.startsWith(wanted));
+		}
+		if (text.includes(word)) return true;
+		// A MAC typed with other separators than stored; an IP-looking word must not be stripped.
+		return /^[0-9a-f:.-]+$/.test(word) && !/^[\d.]+$/.test(word) && text.includes(word.replace(/[:.-]/g, ''));
+	});
 }

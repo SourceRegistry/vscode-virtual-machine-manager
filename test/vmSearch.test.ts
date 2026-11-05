@@ -29,4 +29,19 @@ describe('VM search', () => {
 		expect(matchesQuery('prod', vm, ['Production', 'pve1'])).toBe(true);
 		expect(matchesQuery('prod', vm)).toBe(false);
 	});
+
+	it('takes #<id> as an id prefix, alone or combined with an address', () => {
+		expect(matchesQuery('#105', vm)).toBe(true);
+		expect(matchesQuery('#10', vm)).toBe(true);
+		expect(matchesQuery('#5', vm)).toBe(false);
+		expect(matchesQuery('#', vm)).toBe(true);
+		expect(matchesQuery('#105 192.168.1.20', vm)).toBe(true);
+		expect(matchesQuery('#106 192.168.1.20', vm)).toBe(false);
+	});
+
+	it('finds a full IP, and does not mistake an IP for a MAC', () => {
+		expect(matchesQuery('192.168.1.20', vm)).toBe(true);
+		expect(matchesQuery('192.168.1.21', vm)).toBe(false);
+		expect(matchesQuery('192.168.1', { ...vm, ipAddresses: [], macAddresses: ['AA:19:21:68:10:00'] })).toBe(false);
+	});
 });
