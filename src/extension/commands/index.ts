@@ -109,6 +109,8 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 				label: `${vm.displayId ? `#${vm.displayId}  ` : ''}${vm.name}`,
 				description: stateLabel(vm.state),
 				detail: [`${location.cluster.cluster.name} › ${location.node.name}`, ...addresses].join('  ·  '),
+				// Filtered by matchesQuery below; VS Code's own label filter would hide IP and MAC matches.
+				alwaysShow: true,
 				location
 			};
 		});
