@@ -11,6 +11,7 @@ import { BACK, collectFields, pickStep, textStep, type PickItem } from '../input
 import type { ConsoleManager } from '../webview/ConsoleManager';
 import type { RdpCredentialStore } from '../rdp/credentials';
 import { OverviewPanel } from '../webview/OverviewPanel';
+import { VmDashboardPanel } from '../webview/VmDashboardPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, log, showError } from '../util/log';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
@@ -515,6 +516,10 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		),
 		register('vmm.showWalkthrough', () => vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH_ID, false)),
 		register('vmm.createVm', (arg) => createVm(arg)),
+		register('vmm.openVmDashboard', async (arg) => {
+			const location = await resolveVm(arg, 'Select a virtual machine to show the details of');
+			if (location) VmDashboardPanel.show(context.extensionUri, manager, location.ref);
+		}),
 		register('vmm.editVm', async (arg) => {
 			const location = await resolveVm(arg, 'Select a virtual machine to configure');
 			if (location) VmSettingsPanel.show(context.extensionUri, manager, location.ref);

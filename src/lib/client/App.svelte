@@ -3,6 +3,7 @@
 	import type { BootData } from '../../shared/protocol';
 	import Overview from './views/Overview.svelte';
 	import VmSettings from './views/VmSettings.svelte';
+	import VmDashboard from './views/VmDashboard.svelte';
 	import ConsoleVnc from './views/ConsoleVnc.svelte';
 	import ConsoleSerial from './views/ConsoleSerial.svelte';
 	import ConsolePreview from './views/ConsolePreview.svelte';
@@ -15,6 +16,8 @@
 	<Overview />
 {:else if boot.view === 'vmSettings'}
 	<VmSettings {boot} />
+{:else if boot.view === 'vmDashboard'}
+	<VmDashboard {boot} />
 {:else if boot.view === 'console.vnc'}
 	<ConsoleVnc {boot} />
 {:else if boot.view === 'console.serial'}

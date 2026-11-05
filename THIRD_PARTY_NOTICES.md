@@ -9,6 +9,7 @@ The core extension's webview bundle (`dist/webview`) contains the following thir
 | xterm.js, @xterm/addon-fit | 6.0.0, 0.11.0 | MIT | https://github.com/xtermjs/xterm.js |
 | Svelte | 5 | MIT | https://github.com/sveltejs/svelte |
 | Bootstrap Icons | 1.13.2 | MIT | https://github.com/twbs/icons |
+| uPlot | 1.6.32 | MIT | https://github.com/leeoniya/uPlot |
 | Codicons | 0.0.46 | CC-BY-4.0 | https://github.com/microsoft/vscode-codicons |
 
 IronRDP's license texts are included in `vendor/ironrdp/LICENSE-MIT` and

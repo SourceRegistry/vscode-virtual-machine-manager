@@ -125,6 +125,17 @@ describe.each(['view/item/context', 'webview/context'])('%s media actions', (men
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s details action', (menu) => {
+	it('offers Show Details first in the manage group when the provider reports details or stats', () => {
+		const detailed: Capabilities = { ...caps, details: true };
+		const commands = commandsFor(menu, vmContextValue(vm('running'), detailed));
+		expect(commands).toContain('vmm.openVmDashboard');
+		expect(commands.indexOf('vmm.openVmDashboard')).toBeLessThan(commands.indexOf('vmm.editVm'));
+		expect(commandsFor(menu, vmContextValue(vm('running'), { ...caps, stats: true }))).toContain('vmm.openVmDashboard');
+		expect(commandsFor(menu, vmContextValue(vm('running'), caps))).not.toContain('vmm.openVmDashboard');
+	});
+});
+
 describe('tree inline eject', () => {
 	const withMedia: Capabilities = { ...caps, media: true };
 	const inline = (v: VmInfo) => commandsFor('view/item/context', vmContextValue(v, withMedia), { inline: true });

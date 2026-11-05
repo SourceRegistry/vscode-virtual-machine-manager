@@ -10,10 +10,12 @@ import type {
 	PowerAction,
 	PreviewFrame,
 	VmConfig,
-	VmInfo
+	VmDetails,
+	VmInfo,
+	VmStats
 } from '@vmm/sdk';
 
-export type ViewKind = 'overview' | 'vmSettings' | 'console.vnc' | 'console.serial' | 'console.preview' | 'console.rdp';
+export type ViewKind = 'overview' | 'vmSettings' | 'vmDashboard' | 'console.vnc' | 'console.serial' | 'console.preview' | 'console.rdp';
 
 export interface VmRef {
 	clusterId: string;
@@ -89,6 +91,9 @@ export type OverviewCommand =
 	| 'vmm.connectSerial'
 	| 'vmm.openExternal'
 	| 'vmm.editVm'
+	| 'vmm.openVmDashboard'
+	| 'vmm.ejectMedia'
+	| 'vmm.changeMedia'
 	| 'vmm.deleteVm'
 	| 'vmm.createVm'
 	| 'vmm.addCluster'
@@ -103,6 +108,11 @@ export interface RpcMethods {
 		params: { command: OverviewCommand; ref?: VmRef; clusterId?: string; nodeId?: string };
 		result: void;
 	};
+	// vm dashboard
+	getDashboard: { params: void; result: { vm?: VmInfo; capabilities?: Capabilities } };
+	getDetails: { params: void; result: VmDetails | undefined };
+	/** `undefined` while the panel is hidden (no work done) or the provider has no statistics. */
+	getStats: { params: void; result: VmStats | undefined };
 	// vm settings
 	getConfig: { params: void; result: VmConfig & { vm?: VmInfo } };
 	save: { params: { values: FieldValues }; result: { message: string } };

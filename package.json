@@ -137,6 +137,12 @@
         "icon": "$(add)"
       },
       {
+        "command": "vmm.openVmDashboard",
+        "title": "Show Details",
+        "category": "VM",
+        "icon": "$(graph)"
+      },
+      {
         "command": "vmm.editVm",
         "title": "Settings",
         "category": "VM",
@@ -282,6 +288,10 @@
         {
           "command": "vmm.createVm",
           "when": "vmm.hasClusters"
+        },
+        {
+          "command": "vmm.openVmDashboard",
+          "when": "vmm.hasVms"
         },
         {
           "command": "vmm.editVm",
@@ -503,6 +513,11 @@
           "group": "2_media@2"
         },
         {
+          "command": "vmm.openVmDashboard",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdetails;/",
+          "group": "3_manage@0"
+        },
+        {
           "command": "vmm.editVm",
           "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bedit;/",
           "group": "3_manage@1"
@@ -635,6 +650,11 @@
           "command": "vmm.changeMedia",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bmedia;/",
           "group": "2_media@2"
+        },
+        {
+          "command": "vmm.openVmDashboard",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bdetails;/",
+          "group": "3_manage@0"
         },
         {
           "command": "vmm.editVm",
@@ -784,6 +804,7 @@
     "@vscode/codicons": "^0.0.46-24",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "bootstrap-icons": "^1.13.2"
+    "bootstrap-icons": "^1.13.2",
+    "uplot": "^1.6.32"
   }
 }

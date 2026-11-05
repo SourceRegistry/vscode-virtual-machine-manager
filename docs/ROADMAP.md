@@ -19,7 +19,7 @@ Status: `todo` · `in progress` · `testing` · `merged`
 |---|--------|---------|--------|
 | 1 | `fix/qemu-shutdown` | patch | testing |
 | 2 | `feat/vm-details-sdk` | minor | testing (stacked on phase 1) |
-| 3 | `feat/vm-dashboard` | minor | todo |
+| 3 | `feat/vm-dashboard` | minor | testing (stacked on phase 2) |
 | 4 | `feat/host-dashboard` | minor | todo |
 | 5 | `feat/qemu-network` | minor | todo |
 | 6 | `feat/qemu-import` | minor | todo |
@@ -72,18 +72,26 @@ Branched from `fix/qemu-shutdown` (phase 1 not merged yet): merge phase 1 first,
 
 ## Phase 3: `feat/vm-dashboard`
 
-- [ ] Per-VM Svelte panel, opened from tree and overview
-- [ ] Header: state, uptime, console button, power actions
-- [ ] Hardware cards: disks, CD drives (with Eject / Change ISO), NICs, PCI/USB devices
-- [ ] Network table: IPs, port forwards
-- [ ] Live charts with uPlot (vendored), rolling 5 min window, ~2 s sampling:
-  - [ ] CPU
-  - [ ] RAM
-  - [ ] disk throughput + IOPS
-  - [ ] disk latency / stall (from blockstats time deltas)
-  - [ ] net
-- [ ] VS Code theme tokens for styling
-- [ ] Stats polling only while panel is visible
+Stacked on `feat/vm-details-sdk` (phases 1 and 2 not merged yet).
+
+- [x] Per-VM Svelte panel (`VM: Show Details`), in the tree and overview context menus (when the provider reports details or stats) and the command palette
+- [x] Header: state, power actions, console, settings
+- [x] Stat tiles: uptime, processors, memory, IP, CPU now, disk I/O now
+- [x] Hardware cards: disks and CD/DVD drives (with Change ISO / Eject), network adapters (MAC, IPs, "needs a guest agent" hint), port forwards, PCI devices
+- [x] Live charts with uPlot (npm dependency, bundled into the webview), rolling 5 min window, sampled every 2 s:
+  - [x] CPU
+  - [x] Memory
+  - [x] Disk throughput (read/write)
+  - [x] Disk operations (read/write IOPS)
+  - [x] Disk latency: average service time per request. Idle intervals are gaps, not zeros
+  - [ ] Network throughput: no provider reports it yet (QEMU user networking has no counters)
+- [x] "Show data" table of the last samples (accessibility)
+- [x] Colors: four hues of the validated reference palette, light and dark (`src/lib/client/chartPalette.ts`); VS Code theme tokens for everything else
+- [x] Polling: sequential loop (a slow provider slows it down instead of piling up), host skips the work while the tab is hidden, history resets when the VM stops or restarts
+- [x] Tests: rate derivation, counter resets, tick steps, formatting, menu entries
+- [x] Rendered and checked in Chrome against mocked data (dark, light, stopped)
+- [ ] Manual check in VS Code against a real running VM
+- [ ] Memory chart for QEMU shows the host's resident memory of the QEMU process, not guest-internal usage (needs a balloon/guest agent; not done)
 
 ## Phase 4: `feat/host-dashboard`
 
