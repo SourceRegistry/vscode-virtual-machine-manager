@@ -443,7 +443,7 @@
 											</td>
 										</tr>
 									{:else if !details.forwards.length}
-										<tr><td colspan="5" class="muted">None. Use + to forward a host port to the guest, e.g. SSH.</td></tr>
+										<tr class="empty-row"><td colspan="5" class="empty">No port forwards. Use + to forward a host port to the guest, e.g. SSH.</td></tr>
 									{/if}
 								</tbody>
 							</table>
@@ -457,16 +457,22 @@
 								<Button transparent title="Refresh the list of host devices" aria-label="Refresh host devices" disabled={passthroughBusy !== undefined} onclick={loadPassthrough}><Icon icon="arrow-clockwise" /></Button>
 							{/snippet}
 							{#if !passthroughLoaded && !passthroughBusy}
-								<p class="muted">Give a USB or PCI device of this computer to the virtual machine.</p>
-								<Button onclick={loadPassthrough}><Icon icon="usb-symbol" margin="right" />Show host devices</Button>
+								<div class="empty">
+									<p>Give a USB or PCI device of this computer to the virtual machine.</p>
+									<span class="compact"><Button transparent onclick={loadPassthrough}><Icon icon="usb-symbol" margin="right" />Show host devices</Button></span>
+								</div>
 							{:else if passthroughBusy === 'refresh' && !passthrough}
 								<Flexbox justify="center" style="padding: 1rem 0;"><Loader /></Flexbox>
 							{:else if passthroughError}
 								<p class="error">{passthroughError}</p>
 							{:else if passthrough}
-								{#if !passthrough.usb.supported}<p class="muted">USB: {passthrough.usb.reason}</p>{/if}
-								{#if !passthrough.pci.supported}<p class="muted">PCI: {passthrough.pci.reason}</p>{/if}
-								{#if passthrough.pci.supported && passthrough.pci.experimental}<p class="muted">PCI passthrough (VFIO) is experimental.</p>{/if}
+								{#if !passthrough.usb.supported || !passthrough.pci.supported || passthrough.pci.experimental}
+									<ul class="notes">
+										{#if !passthrough.usb.supported}<li><Icon icon="info-circle" /><span>{passthrough.usb.reason}</span></li>{/if}
+										{#if !passthrough.pci.supported}<li><Icon icon="info-circle" /><span>{passthrough.pci.reason}</span></li>{/if}
+										{#if passthrough.pci.supported && passthrough.pci.experimental}<li><Icon icon="exclamation-triangle" /><span>PCI passthrough (VFIO) is experimental: not validated on every host.</span></li>{/if}
+									</ul>
+								{/if}
 								{#if passthrough.devices.length}
 									<div class="scroll devices">
 										<table class="grid">
@@ -492,7 +498,7 @@
 										</table>
 									</div>
 								{:else if passthrough.usb.supported || passthrough.pci.supported}
-									<p class="muted">No devices found.</p>
+									<p class="empty">No devices found.</p>
 								{/if}
 							{/if}
 						</Card>
@@ -636,6 +642,33 @@
 	}
 	.new-row input {
 		width: 7rem;
+	}
+	.empty {
+		text-align: center;
+		color: var(--vscode-descriptionForeground);
+		padding: 0.75rem 0;
+	}
+	.empty p {
+		margin: 0 0 0.4rem;
+	}
+	.notes {
+		list-style: none;
+		margin: 0 0 0.5rem;
+		padding: 0;
+		display: grid;
+		gap: 0.35rem;
+		color: var(--vscode-descriptionForeground);
+		font-size: 0.9em;
+	}
+	.notes li {
+		display: flex;
+		gap: 0.5rem;
+		align-items: baseline;
+	}
+	.compact :global(button) {
+		padding: 0.15rem 0.6rem;
+		min-height: 0;
+		font-size: 0.9em;
 	}
 	.small {
 		font-size: 0.85em;
