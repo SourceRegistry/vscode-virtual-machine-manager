@@ -1,5 +1,24 @@
 # Changelog
 
+# [0.4.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.3.0...v0.4.0) (2026-11-05)
+
+
+### Bug Fixes
+
+* **menus:** Forget Console Sign-in only for providers with RDP consoles ([00a5301](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/00a5301118523803516936b4b69a1f954545bd93))
+* **menus:** offer Cancel on connecting clusters in the Overview context menu too ([50411f3](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/50411f39da0bb2505f026f9f81889a60dd5a4d59))
+* **proxmox:** ask for the password unless the cluster remembers it ([e2f6e58](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/e2f6e583d20bd7dda158a9ffd8fdceb884cd5802))
+
+
+### Features
+
+* cancel a connection attempt that is waiting on a sign-in ([addddb5](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/addddb52f46822bf52905f4045eab0a05a42cfeb))
+* never prompt for sign-in when the extension connects by itself ([fe06316](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/fe0631657f740a37171baddd4d5aaedc7e25cc96))
+* **release:** release each extension on its own version ([d77e55e](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/d77e55e3fcbfbad45b04c861a78a544730e28b07))
+* **sdk:** negotiate a provider API version range with the core ([6182c8c](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/6182c8cb902aa1fd3576c1ab9aa37d8513369616))
+* share browser sign-in UI and cleanup across providers ([76e7327](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/76e73270fce15fde8459c65d58ea10dc3c2c6840))
+* sign out of a cluster that uses a session ([385fbe9](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/385fbe96075d9b10e187e0e6c4d74e49081439a9))
+
 # [0.3.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.2.0...v0.3.0) (2026-11-05)
 
 
