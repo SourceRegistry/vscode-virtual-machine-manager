@@ -22,6 +22,18 @@ Providers are separate extensions so each one is published and updated on its ow
 Client JDBC* for *Database Client*). The core renders all UI, stores clusters and secrets, relays
 console streams, and activates provider extensions lazily when a stored cluster needs them.
 
+### API version handshake
+
+Core and providers are versioned through `VMM_API_VERSION` / `VMM_MIN_API_VERSION` in
+`packages/sdk/src/index.ts`. A provider built against API version *P* runs on a core that supports
+`VMM_MIN_API_VERSION ≤ P ≤ VMM_API_VERSION`; otherwise the user is told which side to update.
+
+- Bump `VMM_API_VERSION` when `VmManagerApi` or `HypervisorProvider` gains something providers rely on.
+- Raise `VMM_MIN_API_VERSION` only for a breaking change (removed or changed API).
+- Every provider declares the version it was built against as `apiVersion` in its
+  `contributes["vmManager.providers"]` entry; a test keeps this equal to `VMM_API_VERSION`. The core
+  checks it before activating the provider, and the provider checks the core again on activation.
+
 The webviews (Overview, VM settings, consoles) use the
 [client-lib](https://gitlab.projectsource.nl/sourceregistry/svelte/client-lib) Svelte 5 library.
 client-lib is written for SvelteKit; webviews cannot run SvelteKit, so Vite aliases the `$app/*`,

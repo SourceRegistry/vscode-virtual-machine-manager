@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { readFileSync } from 'node:fs';
 import { BrowserLoginService } from './auth/BrowserLogin';
-import { VMM_API_VERSION, type HypervisorProvider, type VmManagerApi } from '@vmm/sdk';
+import { VMM_API_VERSION, VMM_MIN_API_VERSION, type HypervisorProvider, type VmManagerApi } from '@vmm/sdk';
 import { ClusterStore } from './clusters/ClusterStore';
 import { ConnectionManager } from './clusters/ConnectionManager';
 import { registerCommands } from './commands';
@@ -59,6 +59,7 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 
 	return {
 		apiVersion: VMM_API_VERSION,
+		minApiVersion: VMM_MIN_API_VERSION,
 		registerProvider: (provider: HypervisorProvider) => registry.register(provider),
 		browserLogin: (options) => browserLogin.login(options)
 	};

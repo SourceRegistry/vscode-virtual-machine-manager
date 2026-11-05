@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { readFileSync } from 'node:fs';
-import { CORE_EXTENSION_ID, VMM_API_VERSION, type VmManagerApi } from '@vmm/sdk';
+import { CORE_EXTENSION_ID, VMM_API_VERSION, checkApiCompatibility, type VmManagerApi } from '@vmm/sdk';
 import { ProxmoxProvider } from './ProxmoxProvider';
 import { SessionStore } from './session';
 
@@ -12,7 +12,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	const core = vscode.extensions.getExtension<VmManagerApi>(CORE_EXTENSION_ID);
 	if (!core) throw new Error('VM Manager is not installed');
 	const api = core.isActive ? core.exports : await core.activate();
-	if (api.apiVersion !== VMM_API_VERSION) throw new Error('Update VM Manager and its Proxmox provider to compatible versions.');
+	const compatibility = checkApiCompatibility('Proxmox provider', VMM_API_VERSION, api);
+	if (!compatibility.ok) {
+		void vscode.window.showErrorMessage(compatibility.message!);
+		throw new Error(compatibility.message);
+	}
 	const store = new SessionStore({
 		read: () => context.secrets.get(SESSION_SECRET),
 		write: async (value) => { if (value === undefined) await context.secrets.delete(SESSION_SECRET); else await context.secrets.store(SESSION_SECRET, value); }

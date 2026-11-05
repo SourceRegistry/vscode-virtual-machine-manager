@@ -32,7 +32,8 @@
       {
         "id": "proxmox",
         "displayName": "Proxmox VE",
-        "description": "Remote Proxmox VE clusters over HTTPS"
+        "description": "Remote Proxmox VE clusters over HTTPS",
+        "apiVersion": 1
       }
     ]
   },
