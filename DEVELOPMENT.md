@@ -83,19 +83,40 @@ node scripts/render-icons.mjs
 
 ## Releasing
 
-Releases are automatic. Every push to `main` runs
+Releases are automatic, and every extension is released on its own. Every push to `main` runs
 [`.github/workflows/release.yml`](.github/workflows/release.yml): the tests (Linux and Windows,
-including the VS Code integration test), then [semantic-release](https://semantic-release.gitbook.io/),
-which derives the next version from the [Conventional Commits](https://www.conventionalcommits.org/)
-since the last tag (`fix:` → patch, `feat:` → minor, `BREAKING CHANGE:` → major), updates
-`CHANGELOG.md` and the package versions, publishes the core and provider extensions to the VS Code
-Marketplace and creates a GitHub release with the `.vsix` files. All extensions share one version.
+including the VS Code integration test), then `scripts/release.mjs`. That runs
+[semantic-release](https://semantic-release.gitbook.io/) once per extension (core first), configured
+in `release.config.mjs` from the list in `scripts/packages.mjs`. For each extension it looks only at the
+[Conventional Commits](https://www.conventionalcommits.org/) that touched that extension since its own last
+tag (`fix:` → patch, `feat:` → minor, `BREAKING CHANGE:` → major). If there are any, it updates that
+extension's version and `CHANGELOG.md`, publishes it to the VS Code Marketplace and creates a GitHub
+release with its `.vsix`. Extensions without releasable commits are skipped.
+
+| Extension | Files that count | Tag | Changelog |
+| --- | --- | --- | --- |
+| core (`vm-manager`) | everything except `extensions/` | `v1.2.3` | `CHANGELOG.md` |
+| provider (`vm-manager-qemu`, …) | `extensions/<id>/` and `packages/sdk/` | `vm-manager-qemu-v1.2.3` | `extensions/<id>/CHANGELOG.md` |
+
+Providers bundle `packages/sdk`, so a commit that changes it releases every provider. Keep SDK commits
+purposeful, and keep provider-only changes inside `extensions/<id>/`. A commit that touches several
+extensions counts for each of them. Compatibility between versions is handled by the API version
+handshake above, not by matching version numbers.
+
+### Adding a provider to the releases
+
+Create the directory under `extensions/` and tag the commit its first version should be measured from
+(otherwise semantic-release would release `1.0.0` from the whole history):
+
+```sh
+git tag vm-manager-<id>-v<version> <commit> && git push origin vm-manager-<id>-v<version>
+```
 
 Publishing uses Marketplace [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
 (GitHub OIDC, `vsce publish --oidc`), so no access token is stored. The publisher's policy must name
 owner `SourceRegistry`, repository `vscode-virtual-machine-manager`, workflow `release.yml` and environment
 `marketplace`. To publish an existing tag again (e.g. after a failed Marketplace upload), run the
-*Release* workflow manually with that tag.
+*Release* workflow manually with that tag (`v1.2.3` for the core, `vm-manager-qemu-v1.2.3` for a provider).
 
 ## Writing a provider
 

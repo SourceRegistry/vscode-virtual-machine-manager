@@ -1,29 +1,24 @@
-// Packages the core extension and every provider extension into ./out/*.vsix.
-// Each provider is its own Marketplace extension; all of them share one version (see .releaserc.json).
+// Packages extensions into ./out/<name>-<version>.vsix. Every extension is its own Marketplace
+// extension with its own version (see scripts/packages.mjs).
+//
+//   node scripts/package.mjs            all extensions
+//   node scripts/package.mjs qemu       one extension, by id (core, hyperv, proxmox, qemu) or by release tag
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { findPackage, packages, root } from './packages.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'out');
 mkdirSync(out, { recursive: true });
 const vsce = path.join(root, 'node_modules', '@vscode', 'vsce', 'vsce');
 const only = process.argv[2];
 
-const targets = [root, ...readdirSync(path.join(root, 'extensions')).map((d) => path.join(root, 'extensions', d))].filter(
-	(dir) => existsSync(path.join(dir, 'package.json')) && (!only || path.basename(dir) === only || (only === 'core' && dir === root))
-);
-
-for (const dir of targets) {
-	// Providers ship the shared licence and changelog (all extensions are released together).
-	if (dir !== root) {
-		copyFileSync(path.join(root, 'LICENSE'), path.join(dir, 'LICENSE'));
-		copyFileSync(path.join(root, 'CHANGELOG.md'), path.join(dir, 'CHANGELOG.md'));
-	}
-	console.log(`Packaging ${path.relative(root, dir) || 'core'}…`);
+for (const pkg of only ? [findPackage(only)] : packages) {
+	// Providers ship the shared licence; their changelog is their own and lives in the extension folder.
+	if (pkg.id !== 'core') copyFileSync(path.join(root, 'LICENSE'), path.join(pkg.dir, 'LICENSE'));
+	console.log(`Packaging ${pkg.id}…`);
 	execFileSync(process.execPath, [vsce, 'package', '--no-dependencies', '--skip-license', '--out', out], {
-		cwd: dir,
+		cwd: pkg.dir,
 		stdio: 'inherit'
 	});
 }
