@@ -398,6 +398,8 @@ export class ConnectionManager implements vscode.Disposable {
 	private updateContextKeys(): void {
 		void vscode.commands.executeCommand('setContext', 'vmm.hasClusters', this.store.all().length > 0);
 		void vscode.commands.executeCommand('setContext', 'vmm.hasVms', this.allVms().length > 0);
+		// Remembered console credentials only exist for providers that open RDP consoles (Hyper-V).
+		void vscode.commands.executeCommand('setContext', 'vmm.hasRdpClusters', this.clusters().some((rt) => rt.connection?.capabilities.consoles.includes('rdp')));
 	}
 
 	dispose(): void {

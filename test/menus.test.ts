@@ -97,12 +97,8 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 
 	it('offers create on nodes and management on clusters', () => {
 		expect(commandsFor(menu, nodeContextValue('online', caps))).toContain('vmm.createVm');
-		expect(commandsFor(menu, clusterContextValue('connected'))).toEqual([
-			'vmm.reconnectCluster',
-			'vmm.editCluster',
-			'vmm.removeCluster',
-			'vmm.forgetConsoleCredentials'
-		]);
+		expect(commandsFor(menu, clusterContextValue('connected'))).toEqual(['vmm.reconnectCluster', 'vmm.editCluster', 'vmm.removeCluster']);
+		expect(commandsFor(menu, clusterContextValue('connected', { ...caps, consoles: ['rdp'] }))).toEqual(['vmm.reconnectCluster', 'vmm.editCluster', 'vmm.removeCluster', 'vmm.forgetConsoleCredentials']);
 	});
 });
 
@@ -210,5 +206,17 @@ describe('sign out', () => {
 	it('keeps the other cluster menu items working with the extra flag', () => {
 		expect(commandsFor('view/item/context', signedIn)).toEqual(expect.arrayContaining(['vmm.reconnectCluster', 'vmm.editCluster', 'vmm.removeCluster']));
 		expect(commandsFor('view/item/context', clusterContextValue('missingProvider'), { inline: true })).toContain('vmm.installProviders');
+	});
+});
+
+describe('forget console sign-in', () => {
+	const rdp: Capabilities = { ...caps, consoles: ['rdp', 'serial'] };
+
+	it('is offered only for clusters whose provider opens RDP consoles', () => {
+		for (const menu of ['view/item/context', 'webview/context']) {
+			expect(commandsFor(menu, clusterContextValue('connected', rdp))).toContain('vmm.forgetConsoleCredentials');
+			expect(commandsFor(menu, clusterContextValue('connected', caps))).not.toContain('vmm.forgetConsoleCredentials');
+			expect(commandsFor(menu, clusterContextValue('connected', { ...caps, consoles: ['vnc', 'serial'] }))).not.toContain('vmm.forgetConsoleCredentials');
+		}
 	});
 });

@@ -3,7 +3,7 @@
  * overview webview (`data-vscode-context` key `vmmItem`). The `when` regexes in package.json match
  * these strings, so both surfaces show the same native context menu for the same state.
  *
- *   cluster;status=<status>;[signout;]
+ *   cluster;status=<status>;[signout;][rdp;]     rdp: the provider opens RDP consoles (remembered credentials)
  *   node;status=<status>;[create;][adopt;][import;]
  *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial, terminal (serial without a display), external, media, ejectable, details, edit, delete
  *
@@ -15,7 +15,7 @@ import { allowedDuring } from './operations';
 import type { ClusterStatus } from './protocol';
 
 export function clusterContextValue(status: ClusterStatus, caps?: Capabilities): string {
-	return `cluster;status=${status};${status === 'connected' && caps?.signOut ? 'signout;' : ''}`;
+	return `cluster;status=${status};${status === 'connected' && caps?.signOut ? 'signout;' : ''}${caps?.consoles.includes('rdp') ? 'rdp;' : ''}`;
 }
 
 export function nodeContextValue(status: string, caps: Capabilities | undefined): string {

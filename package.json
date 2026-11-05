@@ -298,6 +298,10 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "vmm.forgetConsoleCredentials",
+          "when": "vmm.hasRdpClusters"
+        },
+        {
           "command": "vmm.signOut",
           "when": "false"
         },
@@ -479,7 +483,7 @@
         },
         {
           "command": "vmm.forgetConsoleCredentials",
-          "when": "view == vmm.clusters && viewItem =~ /^cluster;/",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;.*\\brdp;/",
           "group": "2_manage@3"
         },
         {
@@ -668,7 +672,7 @@
         },
         {
           "command": "vmm.forgetConsoleCredentials",
-          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;/",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^cluster;.*\\brdp;/",
           "group": "2_manage@3"
         },
         {
