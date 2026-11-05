@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { candidatesFromFolder, classifyFile, diskFormat, parseLibvirtXml } from '../src/importers';
 
@@ -45,32 +46,34 @@ describe('parseLibvirtXml', () => {
 });
 
 describe('candidatesFromFolder', () => {
+	// The code under test uses the platform's path rules; write the fixtures in them too.
+	const P = (value: string) => value.split('/').join(path.sep);
 	it('prefers definitions over loose images and resolves relative paths', () => {
 		const result = candidatesFromFolder({
-			files: ['/lib/web.qcow2', '/lib/old.vmdk', '/lib/boot.iso', '/lib/a/disk0.qcow2'],
-			libvirt: new Map([['/lib/web.xml', XML.replace('/var/lib/libvirt/images/web.qcow2', '/lib/web.qcow2')]]),
-			vmJson: new Map([['/lib/a/vm.json', { name: 'alpha', disks: ['disk0.qcow2'], cpus: 2, memoryMB: 512, firmware: 'uefi' }]])
+			files: [P('/lib/web.qcow2'), P('/lib/old.vmdk'), P('/lib/boot.iso'), P('/lib/a/disk0.qcow2')],
+			libvirt: new Map([[P('/lib/web.xml'), XML.replace('/var/lib/libvirt/images/web.qcow2', P('/lib/web.qcow2'))]]),
+			vmJson: new Map([[P('/lib/a/vm.json'), { name: 'alpha', disks: ['disk0.qcow2'], cpus: 2, memoryMB: 512, firmware: 'uefi' }]])
 		});
 		expect(result.map((c) => [c.name, c.source])).toEqual([
 			['alpha', 'vm.json'],
 			['web & db', 'libvirt'],
 			['old', 'image']
 		]);
-		expect(result[0]).toMatchObject({ disks: ['/lib/a/disk0.qcow2'], uefi: true });
+		expect(result[0]).toMatchObject({ disks: [P('/lib/a/disk0.qcow2')], uefi: true });
 		// the single ISO beside the loose image becomes its CD
-		expect(result[2]).toMatchObject({ disks: ['/lib/old.vmdk'], cdrom: '/lib/boot.iso' });
+		expect(result[2]).toMatchObject({ disks: [P('/lib/old.vmdk')], cdrom: P('/lib/boot.iso') });
 	});
 
 	it('names UTM bundles after the bundle and skips ambiguous ISOs', () => {
 		const result = candidatesFromFolder({
-			files: ['/vms/Win11.utm/Data/disk.qcow2', '/vms/Win11.utm/Data/a.iso', '/vms/Win11.utm/Data/b.iso'],
+			files: [P('/vms/Win11.utm/Data/disk.qcow2'), P('/vms/Win11.utm/Data/a.iso'), P('/vms/Win11.utm/Data/b.iso')],
 			libvirt: new Map(),
 			vmJson: new Map()
 		});
-		expect(result).toEqual([{ id: '/vms/Win11.utm/Data/disk.qcow2', name: 'Win11', source: 'utm', disks: ['/vms/Win11.utm/Data/disk.qcow2'], cdrom: undefined }]);
+		expect(result).toEqual([{ id: P('/vms/Win11.utm/Data/disk.qcow2'), name: 'Win11', source: 'utm', disks: [P('/vms/Win11.utm/Data/disk.qcow2')], cdrom: undefined }]);
 	});
 
 	it('is empty for a folder without VMs', () => {
-		expect(candidatesFromFolder({ files: ['/x/readme.txt'], libvirt: new Map(), vmJson: new Map() })).toEqual([]);
+		expect(candidatesFromFolder({ files: [P('/x/readme.txt')], libvirt: new Map(), vmJson: new Map() })).toEqual([]);
 	});
 });

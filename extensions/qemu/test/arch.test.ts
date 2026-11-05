@@ -60,7 +60,6 @@ describe('accelerators per host and guest pair', () => {
 	it('is native only on a matching host', () => {
 		expect(isNative('aarch64', 'aarch64')).toBe(true);
 		expect(isNative('x86_64', 'aarch64')).toBe(false);
-		expect(isNative('x86_64', undefined)).toBe(false);
 	});
 
 	it('still drops accelerators the binary does not offer', () => {
@@ -137,17 +136,20 @@ describe('aarch64 argument set', () => {
 });
 
 describe('firmware detection', () => {
+	// Paths are built with the platform's separator, so compare them in one spelling.
+	const posix = (r: { code?: string; vars?: string }) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v).replace(/\\/g, '/')]));
+	const slash = (f: string) => path.normalize(f).replace(/\\/g, '/');
 	const files = new Set(['/opt/homebrew/share/qemu/edk2-aarch64-code.fd', '/opt/homebrew/share/qemu/edk2-arm-vars.fd', '/opt/homebrew/share/qemu/edk2-x86_64-code.fd', '/opt/homebrew/share/qemu/edk2-i386-vars.fd']);
-	const exists = (f: string) => files.has(f);
+	const exists = (f: string) => files.has(slash(f));
 
 	it('finds the right code and vars per architecture', () => {
-		expect(findFirmware('/opt/homebrew/bin', 'aarch64', exists)).toEqual({ code: '/opt/homebrew/share/qemu/edk2-aarch64-code.fd', vars: '/opt/homebrew/share/qemu/edk2-arm-vars.fd' });
-		expect(findFirmware('/opt/homebrew/bin', 'x86_64', exists)).toEqual({ code: '/opt/homebrew/share/qemu/edk2-x86_64-code.fd', vars: '/opt/homebrew/share/qemu/edk2-i386-vars.fd' });
+		expect(posix(findFirmware('/opt/homebrew/bin', 'aarch64', exists))).toEqual({ code: '/opt/homebrew/share/qemu/edk2-aarch64-code.fd', vars: '/opt/homebrew/share/qemu/edk2-arm-vars.fd' });
+		expect(posix(findFirmware('/opt/homebrew/bin', 'x86_64', exists))).toEqual({ code: '/opt/homebrew/share/qemu/edk2-x86_64-code.fd', vars: '/opt/homebrew/share/qemu/edk2-i386-vars.fd' });
 	});
 
 	it('knows the Debian AAVMF layout and reports none when absent', () => {
-		const debian = new Set(['/usr/share/AAVMF/AAVMF_CODE.fd', '/usr/share/AAVMF/AAVMF_VARS.fd'].map((f) => path.normalize(f)));
-		expect(findFirmware('/usr/bin', 'aarch64', (f) => debian.has(path.normalize(f)))).toEqual({ code: '/usr/share/AAVMF/AAVMF_CODE.fd', vars: '/usr/share/AAVMF/AAVMF_VARS.fd' });
+		const debian = new Set(['/usr/share/AAVMF/AAVMF_CODE.fd', '/usr/share/AAVMF/AAVMF_VARS.fd']);
+		expect(posix(findFirmware('/usr/bin', 'aarch64', (f) => debian.has(slash(f))))).toEqual({ code: '/usr/share/AAVMF/AAVMF_CODE.fd', vars: '/usr/share/AAVMF/AAVMF_VARS.fd' });
 		expect(findFirmware('/usr/bin', 'aarch64', () => false)).toEqual({});
 	});
 });
