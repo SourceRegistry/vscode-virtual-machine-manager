@@ -51,6 +51,7 @@ import {
 	type QmpBlockStats,
 	type QmpPciBus
 } from './inspect';
+import { isPortConflict, SerialQueue } from './ports';
 import { gracefulShutdown } from './shutdown';
 
 const execFileAsync = promisify(execFile);
@@ -186,6 +187,7 @@ export class QemuConnection implements ClusterConnection {
 		stats: true
 	};
 	private readonly hostCpu = new CpuLoadSampler();
+	private readonly startQueue = new SerialQueue();
 	private readonly cpuSamples = new Map<string, CpuSample>();
 	private readonly changes = new SimpleEmitter<ChangeEvent>();
 	readonly onDidChange = this.changes.event;
@@ -721,20 +723,52 @@ export class QemuConnection implements ClusterConnection {
 		return !isAlive(pid);
 	}
 
-	private async start(def: VmDefinition): Promise<void> {
-		const dir = this.dir(def.id);
+	/** Starts are serialized: see `SerialQueue`. */
+	private start(def: VmDefinition): Promise<void> {
+		return this.startQueue.run(() => this.startWithRetry(def));
+	}
+
+	/** Local ports used by the QEMU processes that are running now (any VM of this cluster). */
+	private async portsInUse(): Promise<Set<number>> {
+		const used = new Set<number>();
+		for (const def of await this.definitions()) {
+			const runtime = await this.runtime(def.id);
+			for (const port of [runtime?.qmpPort, runtime?.vncPort, runtime?.serialPort, runtime?.agentPort]) if (port) used.add(port);
+		}
+		return used;
+	}
+
+	private async startWithRetry(def: VmDefinition): Promise<void> {
 		for (const disk of def.disks) {
 			if (!fs.existsSync(disk)) throw new ProviderError(`Disk not found: ${disk}`, 'invalid');
 		}
 		if (def.cdrom && !fs.existsSync(def.cdrom)) throw new ProviderError(`ISO not found: ${def.cdrom}`, 'invalid');
-		const runtime: VmRuntime = {
-			pid: 0,
-			qmpPort: await freePort(),
-			vncPort: await freePort(5900, 5999),
-			serialPort: def.serial ? await freePort() : undefined,
-			agentPort: await freePort(),
-			startedAt: Date.now()
-		};
+		// A port that something else (another program, a VM of another window) took after our probe:
+		// QEMU says so and exits; try again with different ports.
+		const rejected = new Set<number>();
+		for (let attempt = 1; ; attempt++) {
+			const avoid = new Set([...(await this.portsInUse()), ...rejected]);
+			const runtime: VmRuntime = {
+				pid: 0,
+				qmpPort: await freePort(undefined, undefined, avoid),
+				vncPort: await freePort(5900, 5999, avoid),
+				serialPort: def.serial ? await freePort(undefined, undefined, avoid) : undefined,
+				agentPort: await freePort(undefined, undefined, avoid),
+				startedAt: Date.now()
+			};
+			try {
+				await this.launch(def, runtime);
+				return;
+			} catch (error) {
+				if (attempt >= 3 || !isPortConflict((error as Error).message)) throw error;
+				for (const port of [runtime.qmpPort, runtime.vncPort, runtime.serialPort, runtime.agentPort]) if (port) rejected.add(port);
+				this.log.warn(`${def.name}: a local port was already in use, retrying with other ports (attempt ${attempt + 1} of 3)`);
+			}
+		}
+	}
+
+	private async launch(def: VmDefinition, runtime: VmRuntime): Promise<void> {
+		const dir = this.dir(def.id);
 		const args = buildArgs(def, runtime, {
 			accelerators: usableAccelerators(defaultAccelerators(process.platform, this.accelerator), this.qemu.accelerators),
 			firmwareCode: this.qemu.firmwareCode,
@@ -853,15 +887,22 @@ function tryListen(port: number): Promise<number | undefined> {
 	});
 }
 
-/** A free localhost port; within [min, max] when given (VNC needs 5900 + display). */
-export async function freePort(min?: number, max?: number): Promise<number> {
+/**
+ * A free localhost port; within [min, max] when given (VNC needs 5900 + display). Ports in `avoid`
+ * (held by running VMs, or just refused) are skipped. Note that this only *probes*: the port is not
+ * held after it returns, see `SerialQueue`.
+ */
+export async function freePort(min?: number, max?: number, avoid: ReadonlySet<number> = new Set()): Promise<number> {
 	if (min === undefined) {
-		const port = await tryListen(0);
-		if (!port) throw new ProviderError('No free TCP port available');
-		return port;
+		for (let tries = 0; tries < 20; tries++) {
+			const port = await tryListen(0);
+			if (!port) throw new ProviderError('No free TCP port available');
+			if (!avoid.has(port)) return port;
+		}
+		throw new ProviderError('No free TCP port available');
 	}
 	for (let port = min; port <= (max ?? min); port++) {
-		if (await tryListen(port)) return port;
+		if (!avoid.has(port) && (await tryListen(port))) return port;
 	}
 	throw new ProviderError(`No free TCP port between ${min} and ${max}`);
 }
