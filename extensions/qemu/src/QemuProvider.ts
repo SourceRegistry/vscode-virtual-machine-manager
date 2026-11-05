@@ -18,9 +18,12 @@ import {
 	type DiskStats,
 	type Disposable,
 	type Event,
+	type ExternalVmInfo,
 	type FieldSchema,
 	type FieldValues,
 	type HypervisorProvider,
+	type ImportCandidate,
+	type ImportOptions,
 	type Logger,
 	type NodeInfo,
 	type PortForward,
@@ -37,7 +40,9 @@ import { detectQemu, type QemuInstallation } from './detect';
 import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
 import { availableMemoryMB, CpuLoadSampler } from './hostInfo';
-import { sampleProcess } from './hostProcess';
+import { listProcesses, processStartedAt, sampleProcess, walkFiles } from './hostProcess';
+import { candidatesFromFolder, classifyFile, type FolderCandidate, type FolderInput } from './importers';
+import { findExternalVms, type ExternalVm } from './scan';
 import {
 	hasMedia,
 	nextCpuSample,
@@ -187,6 +192,8 @@ export class QemuConnection implements ClusterConnection {
 		media: true,
 		details: true,
 		forwards: true,
+		adopt: true,
+		importFolder: true,
 		stats: true
 	};
 	private readonly hostCpu = new CpuLoadSampler();
@@ -263,7 +270,11 @@ export class QemuConnection implements ClusterConnection {
 	private client(id: string, runtime: VmRuntime): Promise<QmpClient> {
 		const existing = this.qmp.get(id);
 		if (existing) return existing;
-		const promise = QmpClient.connect(runtime.qmpPort).then((client) => {
+		const target = runtime.qmpSocket ? QmpClient.connectSocket(runtime.qmpSocket) : runtime.qmpPort ? QmpClient.connect(runtime.qmpPort, runtime.qmpHost) : undefined;
+		if (!target) {
+			return Promise.reject(new ProviderError('This VM was started outside VM Manager without a control socket, so it can only be observed and powered off. Restart it from here to manage it fully.', 'unsupported'));
+		}
+		const promise = target.then((client) => {
 			client.on('event', (event: QmpEvent) => {
 				this.log.debug(`QMP ${id}: ${event.event}`);
 				this.changes.fire({ nodeId: NODE_ID, vmId: id });
@@ -289,6 +300,7 @@ export class QemuConnection implements ClusterConnection {
 
 	private async state(def: VmDefinition, runtime: VmRuntime | undefined): Promise<VmState> {
 		if (!runtime) return 'stopped';
+		if (!hasControlChannel(runtime)) return 'running';
 		try {
 			const client = await this.client(def.id, runtime);
 			const status = await client.execute<{ status: string; running: boolean }>('query-status');
@@ -331,13 +343,24 @@ export class QemuConnection implements ClusterConnection {
 
 	async listVms(): Promise<VmInfo[]> {
 		const defs = await this.definitions();
+		const visible: VmDefinition[] = [];
+		for (const def of defs) {
+			// An adopted VM only exists while its process does; nothing here could restart it faithfully.
+			if (def.origin === 'adopted' && !(await this.runtime(def.id))) {
+				await fs.promises.rm(this.dir(def.id), { recursive: true, force: true });
+				continue;
+			}
+			visible.push(def);
+		}
 		return Promise.all(
-			defs.map(async (def) => {
+			visible.map(async (def) => {
 				const runtime = await this.runtime(def.id);
 				const state = await this.state(def, runtime);
-				const consoles: ConsoleKind[] = def.serial ? ['vnc', 'serial'] : ['vnc'];
+				const consoles: ConsoleKind[] = [];
+				if (!runtime || runtime.vncPort) consoles.push('vnc');
+				if (def.serial) consoles.push('serial');
 				let mediaInserted = !!def.cdrom;
-				if (runtime && state !== 'stopped') {
+				if (runtime && state !== 'stopped' && hasControlChannel(runtime)) {
 					try {
 						mediaInserted = hasMedia(await (await this.client(def.id, runtime)).execute<QmpBlock[]>('query-block'));
 					} catch {
@@ -354,7 +377,9 @@ export class QemuConnection implements ClusterConnection {
 					description: def.notes,
 					os: `${def.firmware.toUpperCase()} · ${def.diskBus.toUpperCase()}`,
 					consoles,
-					mediaInserted
+					mediaInserted,
+					origin: def.origin,
+					controllable: runtime ? hasControlChannel(runtime) : undefined
 				} satisfies VmInfo;
 			})
 		);
@@ -684,8 +709,15 @@ export class QemuConnection implements ClusterConnection {
 
 	async deleteVm(_nodeId: string, vmId: string, options: DeleteOptions): Promise<void> {
 		const def = await this.definition(vmId);
-		if (await this.runtime(vmId)) await this.forceStop(vmId);
 		const dir = this.dir(vmId);
+		if (def.origin === 'adopted') {
+			// Only forget it: the process and its disks are not ours to stop or remove.
+			this.closeQmp(vmId);
+			await fs.promises.rm(dir, { recursive: true, force: true });
+			this.log.info(`Detached from ${def.name} (still running)`);
+			return;
+		}
+		if (await this.runtime(vmId)) await this.forceStop(vmId);
 		if (options.deleteDisks) {
 			await fs.promises.rm(dir, { recursive: true, force: true });
 		} else {
@@ -712,6 +744,9 @@ export class QemuConnection implements ClusterConnection {
 		if (action === 'stop') {
 			await this.forceStop(vmId);
 			return;
+		}
+		if (!hasControlChannel(runtime)) {
+			throw new ProviderError(`${def.name} was started outside VM Manager without a control socket: it cannot be asked to shut down. Use Power off, or restart it from here.`, 'unsupported');
 		}
 		const client = await this.client(vmId, runtime);
 		if (action === 'shutdown') {
@@ -873,6 +908,7 @@ export class QemuConnection implements ClusterConnection {
 		const runtime = await this.runtime(vmId);
 		if (!runtime) throw new ProviderError(`${def.name} is not running`, 'unavailable');
 		const port = kind === 'vnc' ? runtime.vncPort : runtime.serialPort;
+		if (!port && kind === 'vnc') throw new ProviderError('This VM has no VNC server on localhost (it may use a native window or a socket).', 'unavailable');
 		if (!port) throw new ProviderError('The serial console is disabled for this VM. Enable it in the settings and restart the VM.', 'unavailable');
 		const socket = await new Promise<net.Socket>((resolve, reject) => {
 			const s = net.connect({ port, host: '127.0.0.1' });
@@ -883,10 +919,209 @@ export class QemuConnection implements ClusterConnection {
 		return { stream: socket, dispose: () => socket.destroy() };
 	}
 
+	// -----------------------------------------------------------------------------------------
+	// Attach to running VMs, import from files
+	// -----------------------------------------------------------------------------------------
+
+	/** Pids of every QEMU this extension knows (running managed or adopted VMs). */
+	private async knownPids(): Promise<Set<number>> {
+		const pids = new Set<number>();
+		for (const def of await this.definitions()) {
+			const runtime = await this.runtime(def.id);
+			if (runtime) pids.add(runtime.pid);
+		}
+		return pids;
+	}
+
+	private async scanRunning(): Promise<ExternalVm[]> {
+		return findExternalVms(await listProcesses(), await this.knownPids());
+	}
+
+	async scanExternalVms(): Promise<ExternalVmInfo[]> {
+		return (await this.scanRunning()).map((vm) => ({
+			id: String(vm.pid),
+			name: vm.name,
+			detail: `pid ${vm.pid} · ${vm.cpus} CPU · ${vm.memoryMB >= 1024 ? `${Math.round((vm.memoryMB / 1024) * 10) / 10} GB` : `${vm.memoryMB} MB`}${vm.disks.length ? ` · ${path.basename(vm.disks[0]!)}` : ''}`,
+			controllable: !!vm.qmp,
+			hint: vm.qmp ? undefined : 'No control socket (-qmp): it can only be observed and powered off. Restart it from VM Manager for full control.'
+		}));
+	}
+
+	async adoptExternalVm(_nodeId: string, externalId: string): Promise<{ vm: VmInfo; warning?: string }> {
+		const found = (await this.scanRunning()).find((vm) => String(vm.pid) === externalId);
+		if (!found) throw new ProviderError('That QEMU process is gone, or is already managed. Scan again.', 'notFound');
+		const id = randomUUID();
+		const dir = this.dir(id);
+		await fs.promises.mkdir(dir, { recursive: true });
+		try {
+			const def: VmDefinition = {
+				id,
+				name: await this.uniqueName(found.name),
+				cpus: found.cpus,
+				memoryMB: found.memoryMB,
+				cpuModel: 'unknown',
+				firmware: 'bios',
+				disks: found.disks,
+				diskBus: 'sata',
+				cdrom: found.cdrom,
+				nic: 'none',
+				vga: 'std',
+				serial: false,
+				notes: `Attached to an existing QEMU process (pid ${found.pid}).`,
+				origin: 'adopted',
+				createdAt: Date.now()
+			};
+			const runtime: VmRuntime = {
+				pid: found.pid,
+				qmpPort: found.qmp?.port ?? 0,
+				qmpHost: found.qmp?.host,
+				qmpSocket: found.qmp?.socket,
+				vncPort: found.vncPort ?? 0,
+				startedAt: (await processStartedAt(found.pid)) ?? Date.now(),
+				external: true
+			};
+			// Runtime first: a definition without one is an adopted VM that is gone, and gets cleaned up.
+			await fs.promises.writeFile(path.join(dir, 'runtime.json'), JSON.stringify(runtime, null, 2));
+			await this.saveDefinition(def);
+			let warning: string | undefined;
+			if (!found.qmp) {
+				warning = `${def.name} has no control socket: it is listed, but can only be observed and powered off.`;
+			} else {
+				try {
+					await this.client(id, runtime);
+				} catch (error) {
+					// QMP serves one client at a time: libvirt, UTM or another tool may hold it.
+					this.closeQmp(id);
+					warning = `Could not talk to the control socket of ${def.name} (${(error as Error).message}). Another program may be using it; it is listed as observe-only until it is free.`;
+					await fs.promises.writeFile(path.join(dir, 'runtime.json'), JSON.stringify({ ...runtime, qmpPort: 0, qmpSocket: undefined }, null, 2));
+				}
+			}
+			this.log.info(`Attached to pid ${found.pid} as ${def.name}${warning ? `: ${warning}` : ''}`);
+			this.changes.fire({ nodeId: NODE_ID, vmId: id });
+			return { vm: { id, name: def.name, state: 'running', cpus: def.cpus, memoryMB: def.memoryMB, origin: 'adopted', controllable: !warning }, warning };
+		} catch (error) {
+			await fs.promises.rm(dir, { recursive: true, force: true });
+			throw error;
+		}
+	}
+
+	/** `name`, or `name (2)`, `name (3)` … when taken. */
+	private async uniqueName(wanted: string): Promise<string> {
+		const base = wanted.replace(/[^\w .()\-]/g, '_').slice(0, 56).trim() || 'imported';
+		const taken = new Set((await this.definitions()).map((d) => d.name.toLowerCase()));
+		let name = base;
+		for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${base} (${n})`;
+		return name;
+	}
+
+	private async folderInput(folder: string): Promise<FolderInput> {
+		const files = await walkFiles(folder);
+		const libvirt = new Map<string, string>();
+		const vmJson = new Map<string, NonNullable<ReturnType<FolderInput['vmJson']['get']>>>();
+		for (const file of files) {
+			const lower = file.toLowerCase();
+			try {
+				if (lower.endsWith('.xml')) {
+					if ((await fs.promises.stat(file)).size > 1_000_000) continue;
+					const text = await fs.promises.readFile(file, 'utf8');
+					if (text.includes('<domain')) libvirt.set(file, text);
+				} else if (path.basename(lower) === 'vm.json') {
+					const parsed = JSON.parse(await fs.promises.readFile(file, 'utf8')) as Record<string, unknown>;
+					if (Array.isArray(parsed.disks)) vmJson.set(file, parsed as never);
+				}
+			} catch {
+				// unreadable or not what it looks like
+			}
+		}
+		return { files, libvirt, vmJson };
+	}
+
+	/** Candidates minus the ones whose disks a managed VM already uses. */
+	private async folderCandidates(folder: string): Promise<FolderCandidate[]> {
+		if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) throw new ProviderError(`Not a folder: ${folder}`, 'invalid');
+		const managed = new Set<string>();
+		for (const def of await this.definitions()) for (const disk of def.disks) managed.add(path.resolve(disk));
+		return candidatesFromFolder(await this.folderInput(folder)).filter(
+			(c) => c.disks.length > 0 && !c.disks.every((d) => managed.has(path.resolve(d)))
+		);
+	}
+
+	async scanImportFolder(_nodeId: string, folder: string): Promise<ImportCandidate[]> {
+		const label = { 'vm.json': 'VM Manager definition', libvirt: 'libvirt definition', utm: 'UTM bundle', image: 'disk image' } as const;
+		return (await this.folderCandidates(folder)).map((c) => ({
+			id: c.id,
+			name: c.name,
+			source: label[c.source],
+			detail: [c.cpus ? `${c.cpus} CPU` : undefined, c.memoryMB ? `${c.memoryMB} MB` : undefined, `${c.disks.length} disk${c.disks.length === 1 ? '' : 's'}`, c.disks[0] ? path.basename(c.disks[0]) : undefined]
+				.filter(Boolean)
+				.join(' · ')
+		}));
+	}
+
+	async importFromFolder(_nodeId: string, folder: string, candidateIds: string[], options: ImportOptions): Promise<VmInfo[]> {
+		const wanted = new Set(candidateIds);
+		const chosen = (await this.folderCandidates(folder)).filter((c) => wanted.has(c.id));
+		if (!chosen.length) throw new ProviderError('Nothing to import: the selection is gone from the folder', 'notFound');
+		const imported: VmInfo[] = [];
+		for (const candidate of chosen) {
+			for (const file of [...candidate.disks, ...(candidate.cdrom ? [candidate.cdrom] : [])]) {
+				if (!fs.existsSync(file)) throw new ProviderError(`File not found: ${file}`, 'invalid');
+			}
+			const id = randomUUID();
+			const dir = this.dir(id);
+			await fs.promises.mkdir(dir, { recursive: true });
+			try {
+				const disks: string[] = [];
+				for (const [index, disk] of candidate.disks.entries()) {
+					if (options.copy) {
+						const target = path.join(dir, `disk${index}${path.extname(disk).toLowerCase()}`);
+						await fs.promises.copyFile(disk, target);
+						disks.push(target);
+					} else {
+						disks.push(disk);
+					}
+				}
+				const uefi = !!candidate.uefi && !!this.qemu.firmwareCode;
+				const def: VmDefinition = {
+					id,
+					name: await this.uniqueName(candidate.name),
+					cpus: Math.max(1, candidate.cpus ?? 2),
+					memoryMB: Math.max(128, candidate.memoryMB ?? 2048),
+					cpuModel: 'max',
+					firmware: uefi ? 'uefi' : 'bios',
+					disks,
+					diskBus: 'sata',
+					cdrom: candidate.cdrom,
+					nic: 'e1000',
+					mac: randomMac(),
+					vga: 'std',
+					serial: true,
+					notes: options.copy ? `Imported (copied) from ${candidate.id}.` : `Imported from ${candidate.id}; the disks stay where they are.`,
+					origin: 'imported',
+					createdAt: Date.now()
+				};
+				if (uefi) await this.ensureVars(def);
+				await this.saveDefinition(def);
+				this.log.info(`Imported ${def.name} (${options.copy ? 'copied' : 'referenced'}) from ${candidate.id}`);
+				imported.push({ id, name: def.name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB, origin: 'imported' });
+			} catch (error) {
+				await fs.promises.rm(dir, { recursive: true, force: true });
+				throw error;
+			}
+		}
+		this.changes.fire({ nodeId: NODE_ID, vmId: imported[0]!.id });
+		return imported;
+	}
+
 	dispose(): void {
 		for (const id of [...this.qmp.keys()]) this.closeQmp(id);
 		this.changes.dispose();
 	}
+}
+
+/** An adopted VM may have no monitor at all (see `ExternalVm.qmp`). */
+function hasControlChannel(runtime: VmRuntime): boolean {
+	return !!(runtime.qmpSocket || runtime.qmpPort);
 }
 
 function isAlive(pid: number): boolean {

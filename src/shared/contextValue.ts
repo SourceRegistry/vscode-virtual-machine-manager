@@ -4,7 +4,7 @@
  * these strings, so both surfaces show the same native context menu for the same state.
  *
  *   cluster;status=<status>;
- *   node;status=<status>;[create;]
+ *   node;status=<status>;[create;][adopt;][import;]
  *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial, external, media, ejectable, details, edit, delete
  *
  * While a power operation runs, `state` is the transitional state and only the actions allowed
@@ -19,14 +19,16 @@ export function clusterContextValue(status: ClusterStatus): string {
 }
 
 export function nodeContextValue(status: string, caps: Capabilities | undefined): string {
-	return `node;status=${status};${caps?.create ? 'create;' : ''}`;
+	return `node;status=${status};${caps?.create ? 'create;' : ''}${caps?.adopt ? 'adopt;' : ''}${caps?.importFolder ? 'import;' : ''}`;
 }
 
 export function vmContextValue(vm: VmInfo & { operation?: PowerAction }, caps: Capabilities | undefined): string {
 	const flags: string[] = [];
 	if (caps) {
 		const running = vm.operation;
-		flags.push(...(running ? caps.power.filter((action) => allowedDuring(running, action)) : caps.power));
+		// An attached VM without a control channel cannot be asked to do anything but die.
+		const powers = vm.controllable === false ? caps.power.filter((action) => action === 'stop') : caps.power;
+		flags.push(...(running ? powers.filter((action) => allowedDuring(running, action)) : powers));
 		if (running) flags.push('busy');
 		const consoles = vm.consoles ?? caps.consoles;
 		if (consoles.includes('vnc') || consoles.includes('rdp') || caps.preview) flags.push('graphical');

@@ -1,5 +1,6 @@
 import type { PortForward } from '@vmm/sdk';
 import { hostfwdOptions } from './forwards';
+import { diskFormat } from './importers';
 
 /** On-disk VM definition (`<vmDirectory>/<id>/vm.json`). Pure module: no I/O, unit tested. */
 
@@ -27,12 +28,20 @@ export interface VmDefinition {
 	serial: boolean;
 	extraArgs?: string;
 	notes?: string;
+	/** Set when the VM was not created here: see `VmInfo.origin`. */
+	origin?: 'adopted' | 'imported';
 	createdAt: number;
 }
 
 export interface VmRuntime {
 	pid: number;
+	/** 0 when QMP is reached through `qmpSocket` or not at all (adopted VM without a monitor). */
 	qmpPort: number;
+	qmpHost?: string;
+	/** Unix socket of an adopted VM's QMP monitor. */
+	qmpSocket?: string;
+	/** Started outside the extension (adopted): ports and sockets are the original process's. */
+	external?: boolean;
 	vncPort: number;
 	serialPort?: number;
 	/** Localhost port of the guest agent channel (absent for VMs started before it existed). */
@@ -123,7 +132,7 @@ export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvi
 	}
 
 	def.disks.forEach((disk, index) => {
-		const format = disk.toLowerCase().endsWith('.qcow2') ? 'qcow2' : 'raw';
+		const format = diskFormat(disk);
 		args.push('-drive', `file=${escapeOptionValue(disk)},if=none,id=disk${index},format=${format}`);
 		if (def.diskBus === 'virtio') args.push('-device', `virtio-blk-pci,drive=disk${index},bootindex=${index + 1}`);
 		else args.push('-device', `ide-hd,drive=disk${index},bus=ide.${index},bootindex=${index + 1}`);

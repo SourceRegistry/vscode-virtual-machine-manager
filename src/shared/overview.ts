@@ -130,6 +130,8 @@ export function totalAllocation(clusters: ClusterSnapshot[]): Allocation {
 /** Whether `action` applies to a VM right now. Mirrors the single-VM command filters. */
 export function eligibleFor(action: PowerAction, vm: VmSnapshot, supported: readonly PowerAction[] | undefined): boolean {
 	if (!supported?.includes(action)) return false;
+	// Attached without a control channel: nothing but a hard power-off can be asked of it.
+	if (vm.controllable === false && action !== 'stop') return false;
 	if (vm.operation) return allowedDuring(vm.operation, action);
 	switch (action) {
 		case 'start':

@@ -42,8 +42,17 @@ export class QmpClient extends EventEmitter {
 	}
 
 	static connect(port: number, host = '127.0.0.1', timeoutMs = 3000): Promise<QmpClient> {
+		return QmpClient.open(net.connect({ port, host }), timeoutMs);
+	}
+
+	/** Connects to a unix domain socket (Linux/macOS) or named pipe path. */
+	static connectSocket(socketPath: string, timeoutMs = 3000): Promise<QmpClient> {
+		return QmpClient.open(net.connect({ path: socketPath }), timeoutMs);
+	}
+
+	/** Performs the QMP handshake on a connecting socket. */
+	private static open(socket: net.Socket, timeoutMs: number): Promise<QmpClient> {
 		return new Promise((resolve, reject) => {
-			const socket = net.connect({ port, host });
 			const client = new QmpClient(socket);
 			const timer = setTimeout(() => {
 				socket.destroy();

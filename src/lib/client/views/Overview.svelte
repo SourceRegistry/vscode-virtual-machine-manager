@@ -19,6 +19,7 @@
 	import { clusterContextValue, nodeContextValue, vmContextValue } from '../../../shared/contextValue';
 	import { OPERATION_LABEL, allowedDuring } from '../../../shared/operations';
 	import { formatPercent } from '../../../shared/metrics';
+	import { originLabel } from '../../../shared/origin';
 	import {
 		eligibleFor,
 		filterRows,
@@ -323,6 +324,16 @@
 								<div class="context" data-vscode-context={vscodeContext(nodeContextValue(node.status, cluster.capabilities), { clusterId: cluster.id, nodeId: node.id })}>
 									<Card title={node.name} description="{alloc.running} of {alloc.total} running{node.cpus ? ` · ${node.cpus} CPUs` : ''}{node.memoryMB ? ` · ${formatMemory(node.memoryMB)}` : ''}">
 										{#snippet header()}
+											{#if cluster.capabilities?.adopt && node.status === 'online'}
+												<Button size="sm" transparent title="Attach to a QEMU VM that is already running" onclick={() => run('vmm.attachRunningVm', { clusterId: cluster.id, nodeId: node.id })}>
+													<Icon icon="plug" margin="right" />Attach
+												</Button>
+											{/if}
+											{#if cluster.capabilities?.importFolder && node.status === 'online'}
+												<Button size="sm" transparent title="Import disk images or VM definitions from a folder" onclick={() => run('vmm.importFromFolder', { clusterId: cluster.id, nodeId: node.id })}>
+													<Icon icon="folder2-open" margin="right" />Import
+												</Button>
+											{/if}
 											{#if cluster.capabilities?.create && node.status === 'online'}
 												<Button size="sm" transparent onclick={() => run('vmm.createVm', { clusterId: cluster.id, nodeId: node.id })}>
 													<Icon icon="plus-lg" margin="right" />Create VM
@@ -444,6 +455,7 @@
 											{:else}
 												<strong>{vm.name}</strong>
 											{/if}
+											{#if originLabel(vm)}<span class="badge" title="Not created by VM Manager">{originLabel(vm)}</span>{/if}
 										</td>
 										<td class="muted">{row.cluster.name} › {row.node.name}</td>
 										<td>{vm.cpus ?? '–'}</td>
@@ -690,6 +702,15 @@
 	}
 	.mono {
 		font-family: var(--vscode-editor-font-family, monospace);
+	}
+	.badge {
+		margin-left: 0.4rem;
+		padding: 0.05rem 0.45rem;
+		border-radius: 999px;
+		font-size: 0.8em;
+		color: var(--vscode-badge-foreground, inherit);
+		background: var(--vscode-badge-background, #8883);
+		white-space: nowrap;
 	}
 	.muted {
 		color: var(--vscode-descriptionForeground);

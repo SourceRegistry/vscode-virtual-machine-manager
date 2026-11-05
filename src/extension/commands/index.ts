@@ -101,17 +101,17 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		return picked?.id;
 	}
 
-	async function resolveNode(arg: Arg): Promise<{ clusterId: string; nodeId: string } | undefined> {
+	async function resolveNode(arg: Arg, capability: 'create' | 'adopt' | 'importFolder' = 'create'): Promise<{ clusterId: string; nodeId: string } | undefined> {
 		const ref = asNodeRef(arg);
 		if (ref) return ref;
 		await loadAll();
 		const clusterFilter = asClusterId(arg);
 		const nodes = manager
 			.clusters()
-			.filter((c) => c.connection?.capabilities.create && (!clusterFilter || c.cluster.id === clusterFilter))
+			.filter((c) => c.connection?.capabilities[capability] && (!clusterFilter || c.cluster.id === clusterFilter))
 			.flatMap((c) => c.nodes.filter((n) => n.status === 'online').map((n) => ({ cluster: c, node: n })));
 		if (!nodes.length) {
-			void vscode.window.showInformationMessage('No connected node supports creating virtual machines.');
+			void vscode.window.showInformationMessage(capability === 'create' ? 'No connected node supports creating virtual machines.' : 'No connected node supports this.');
 			return undefined;
 		}
 		if (nodes.length === 1) return { clusterId: nodes[0].cluster.cluster.id, nodeId: nodes[0].node.id };
@@ -121,7 +121,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 				description: n.cluster.cluster.name,
 				ref: { clusterId: n.cluster.cluster.id, nodeId: n.node.id }
 			})),
-			{ placeHolder: 'Select the node to create the virtual machine on' }
+			{ placeHolder: 'Select the node' }
 		);
 		return picked?.ref;
 	}
@@ -407,9 +407,104 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}
 	}
 
+	async function attachRunningVm(arg: Arg): Promise<void> {
+		const nodeRef = await resolveNode(arg, 'adopt');
+		if (!nodeRef) return;
+		try {
+			const connection = await manager.connect(nodeRef.clusterId);
+			if (!connection.scanExternalVms || !connection.adoptExternalVm) return;
+			const found = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Looking for running virtual machines…' }, () =>
+				connection.scanExternalVms!(nodeRef.nodeId)
+			);
+			if (!found.length) {
+				void vscode.window.showInformationMessage('No running virtual machines were found that VM Manager does not already know.');
+				return;
+			}
+			const picked = await vscode.window.showQuickPick(
+				found.map((f) => ({
+					label: f.name,
+					description: f.detail,
+					detail: f.controllable ? 'Can be fully managed' : f.hint,
+					picked: f.controllable,
+					id: f.id
+				})),
+				{ title: 'Attach to running virtual machines', placeHolder: 'Select the machines to attach to', canPickMany: true, matchOnDescription: true }
+			);
+			if (!picked?.length) return;
+			const warnings: string[] = [];
+			let last: string | undefined;
+			for (const item of picked) {
+				const result = await connection.adoptExternalVm(nodeRef.nodeId, item.id);
+				last = result.vm.id;
+				if (result.warning) warnings.push(result.warning);
+			}
+			await manager.refresh(nodeRef.clusterId);
+			if (last) await tree.reveal({ kind: 'vm', ...nodeRef, vmId: last }).then(undefined, () => undefined);
+			const summary = `Attached to ${picked.length} virtual machine${picked.length === 1 ? '' : 's'}.`;
+			if (warnings.length) void vscode.window.showWarningMessage(`${summary} ${warnings.join(' ')}`);
+			else void vscode.window.showInformationMessage(summary);
+		} catch (error) {
+			await showError('Could not attach to the running virtual machine', error);
+		}
+	}
+
+	async function importFromFolder(arg: Arg): Promise<void> {
+		const nodeRef = await resolveNode(arg, 'importFolder');
+		if (!nodeRef) return;
+		try {
+			const connection = await manager.connect(nodeRef.clusterId);
+			if (!connection.scanImportFolder || !connection.importFromFolder) return;
+			const folder = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, title: 'Folder with virtual machines or disk images', openLabel: 'Scan Folder' });
+			if (!folder?.[0]) return;
+			const dir = folder[0].fsPath;
+			const found = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Scanning ${path.basename(dir)}…` }, () =>
+				connection.scanImportFolder!(nodeRef.nodeId, dir)
+			);
+			if (!found.length) {
+				void vscode.window.showInformationMessage('No disk images or virtual machine definitions that are not yet imported were found in that folder.');
+				return;
+			}
+			const picked = await vscode.window.showQuickPick(
+				found.map((f) => ({ label: f.name, description: f.source, detail: f.detail, picked: true, id: f.id })),
+				{ title: 'Import virtual machines', placeHolder: 'Select the machines to import', canPickMany: true, matchOnDetail: true }
+			);
+			if (!picked?.length) return;
+			const mode = await vscode.window.showQuickPick(
+				[
+					{ label: 'Use the disks where they are', description: 'Fast, no extra space. The VM works on the original files.', copy: false },
+					{ label: 'Copy the disks', description: 'Keeps the originals untouched. Needs the space and time to copy.', copy: true }
+				],
+				{ title: 'Import virtual machines', placeHolder: 'How should the disks be imported?' }
+			);
+			if (!mode) return;
+			const imported = await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `Importing ${picked.length} virtual machine${picked.length === 1 ? '' : 's'}…` },
+				() => connection.importFromFolder!(nodeRef.nodeId, dir, picked.map((p) => p.id), { copy: mode.copy })
+			);
+			await manager.refresh(nodeRef.clusterId);
+			if (imported[0]) await tree.reveal({ kind: 'vm', ...nodeRef, vmId: imported[0].id }).then(undefined, () => undefined);
+			void vscode.window.showInformationMessage(`Imported ${imported.map((v) => v.name).join(', ')}.`);
+		} catch (error) {
+			await showError('Could not import the virtual machines', error);
+		}
+	}
+
 	async function deleteVm(arg: Arg): Promise<void> {
 		const location = await resolveVm(arg, 'Select the virtual machine to delete');
 		if (!location) return;
+		if (location.vm.origin === 'adopted') {
+			// Detaching never touches the process or its disks.
+			const detach = await vscode.window.showWarningMessage(`Stop tracking "${location.vm.name}"?`, { modal: true, detail: 'The virtual machine keeps running; it is only removed from this list. You can attach to it again.' }, 'Detach');
+			if (!detach) return;
+			try {
+				const connection = await manager.connect(location.ref.clusterId);
+				await connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: false });
+				await manager.refresh(location.ref.clusterId);
+			} catch (error) {
+				await showError(`Could not detach from ${location.vm.name}`, error);
+			}
+			return;
+		}
 		const choice = await vscode.window.showWarningMessage(
 			`Delete virtual machine "${location.vm.name}"?`,
 			{ modal: true, detail: 'This cannot be undone. A running machine is powered off first.' },
@@ -516,6 +611,8 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		),
 		register('vmm.showWalkthrough', () => vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH_ID, false)),
 		register('vmm.createVm', (arg) => createVm(arg)),
+		register('vmm.attachRunningVm', (arg) => attachRunningVm(arg)),
+		register('vmm.importFromFolder', (arg) => importFromFolder(arg)),
 		register('vmm.openVmDashboard', async (arg) => {
 			const location = await resolveVm(arg, 'Select a virtual machine to show the details of');
 			if (location) VmDashboardPanel.show(context.extensionUri, manager, location.ref);

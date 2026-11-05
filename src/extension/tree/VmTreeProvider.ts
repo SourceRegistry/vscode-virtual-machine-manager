@@ -5,6 +5,7 @@ import { clusterContextValue, nodeContextValue, vmContextValue } from '../../sha
 import { OPERATION_LABEL } from '../../shared/operations';
 import type { ConnectionManager, ClusterRuntime } from '../clusters/ConnectionManager';
 import type { ProviderRegistry } from '../registry/ProviderRegistry';
+import { originLabel } from '../../shared/origin';
 
 export type TreeNode =
 	| { kind: 'cluster'; clusterId: string }
@@ -180,6 +181,8 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		const label = vm.operation ? OPERATION_LABEL[vm.operation] : stateLabel(vm.state);
 		const parts = [label];
 		if (vm.state === 'running' && vm.ipAddresses?.length) parts.push(vm.ipAddresses[0]);
+		const origin = originLabel(vm);
+		if (origin) parts.push(origin);
 		item.description = parts.join(' · ');
 		item.contextValue = vmContextValue(vm, caps);
 		// Clicking a VM opens its details (providers without inventory/stats keep a plain, selectable row).
@@ -198,6 +201,7 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 				`| Uptime | ${formatUptime(vm.uptimeSeconds)} |\n` +
 				(vm.ipAddresses?.length ? `| IP | ${vm.ipAddresses.join(', ')} |\n` : '') +
 				(vm.os ? `| OS | ${escapeMd(vm.os)} |\n` : '') +
+				(vm.origin ? `| Origin | ${vm.origin === 'adopted' ? 'Attached to a process started outside VM Manager' : 'Imported from existing files'}${vm.controllable === false ? ' (observe only: no control socket)' : ''} |\n` : '') +
 				(vm.description ? `\n${escapeMd(vm.description)}` : '')
 		);
 		item.tooltip = md;

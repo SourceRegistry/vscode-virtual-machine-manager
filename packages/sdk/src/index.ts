@@ -113,6 +113,10 @@ export interface Capabilities {
 	stats?: boolean;
 	/** Implements `addPortForward` / `removePortForward`. */
 	forwards?: boolean;
+	/** Implements `scanExternalVms` / `adoptExternalVm`. */
+	adopt?: boolean;
+	/** Implements `scanImportFolder` / `importFromFolder`. */
+	importFolder?: boolean;
 }
 
 export interface NodeInfo {
@@ -143,6 +147,40 @@ export interface VmInfo {
 	consoles?: ConsoleKind[];
 	/** A CD/DVD drive of this VM holds media (an ISO): the core offers a quick eject. */
 	mediaInserted?: boolean;
+	/**
+	 * Where the VM came from when it was not created here: `adopted` = a process started outside the
+	 * extension that it attached to, `imported` = built from existing disk images or definitions.
+	 */
+	origin?: 'adopted' | 'imported';
+	/** `false` for an adopted VM without a control channel: it can only be observed and powered off. */
+	controllable?: boolean;
+}
+
+/** A hypervisor process found on the host that was not started by the extension. */
+export interface ExternalVmInfo {
+	/** Handle for `adoptExternalVm` (a process id for QEMU). */
+	id: string;
+	name: string;
+	/** One line: what it has (CPUs, memory, disks). */
+	detail: string;
+	/** The extension can fully control it (a control socket is reachable). */
+	controllable: boolean;
+	/** Why it is observe-only / what to do about it. */
+	hint?: string;
+}
+
+/** A VM that can be created from files already on disk. */
+export interface ImportCandidate {
+	id: string;
+	name: string;
+	/** e.g. `libvirt definition`, `disk image`. */
+	source: string;
+	detail: string;
+}
+
+export interface ImportOptions {
+	/** Copy the disk files into the VM's own folder instead of using them where they are. */
+	copy: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -347,6 +385,13 @@ export interface ClusterConnection extends Disposable {
 	/** Forwards a host port to a guest port. Works on running VMs and is remembered for the next start. */
 	addPortForward?(nodeId: string, vmId: string, forward: PortForward): Promise<void>;
 	removePortForward?(nodeId: string, vmId: string, forward: PortForward): Promise<void>;
+	/** Lists running VMs that were not started by this extension. */
+	scanExternalVms?(nodeId: string): Promise<ExternalVmInfo[]>;
+	/** Attaches to one of them. `warning` explains a limited attachment (no control channel). */
+	adoptExternalVm?(nodeId: string, externalId: string): Promise<{ vm: VmInfo; warning?: string }>;
+	/** Finds VMs in a folder: disk images, definitions of other tools. */
+	scanImportFolder?(nodeId: string, folder: string): Promise<ImportCandidate[]>;
+	importFromFolder?(nodeId: string, folder: string, candidateIds: string[], options: ImportOptions): Promise<VmInfo[]>;
 	/** Fire to make the core refresh immediately. Without it the core polls. */
 	readonly onDidChange?: Event<ChangeEvent>;
 }

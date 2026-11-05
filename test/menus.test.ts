@@ -106,6 +106,25 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s attach and import', (menu) => {
+	it('offers attach and import on nodes of providers that support them', () => {
+		const plain = commandsFor(menu, nodeContextValue('online', caps));
+		expect(plain).not.toContain('vmm.attachRunningVm');
+		expect(plain).not.toContain('vmm.importFromFolder');
+		const capable = commandsFor(menu, nodeContextValue('online', { ...caps, adopt: true, importFolder: true }));
+		expect(capable).toEqual(expect.arrayContaining(['vmm.createVm', 'vmm.attachRunningVm', 'vmm.importFromFolder']));
+	});
+
+	it('only offers a power-off for an attached VM without a control channel', () => {
+		const blind: VmInfo = { ...vm('running'), origin: 'adopted', controllable: false };
+		const commands = commandsFor(menu, vmContextValue(blind, caps));
+		expect(commands).toContain('vmm.stop');
+		expect(commands).not.toContain('vmm.shutdown');
+		expect(commands).not.toContain('vmm.reboot');
+		expect(commandsFor(menu, vmContextValue({ ...blind, controllable: true }, caps))).toContain('vmm.shutdown');
+	});
+});
+
 describe.each(['view/item/context', 'webview/context'])('%s media actions', (menu) => {
 	const withMedia: Capabilities = { ...caps, media: true };
 

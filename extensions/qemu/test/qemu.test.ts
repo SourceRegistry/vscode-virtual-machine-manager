@@ -1,4 +1,6 @@
 import * as net from 'node:net';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildArgs, defaultAccelerators, splitArgs, type VmDefinition } from '../src/definition';
 import { QmpClient, type QmpEvent } from '../src/QmpClient';
@@ -96,7 +98,7 @@ describe('QmpClient', () => {
 	let server: net.Server | undefined;
 	afterEach(() => server?.close());
 
-	function fakeQemu(): Promise<{ port: number; sockets: net.Socket[] }> {
+	function fakeQemu(socketPath?: string): Promise<{ port: number; sockets: net.Socket[] }> {
 		const sockets: net.Socket[] = [];
 		server = net.createServer((socket) => {
 			sockets.push(socket);
@@ -114,8 +116,17 @@ describe('QmpClient', () => {
 				}
 			});
 		});
+		if (socketPath) return new Promise((resolve) => server!.listen(socketPath, () => resolve({ port: 0, sockets })));
 		return new Promise((resolve) => server!.listen(0, '127.0.0.1', () => resolve({ port: (server!.address() as net.AddressInfo).port, sockets })));
 	}
+
+	it.skipIf(process.platform === 'win32')('talks over a unix socket', async () => {
+		const socketPath = path.join(os.tmpdir(), `vmm-qmp-${process.pid}.sock`);
+		await fakeQemu(socketPath);
+		const client = await QmpClient.connectSocket(socketPath);
+		await expect(client.execute('query-status')).resolves.toEqual({ status: 'running', running: true });
+		client.close();
+	});
 
 	it('negotiates capabilities, executes commands and reports errors', async () => {
 		const { port } = await fakeQemu();

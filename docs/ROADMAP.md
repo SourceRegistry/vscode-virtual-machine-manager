@@ -119,13 +119,15 @@ Stacked on `feat/vm-dashboard` (phases 1-3 not merged yet).
 
 ## Phase 6: `feat/qemu-import`
 
-- [ ] Import from folder: qcow2/raw/vmdk/vdi/vhdx/iso, libvirt XML, UTM bundles, existing `vm.json`; reference or copy
-- [ ] Process scan: find `qemu-system-*`, parse cmdline into a `VmDefinition`
-- [ ] Adopt when a QMP socket/port is available: full control, badged **external / imported**
-- [ ] Stop of adopted VM: ACPI, escalate to SIGTERM only after confirmation
-- [ ] No QMP: read-only (stats, kill) with hint to restart managed
-- [ ] `QmpClient` unix-socket support (currently TCP only)
-- [ ] Dedupe against managed VMs by pid
+- [x] Import from folder (`vmm.importFromFolder`): qcow2/raw/img/vmdk/vdi/vhdx/vhd/qed disks, `vm.json` of another install, libvirt domain XML (name, memory, vCPUs, disks, CD, UEFI), UTM bundles (disks only: `config.plist` is not translated). Reference the disks in place or copy them. Disks already used by a managed VM are not offered again
+- [x] Process scan (`vmm.attachRunningVm`): finds `qemu-system-*`, parses name, CPUs, memory, disks, CD, VNC port and the monitor address (`-qmp`, or `-chardev socket` + `-mon`); libvirt's inherited `fd=` sockets are recognised as unusable
+- [x] Adopt when a QMP socket/port is available: full control (power, stats, media, details), badged **external**
+- [x] Stop of adopted VM: guest agent/ACPI ladder, then the usual confirmed power-off (quit → SIGTERM → SIGKILL)
+- [x] No QMP: observe-only (stats, power off), badged **external · observe only**, only Power off offered, hint to restart managed
+- [x] `QmpClient` unix-socket support
+- [x] Dedupe against managed VMs by pid
+- Decisions: an adopted VM exists only while its process does (it disappears from the list when it exits, nothing could restart it faithfully); "Delete" on one only detaches (never stops it or touches its disks). QMP serves one client at a time: if another tool holds the socket the VM is attached observe-only with a warning
+- Not done: translating UTM `config.plist`, importing a VM definition's NICs/firmware beyond UEFI, Windows process scan is untested
 
 ## Phase 7: `feat/passthrough`
 

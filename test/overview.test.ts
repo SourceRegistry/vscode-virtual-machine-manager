@@ -107,6 +107,13 @@ describe('eligibleFor', () => {
 		expect(eligibleFor('start', busy, all)).toBe(false);
 	});
 
+	it('only offers a power-off for an attached VM without a control channel', () => {
+		const blind = vm('x', 'x', 'running', { controllable: false });
+		expect(eligibleFor('stop', blind, all)).toBe(true);
+		expect(eligibleFor('shutdown', blind, all)).toBe(false);
+		expect(eligibleFor('reboot', blind, all)).toBe(false);
+	});
+
 	it('requires provider support', () => {
 		expect(eligibleFor('shutdown', vm('x', 'x', 'running'), ['start'])).toBe(false);
 		expect(eligibleFor('start', vm('x', 'x', 'stopped'), undefined)).toBe(false);

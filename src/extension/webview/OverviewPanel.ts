@@ -21,6 +21,8 @@ const ALLOWED_COMMANDS = new Set<OverviewCommand>([
 	'vmm.changeMedia',
 	'vmm.deleteVm',
 	'vmm.createVm',
+	'vmm.attachRunningVm',
+	'vmm.importFromFolder',
 	'vmm.addCluster',
 	'vmm.editCluster',
 	'vmm.reconnectCluster',

@@ -2,6 +2,7 @@
  * Runs the provider against a real QEMU. Opt-in: `VMM_E2E_QEMU=1 npx vitest run extensions/qemu/test/e2e.test.ts`
  * (needs QEMU on PATH; uses TCG and an empty UEFI VM, so it needs no guest OS).
  */
+import { execFileSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as os from 'node:os';
@@ -111,4 +112,52 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 			await connection.power('local', nicVm.id, 'stop').catch(() => undefined);
 		}
 	}, 60_000);
+
+	describe.skipIf(process.platform === 'win32')('QEMU started outside the extension', () => {
+		let child: ReturnType<typeof spawn> | undefined;
+		afterAll(() => child?.kill('SIGKILL'));
+
+		it('is found by the scan, attached, observed, imported by folder and powered off', async () => {
+			const socket = path.join(dir, 'outside.sock');
+			const disk = path.join(dir, 'outside.qcow2');
+			execFileSync('qemu-img', ['create', '-f', 'qcow2', disk, '64M']);
+			child = spawn('qemu-system-x86_64', ['-name', 'outside-vm', '-machine', 'q35', '-accel', 'tcg', '-m', '128', '-smp', '1', '-display', 'none', '-drive', `file=${disk},if=none,id=d0,format=qcow2`, '-device', 'ide-hd,drive=d0,bus=ide.0', '-qmp', `unix:${socket},server=on,wait=off`], { stdio: 'ignore' });
+			for (let i = 0; i < 50 && !fs.existsSync(socket); i++) await new Promise((r) => setTimeout(r, 100));
+
+			const found = (await connection.scanExternalVms!('local')).find((v) => v.name === 'outside-vm');
+			expect(found).toMatchObject({ id: String(child.pid), controllable: true });
+
+			const { vm, warning } = await connection.adoptExternalVm!('local', found!.id);
+			expect(warning).toBeUndefined();
+			expect(vm).toMatchObject({ name: 'outside-vm', origin: 'adopted', state: 'running', controllable: true });
+			// attached once: no longer offered
+			expect((await connection.scanExternalVms!('local')).some((v) => v.name === 'outside-vm')).toBe(false);
+
+			const listed = (await connection.listVms('local')).find((v) => v.id === vm.id);
+			expect(listed).toMatchObject({ state: 'running', origin: 'adopted', consoles: [] });
+			const details = await connection.getVmDetails!('local', vm.id);
+			expect(details.disks.find((d) => d.kind === 'disk')?.format).toBe('qcow2');
+			expect((await connection.getVmStats!('local', vm.id)).memoryUsedMB).toBeGreaterThan(0);
+
+			// A bare guest ignores ACPI: the ladder times out, then the confirmed power off ends the process.
+			await expect(connection.power('local', vm.id, 'shutdown')).rejects.toMatchObject({ code: 'timeout' });
+			await connection.power('local', vm.id, 'stop');
+			for (let i = 0; i < 30 && child.exitCode === null && child.signalCode === null; i++) await new Promise((r) => setTimeout(r, 100));
+			expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+			// An adopted VM is gone from the list once its process is.
+			expect((await connection.listVms('local')).some((v) => v.id === vm.id)).toBe(false);
+
+			// The same disk is now offered for import from its folder, referenced rather than copied.
+			const candidates = await connection.scanImportFolder!('local', dir);
+			const candidate = candidates.find((c) => c.name === 'outside');
+			expect(candidate).toBeDefined();
+			const [imported] = await connection.importFromFolder!('local', dir, [candidate!.id], { copy: false });
+			expect(imported).toMatchObject({ name: 'outside', origin: 'imported', state: 'stopped' });
+			expect((await connection.getVmDetails!('local', imported!.id)).disks[0]).toMatchObject({ path: disk });
+			// ...and not offered again.
+			expect((await connection.scanImportFolder!('local', dir)).some((c) => c.id === candidate!.id)).toBe(false);
+			await connection.deleteVm('local', imported!.id, { deleteDisks: false });
+			expect(fs.existsSync(disk)).toBe(true);
+		}, 90_000);
+	});
 });

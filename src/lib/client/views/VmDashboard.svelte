@@ -10,6 +10,7 @@
 	import Status from '#lib/client-lib/components/feedback/Status.svelte';
 	import { formatMemory, formatUptime, type Capabilities, type VmDetails, type VmInfo, type VmStats } from '@vmm/sdk';
 	import type { BootData, OverviewCommand } from '../../../shared/protocol';
+	import { originLabel } from '../../../shared/origin';
 	import { browserUrl, GUEST_HOST_ADDRESS, sshCommand } from '../../../shared/forwards';
 	import {
 		column,
@@ -193,7 +194,7 @@
 			<Flexbox gap="0.5rem" wrap="wrap">
 				{#if vm.state !== 'running'}
 					<Button variant="primary" disabled={!!vm.operation} onclick={() => run('vmm.start')}><Icon icon="play-fill" margin="right" />Start</Button>
-				{:else}
+				{:else if vm.controllable !== false}
 					<Button disabled={!!vm.operation} onclick={() => run('vmm.shutdown')}><Icon icon="power" margin="right" />Shut down</Button>
 					<Button transparent disabled={!!vm.operation} onclick={() => run('vmm.reboot')}><Icon icon="arrow-repeat" margin="right" />Restart</Button>
 				{/if}
@@ -202,6 +203,7 @@
 				{/if}
 				<Button transparent onclick={() => run('vmm.connectGraphical')}><Icon icon="display" margin="right" />Console</Button>
 				<Button transparent onclick={() => run('vmm.editVm')}><Icon icon="gear" margin="right" />Settings</Button>
+				{#if originLabel(vm)}<span class="badge" title={vm.controllable === false ? 'Started outside VM Manager without a control socket: it can only be observed and powered off.' : 'Not created by VM Manager'}>{originLabel(vm)}</span>{/if}
 				{#if actionError}<span class="error">{actionError}</span>{/if}
 				{#if vm.operation}<span class="operation">{OPERATION_LABEL[vm.operation as keyof typeof OPERATION_LABEL] ?? ''}</span>{/if}
 			</Flexbox>
@@ -496,6 +498,14 @@
 	.actions {
 		white-space: nowrap;
 		text-align: right;
+	}
+	.badge {
+		padding: 0.05rem 0.45rem;
+		border-radius: 999px;
+		font-size: 0.8em;
+		color: var(--vscode-badge-foreground, inherit);
+		background: var(--vscode-badge-background, #8883);
+		white-space: nowrap;
 	}
 	.muted,
 	.operation {
