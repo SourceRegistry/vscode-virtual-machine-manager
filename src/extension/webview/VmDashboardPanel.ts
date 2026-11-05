@@ -1,9 +1,23 @@
 import * as vscode from 'vscode';
-import type { VmRef } from '../../shared/protocol';
+import type { OverviewCommand, VmRef } from '../../shared/protocol';
 import type { ConnectionManager } from '../clusters/ConnectionManager';
 import { panelIcon, renderHtml, WebviewChannel, webviewOptions } from './WebviewHost';
 
 export const VM_DASHBOARD_VIEW_TYPE = 'vmm.vmDashboard';
+
+/** Commands the page may run, always on its own VM. */
+const ALLOWED_COMMANDS = new Set<OverviewCommand>([
+	'vmm.start',
+	'vmm.shutdown',
+	'vmm.reboot',
+	'vmm.stop',
+	'vmm.connectGraphical',
+	'vmm.connectSerial',
+	'vmm.openExternal',
+	'vmm.editVm',
+	'vmm.ejectMedia',
+	'vmm.changeMedia'
+]);
 
 /** One dashboard tab per VM: hardware inventory and live charts. */
 export class VmDashboardPanel implements vscode.Disposable {
@@ -40,6 +54,11 @@ export class VmDashboardPanel implements vscode.Disposable {
 		panel.iconPath = panelIcon(extensionUri, 'dashboard');
 		panel.webview.html = renderHtml(panel.webview, extensionUri, { view: 'vmDashboard', title: panel.title, ref, vmName });
 		const channel = new WebviewChannel(panel.webview, {
+			// The VM is fixed by this panel; whatever `ref` the page sends is ignored.
+			runCommand: async ({ command }) => {
+				if (!ALLOWED_COMMANDS.has(command)) throw new Error(`Command not allowed: ${command}`);
+				await vscode.commands.executeCommand(command, ref);
+			},
 			getDashboard: async () => {
 				await manager.connect(ref.clusterId).catch(() => undefined);
 				return { vm: manager.findVm(ref)?.vm, capabilities: manager.cluster(ref.clusterId)?.connection?.capabilities };

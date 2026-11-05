@@ -55,9 +55,12 @@
 	const hasDiskStats = $derived(points.some((p) => p.readBps !== null));
 	const memoryTop = $derived(Math.max(vm?.memoryMB ?? 0, ...points.map((p) => p.memoryMB ?? 0), 1));
 
+	let actionError = $state<string | undefined>();
+
 	function run(command: OverviewCommand) {
 		if (!boot.ref) return;
-		void request('runCommand', { command, ref: boot.ref });
+		actionError = undefined;
+		request('runCommand', { command, ref: boot.ref }).catch((error: Error) => (actionError = error.message));
 	}
 
 	async function loadDetails() {
@@ -160,6 +163,7 @@
 				{/if}
 				<Button transparent onclick={() => run('vmm.connectGraphical')}><Icon icon="display" margin="right" />Console</Button>
 				<Button transparent onclick={() => run('vmm.editVm')}><Icon icon="gear" margin="right" />Settings</Button>
+				{#if actionError}<span class="error">{actionError}</span>{/if}
 				{#if vm.operation}<span class="operation">{OPERATION_LABEL[vm.operation as keyof typeof OPERATION_LABEL] ?? ''}</span>{/if}
 			</Flexbox>
 		</Section>
