@@ -105,6 +105,8 @@ export type VmState = 'running' | 'stopped' | 'paused' | 'saved' | 'starting' | 
 export type NodeStatus = 'online' | 'offline' | 'unknown';
 
 export interface Capabilities {
+	/** The connection holds a sign-in session the user can end (`ClusterConnection.signOut`). */
+	signOut?: boolean;
 	create: boolean;
 	edit: boolean;
 	delete: boolean;
@@ -423,6 +425,8 @@ export interface PreviewFrame {
 
 export interface ClusterConnection extends Disposable {
 	readonly capabilities: Capabilities;
+	/** Ends the sign-in session and forgets whatever was stored for it. The core then drops the connection. */
+	signOut?(): Promise<void>;
 	listNodes(): Promise<NodeInfo[]>;
 	listVms(nodeId: string): Promise<VmInfo[]>;
 	getCreateSchema(nodeId: string): Promise<FieldSchema[]>;

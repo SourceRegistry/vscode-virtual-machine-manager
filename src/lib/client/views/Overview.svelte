@@ -284,7 +284,7 @@
 
 		<!-- Hosts: one card per node with its live load and allocation. -->
 		{#each clusters as cluster (cluster.id)}
-			<div class="context" data-vscode-context={vscodeContext(clusterContextValue(cluster.status), { clusterId: cluster.id })}>
+			<div class="context" data-vscode-context={vscodeContext(clusterContextValue(cluster.status, cluster.capabilities), { clusterId: cluster.id })}>
 				<Section title={cluster.name} description={cluster.providerName}>
 					{#snippet headerSuffix()}
 						<Flexbox align="center" gap="0.5rem">

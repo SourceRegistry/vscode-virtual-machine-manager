@@ -7,7 +7,7 @@ import { tokenTerminal } from './terminal';
 import { agentAddresses, allAddresses, containerAddresses, diskDevices, hostDevices, mergeAddresses, nicDevices } from './inventory';
 import { openIdLogin, qualifiedUser, type SessionStore, type SessionUi } from './session';
 
-import { ProviderError, validateValues, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type VmDetails, type SecretBag, type VmInfo } from '@vmm/sdk';
+import { ProviderError, validateValues, type Capabilities, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type VmDetails, type SecretBag, type VmInfo } from '@vmm/sdk';
 
 /** Whether the VM has a graphical display: `vga` is `serialN` (terminal as display) or `none` otherwise absent. */
 export function hasDisplay(config: object): boolean {
@@ -105,7 +105,7 @@ export class ProxmoxProvider implements HypervisorProvider {
 		const options = connectionOptions(cluster, secrets);
 		const agent = new Agent({ rejectUnauthorized: options.verifyTls, timeout: 30_000 });
 		const transport = proxmoxFetch(agent, options.verifyTls);
-		const open = (client: Client) => new ProxmoxConnection(client, options.baseUrl, (url) => this.host.openUrl(url), () => agent.destroy(), options.verifyTls);
+		const open = (client: Client) => new ProxmoxConnection(client, options.baseUrl, (url) => this.host.openUrl(url), () => agent.destroy(), options.verifyTls, options.method === 'token' ? undefined : () => this.host.store.remove(cluster.id));
 		const base = { baseUrl: options.baseUrl, agent, fetch: transport };
 		try {
 			if (options.method === 'token') {
@@ -166,13 +166,15 @@ export function consoleUrl(baseUrl: string, node: string, id: string, container:
 }
 
 export class ProxmoxConnection implements ClusterConnection {
-	readonly capabilities = { details: true, create: true, edit: true, delete: true, power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[], consoles: ['vnc', 'serial'] as ConsoleKind[], preview: false, external: true, stats: true };
+	readonly capabilities: Capabilities = { details: true, create: true, edit: true, delete: true, power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[], consoles: ['vnc', 'serial'] as ConsoleKind[], preview: false, external: true, stats: true };
 	private readonly abort = new AbortController();
 	private readonly consoles = new Set<ConsoleStream>();
 	private readonly containers = new Set<string>();
 	private isContainer(node: string, id: string): boolean { return this.containers.has(`${node}/${id}`); }
 	private container(node: string, id: string) { this.vm(node, id); return this.client.api.nodes.get(node).lxc.id(Number(id)); }
-	constructor(private readonly client: Client, private readonly baseUrl: string, private readonly openUrl: (url: string) => PromiseLike<unknown>, private readonly cleanup: () => void = () => {}, private readonly verifyTls = true) {}
+	constructor(private readonly client: Client, private readonly baseUrl: string, private readonly openUrl: (url: string) => PromiseLike<unknown>, private readonly cleanup: () => void = () => {}, private readonly verifyTls = true, private readonly endSession?: () => Promise<void>) {
+		this.capabilities = { ...this.capabilities, ...(endSession ? { signOut: true } : {}) };
+	}
 	private vm(node: string, id: string) {
 		if (!/^\d+$/.test(id) || Number(id) < 100) throw new ProviderError('Invalid Proxmox VM ID.', 'invalid');
 		return this.client.api.nodes.get(node).qemu.vmid(Number(id));
@@ -350,6 +352,8 @@ export class ProxmoxConnection implements ClusterConnection {
 		}
 	}
 	/** Opens Proxmox's stand-alone console page (noVNC, or xterm.js without a display) in the browser. */
+	/** Forgets the stored ticket. Proxmox has no logout call: the ticket only expires on its own. */
+	async signOut(): Promise<void> { await this.endSession?.(); }
 	async openExternal(node: string, id: string): Promise<void> {
 		this.vm(node, id);
 		const container = this.isContainer(node, id);

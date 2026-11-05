@@ -193,3 +193,22 @@ describe('tree inline actions', () => {
 		]);
 	});
 });
+
+describe('sign out', () => {
+	const signedIn = clusterContextValue('connected', { ...caps, signOut: true });
+
+	it('is offered only for a connected cluster whose provider has a session', () => {
+		expect(commandsFor('view/item/context', signedIn)).toContain('vmm.signOut');
+		expect(commandsFor('view/item/context', signedIn, { inline: true })).toContain('vmm.signOut');
+		expect(commandsFor('webview/context', signedIn)).toContain('vmm.signOut');
+		for (const value of [clusterContextValue('connected', caps), clusterContextValue('connected'), clusterContextValue('disconnected', { ...caps, signOut: true }), clusterContextValue('error')]) {
+			expect(commandsFor('view/item/context', value)).not.toContain('vmm.signOut');
+			expect(commandsFor('webview/context', value)).not.toContain('vmm.signOut');
+		}
+	});
+
+	it('keeps the other cluster menu items working with the extra flag', () => {
+		expect(commandsFor('view/item/context', signedIn)).toEqual(expect.arrayContaining(['vmm.reconnectCluster', 'vmm.editCluster', 'vmm.removeCluster']));
+		expect(commandsFor('view/item/context', clusterContextValue('missingProvider'), { inline: true })).toContain('vmm.installProviders');
+	});
+});

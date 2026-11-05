@@ -24,6 +24,8 @@ export interface ClusterRuntime {
 	connecting?: Promise<ClusterConnection>;
 	refreshing?: Promise<void>;
 	changeSubscription?: vscode.Disposable;
+	/** The user ended the session: do not reconnect (and ask for credentials) until they ask. */
+	signedOut?: boolean;
 }
 
 export interface VmLocation {
@@ -158,7 +160,7 @@ export class ConnectionManager implements vscode.Disposable {
 
 	async ensureLoaded(clusterId: string): Promise<void> {
 		const rt = this.runtimes.get(clusterId);
-		if (!rt || rt.loaded || rt.status === 'error' || rt.status === 'missingProvider') return;
+		if (!rt || rt.loaded || rt.signedOut || rt.status === 'error' || rt.status === 'missingProvider') return;
 		await this.refresh(clusterId);
 	}
 
@@ -166,15 +168,36 @@ export class ConnectionManager implements vscode.Disposable {
 	async refresh(clusterId?: string): Promise<void> {
 		if (clusterId) {
 			const rt = this.runtimes.get(clusterId);
-			if (rt) await this.refreshRuntime(rt);
+			if (rt) {
+				rt.signedOut = false;
+				await this.refreshRuntime(rt);
+			}
 			return;
 		}
-		await Promise.all(this.clusters().map((rt) => this.refreshRuntime(rt)));
+		await Promise.all(this.clusters().filter((rt) => !rt.signedOut).map((rt) => this.refreshRuntime(rt)));
+	}
+
+	/** Ends the provider's sign-in session, drops the connection and stays disconnected until asked to connect. */
+	async signOut(clusterId: string): Promise<void> {
+		const rt = this.runtimes.get(clusterId);
+		if (!rt) return;
+		try {
+			await rt.connection?.signOut?.();
+		} catch (error) {
+			log.warn(`Signing out of ${rt.cluster.name} failed: ${errorMessage(error)}`);
+		}
+		this.disconnect(rt);
+		rt.nodes = [];
+		rt.loaded = false;
+		rt.signedOut = true;
+		this.setStatus(rt, 'disconnected');
+		this.updateContextKeys();
 	}
 
 	async reconnect(clusterId: string): Promise<void> {
 		const rt = this.runtimes.get(clusterId);
 		if (!rt) return;
+		rt.signedOut = false;
 		this.disconnect(rt);
 		rt.loaded = false;
 		this.setStatus(rt, 'disconnected');
