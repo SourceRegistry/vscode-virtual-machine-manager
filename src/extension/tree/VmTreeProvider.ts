@@ -180,7 +180,6 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		item.iconPath = new vscode.ThemeIcon(icon, color ? new vscode.ThemeColor(color) : undefined);
 		const label = vm.operation ? OPERATION_LABEL[vm.operation] : stateLabel(vm.state);
 		const parts = [...(vm.displayId ? [`#${vm.displayId}`] : []), label];
-		if (vm.state === 'running' && vm.ipAddresses?.length) parts.push(vm.ipAddresses[0]);
 		const origin = originLabel(vm);
 		if (origin) parts.push(origin);
 		item.description = parts.join(' · ');
