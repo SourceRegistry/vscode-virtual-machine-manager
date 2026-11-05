@@ -311,10 +311,9 @@ export class ConsoleManager implements vscode.Disposable {
 		}
 		const vm = this.manager.findVm(ref)?.vm;
 		const name = vm?.name ?? ref.vmId;
-		const title = kind === 'serial' ? `${name} — Serial` : name;
 		const panel = vscode.window.createWebviewPanel(
 			VIEW_TYPES[kind],
-			title,
+			name,
 			vscode.ViewColumn.Active,
 			// Live sockets: keep the page alive while the tab is in the background.
 			webviewOptions(this.extensionUri, true)
@@ -324,7 +323,7 @@ export class ConsoleManager implements vscode.Disposable {
 		const view: ViewKind = `console.${kind}`;
 		panel.webview.html = renderHtml(panel.webview, this.extensionUri, {
 			view,
-			title,
+			title: name,
 			ref,
 			vmName: name,
 			settings: { scaleViewport },
