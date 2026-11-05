@@ -1,6 +1,6 @@
 // Renders the Marketplace icons (256×256 PNG; the Marketplace does not accept SVG icons) from
 // media/marketplace/icon.svg (512×512). Provider icons are the same artwork with a badge holding the
-// platform's logo (media/marketplace/hyperv.svg, qemu.svg), so the three extensions read as one
+// platform's logo (media/marketplace/hyperv.svg, qemu.svg, proxmox.svg), so the extensions read as one
 // family. Run after changing the artwork: `node scripts/render-icons.mjs`.
 import { Resvg } from '@resvg/resvg-js';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -40,7 +40,8 @@ const icons = [
 	{ out: 'media/icon.png', svg: base },
 	{ out: 'extensions/hyperv/media/icon.png', svg: withBadge('hyperv.svg', 1.4) },
 	// The QEMU tail reaches the corner of its box: 1.3 keeps the diagonal inside the badge.
-	{ out: 'extensions/qemu/media/icon.png', svg: withBadge('qemu.svg', 1.3) }
+	{ out: 'extensions/qemu/media/icon.png', svg: withBadge('qemu.svg', 1.3) },
+	{ out: 'extensions/proxmox/media/icon.png', svg: withBadge('proxmox.svg', 1.4) }
 ];
 
 for (const { out, svg } of icons) {
