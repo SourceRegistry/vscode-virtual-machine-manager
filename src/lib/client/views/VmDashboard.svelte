@@ -63,6 +63,7 @@
 	let newHostPort = $state('');
 	let newGuestPort = $state('');
 	let forwardBusy = $state(false);
+	let addingForward = $state(false);
 	const canForward = $derived(!!caps?.forwards);
 
 	async function forwardCall(call: () => Promise<unknown>) {
@@ -85,7 +86,14 @@
 			await request('addForward', { forward });
 			newHostPort = '';
 			newGuestPort = '';
+			addingForward = false;
 		});
+	}
+
+	function cancelForward() {
+		addingForward = false;
+		newHostPort = '';
+		newGuestPort = '';
 	}
 
 	function run(command: OverviewCommand) {
@@ -348,9 +356,12 @@
 							<p class="muted">No network adapters.</p>
 						{/if}
 						{#if details.forwards.length || canForward}
-							<h4>Port forwards</h4>
-						{/if}
-						{#if details.forwards.length}
+							<div class="subhead">
+								<span>Port forwards</span>
+								{#if canForward}
+									<Button transparent title="Add port forward" aria-label="Add port forward" disabled={addingForward} onclick={() => (addingForward = true)}><Icon icon="plus-lg" /></Button>
+								{/if}
+							</div>
 							<table class="grid">
 								<thead><tr><th>Protocol</th><th>Host</th><th>Guest</th><th></th></tr></thead>
 								<tbody>
@@ -372,22 +383,27 @@
 											</td>
 										</tr>
 									{/each}
+									{#if addingForward}
+										<tr class="new-row">
+											<td>
+												<select form="forward-form" bind:value={newProtocol} aria-label="Protocol">
+													<option value="tcp">TCP</option>
+													<option value="udp">UDP</option>
+												</select>
+											</td>
+											<td><input form="forward-form" type="number" min="1" max="65535" placeholder="Host port" aria-label="Host port" bind:value={newHostPort} required /></td>
+											<td><input form="forward-form" type="number" min="1" max="65535" placeholder="Guest port" aria-label="Guest port" bind:value={newGuestPort} required /></td>
+											<td class="actions">
+												<Button transparent type="submit" form="forward-form" disabled={forwardBusy} title="Add" aria-label="Confirm port forward"><Icon icon="check-lg" /></Button>
+												<Button transparent title="Cancel" aria-label="Cancel" onclick={cancelForward}><Icon icon="x-lg" /></Button>
+											</td>
+										</tr>
+									{:else if !details.forwards.length}
+										<tr><td colspan="4" class="muted">None. Use + to forward a host port to the guest, e.g. SSH.</td></tr>
+									{/if}
 								</tbody>
 							</table>
-						{:else if canForward}
-							<p class="muted">No port forwards. Forward a host port to reach a service in the guest, e.g. SSH.</p>
-						{/if}
-						{#if canForward}
-							<form class="forward-form" onsubmit={addForward}>
-								<select bind:value={newProtocol} aria-label="Protocol">
-									<option value="tcp">TCP</option>
-									<option value="udp">UDP</option>
-								</select>
-								<input type="number" min="1" max="65535" placeholder="Host port" aria-label="Host port" bind:value={newHostPort} required />
-								<span aria-hidden="true">→</span>
-								<input type="number" min="1" max="65535" placeholder="Guest port" aria-label="Guest port" bind:value={newGuestPort} required />
-								<Button type="submit" disabled={forwardBusy}><Icon icon="plus-lg" margin="right" />Add</Button>
-							</form>
+							<form id="forward-form" onsubmit={addForward}></form>
 							<p class="muted hint">Forwards listen on 127.0.0.1 only. From the guest, the host is reachable at <span class="mono">{GUEST_HOST_ADDRESS}</span>.</p>
 						{/if}
 					</Card>
@@ -486,30 +502,28 @@
 	.error {
 		color: var(--vscode-errorForeground);
 	}
-	.forward-form {
+	.subhead {
 		display: flex;
-		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.5rem;
-		margin-top: 0.5rem;
+		justify-content: space-between;
+		margin: 1rem 0 0.15rem;
+		font-weight: 600;
+		color: var(--vscode-descriptionForeground);
 	}
-	.forward-form input,
-	.forward-form select {
+	.new-row input,
+	.new-row select {
 		background: var(--vscode-input-background);
 		color: var(--vscode-input-foreground);
 		border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, #8886));
 		border-radius: 3px;
-		padding: 0.25rem 0.4rem;
+		padding: 0.2rem 0.4rem;
 		font: inherit;
 	}
-	.forward-form input {
-		width: 8rem;
+	.new-row input {
+		width: 7rem;
 	}
 	.hint {
 		margin: 0.5rem 0 0;
 		font-size: 0.9em;
-	}
-	h4 {
-		margin: 1rem 0 0.25rem;
 	}
 </style>
