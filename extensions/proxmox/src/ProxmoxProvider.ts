@@ -4,9 +4,10 @@ import { Client, type PveSession } from 'pve-client';
 import { consoleStream } from './console';
 import { proxmoxFetch } from './transport';
 import { tokenTerminal } from './terminal';
+import { agentAddresses, allAddresses, containerAddresses, diskDevices, hostDevices, mergeAddresses, nicDevices } from './inventory';
 import { openIdLogin, qualifiedUser, type SessionStore, type SessionUi } from './session';
 
-import { ProviderError, validateValues, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type SecretBag, type VmInfo } from '@vmm/sdk';
+import { ProviderError, validateValues, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type VmDetails, type SecretBag, type VmInfo } from '@vmm/sdk';
 
 /** Whether the VM has a graphical display: `vga` is `serialN` (terminal as display) or `none` otherwise absent. */
 export function hasDisplay(config: object): boolean {
@@ -165,7 +166,7 @@ export function consoleUrl(baseUrl: string, node: string, id: string, container:
 }
 
 export class ProxmoxConnection implements ClusterConnection {
-	readonly capabilities = { create: true, edit: true, delete: true, power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[], consoles: ['vnc', 'serial'] as ConsoleKind[], preview: false, external: true, stats: true };
+	readonly capabilities = { details: true, create: true, edit: true, delete: true, power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[], consoles: ['vnc', 'serial'] as ConsoleKind[], preview: false, external: true, stats: true };
 	private readonly abort = new AbortController();
 	private readonly consoles = new Set<ConsoleStream>();
 	private readonly containers = new Set<string>();
@@ -193,6 +194,25 @@ export class ProxmoxConnection implements ClusterConnection {
 		const nodes = await this.client.api.nodes.list();
 		return nodes.map((n) => ({ id: n.node, name: n.node, status: n.status === 'online' ? 'online' as const : n.status === 'offline' ? 'offline' as const : 'unknown' as const, cpus: n.maxcpu, cpuUsage: n.cpu, memoryMB: n.maxmem === undefined ? undefined : n.maxmem / 1048576, memoryUsedMB: n.mem === undefined ? undefined : n.mem / 1048576 }));
 	}
+	private readonly addressCache = new Map<string, { at: number; addresses: Map<string, string[]> }>();
+	/** What the guest reports about its network, via the QEMU guest agent or the container's interfaces. Empty when unavailable. */
+	private async guestAddresses(node: string, id: string, container: boolean, config: object | undefined, maxAgeMs = 60_000): Promise<Map<string, string[]>> {
+		const key = `${node}/${id}`;
+		const cached = this.addressCache.get(key);
+		if (cached && Date.now() - cached.at < maxAgeMs) return cached.addresses;
+		const agent = String((config as Record<string, unknown> | undefined)?.agent ?? '');
+		// A VM without the agent enabled would only answer with an error.
+		if (!container && !/^(1|enabled=1)/.test(agent)) return new Map();
+		const init = { signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(4000)]) };
+		let addresses = new Map<string, string[]>();
+		try {
+			addresses = container
+				? containerAddresses(await this.client.request('/nodes/{node}/lxc/{vmid}/interfaces', 'GET', { $path: { node, vmid: Number(id) } }, init))
+				: agentAddresses(await this.client.request('/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces', 'GET', { $path: { node, vmid: Number(id) } }, init));
+		} catch { /* agent not running yet, or no permission: no addresses */ }
+		this.addressCache.set(key, { at: Date.now(), addresses });
+		return addresses;
+	}
 	async listVms(node: string): Promise<VmInfo[]> {
 		const api = this.client.api.nodes.get(node);
 		const [vms, containers] = await Promise.all([api.qemu.list(), api.lxc.list()]);
@@ -201,9 +221,18 @@ export class ProxmoxConnection implements ClusterConnection {
 		return Promise.all([...vms.map((v) => ({ ...v, container: false })), ...containers.map((v) => ({ ...v, container: true }))]
 			.filter((v) => !v.template).map(async (v): Promise<VmInfo> => {
 				const config = v.container ? undefined : await api.qemu.vmid(v.vmid).config.get().then((c) => c as object, () => undefined);
-				const macs = macAddresses(v.container ? await api.lxc.id(v.vmid).config.get().then((c) => c as object, () => undefined) : config);
-				return ({ id: String(v.vmid), displayId: String(v.vmid), ...(macs.length ? { macAddresses: macs } : {}), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
+				const guestConfig = v.container ? await api.lxc.id(v.vmid).config.get().then((c) => c as object, () => undefined) : config;
+				const macs = macAddresses(guestConfig);
+				const addresses = v.status === 'running' ? allAddresses(await this.guestAddresses(node, String(v.vmid), v.container, guestConfig)) : [];
+				return ({ id: String(v.vmid), displayId: String(v.vmid), ...(macs.length ? { macAddresses: macs } : {}), ...(addresses.length ? { ipAddresses: addresses } : {}), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
 			}));
+	}
+	async getVmDetails(node: string, id: string): Promise<VmDetails> {
+		const container = this.isContainer(node, id);
+		const config = (container ? await this.container(node, id).config.get() : await this.vm(node, id).config.get()) as Record<string, unknown>;
+		const running = await (container ? this.container(node, id).status.current() : this.vm(node, id).status.current()).then((s) => s.status === 'running', () => false);
+		const reported = running ? await this.guestAddresses(node, id, container, config, 0) : new Map<string, string[]>();
+		return { disks: diskDevices(config, container), nics: mergeAddresses(nicDevices(config, container), reported), devices: hostDevices(config), forwards: [] };
 	}
 	async getCreateSchema(node: string): Promise<FieldSchema[]> {
 		const stores = await this.client.api.nodes.get(node).storage.list();
