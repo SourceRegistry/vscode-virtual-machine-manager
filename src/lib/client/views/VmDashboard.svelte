@@ -454,7 +454,7 @@
 					{#if caps?.passthrough}
 						<Card title="Host devices">
 							{#snippet header()}
-								<Button transparent title="Refresh the list of host devices" aria-label="Refresh host devices" disabled={passthroughBusy !== undefined} onclick={loadPassthrough}><Icon icon="arrow-clockwise" /></Button>
+								<span class="icon-only"><Button transparent title="Refresh the list of host devices" aria-label="Refresh host devices" disabled={passthroughBusy !== undefined} onclick={loadPassthrough}><Icon icon="arrow-clockwise" /></Button></span>
 							{/snippet}
 							{#if !passthroughLoaded && !passthroughBusy}
 								<div class="empty">
@@ -622,12 +622,14 @@
 	}
 	/* Icon-only buttons in these rows: compact, so they sit level with the text. */
 	.subhead :global(button),
+	.icon-only :global(button),
 	.actions :global(button) {
 		padding: 0.1rem 0.3rem;
 		min-height: 0;
 		line-height: 1;
 	}
 	.subhead :global(.bi),
+	.icon-only :global(.bi),
 	.actions :global(.bi) {
 		font-size: 0.95em;
 	}
