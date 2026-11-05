@@ -2,7 +2,7 @@
   "name": "vm-manager-hyperv",
   "displayName": "VM Manager – Hyper-V",
   "description": "Hyper-V provider for VM Manager: manage the Hyper-V virtual machines on this Windows machine, with an interactive console and a serial console in the editor.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "sourceregistry",
   "icon": "media/icon.png",
   "license": "Apache-2.0",

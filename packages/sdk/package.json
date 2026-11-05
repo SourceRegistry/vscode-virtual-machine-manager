@@ -1,6 +1,6 @@
 {
   "name": "@vmm/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Provider API for the VM Manager VS Code extension.",
   "license": "Apache-2.0",
   "private": true,

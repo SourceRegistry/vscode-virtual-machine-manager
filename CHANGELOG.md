@@ -1,5 +1,54 @@
 # Changelog
 
+# [0.3.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.2.0...v0.3.0) (2026-11-05)
+
+
+### Bug Fixes
+
+* **console:** tab title is the VM name for the terminal too ([8909e9e](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/8909e9e3adc1f1cf25e603caf54d94ff944823d8))
+* **core:** make the shutdown-timeout prompt modal and log it ([b6b3949](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/b6b3949b9447ea454e95b8194ecb05d2c84494c5))
+* dashboard buttons did nothing (no runCommand handler) ([64b45d6](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/64b45d6463f8d95c52309d59a4ab46bd60a68919))
+* **proxmox:** open the console viewer, not the guest summary ([27147bd](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/27147bd39b9ef7cc1433c97645bbcf9083f7c2d4))
+* **proxmox:** open the stand-alone console page from the context menu ([e6287c7](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/e6287c781a54e9f8fd889f693f6703533e75200b)), closes [#v1](https://github.com/SourceRegistry/vscode-virtual-machine-manager/issues/v1)
+* **qemu:** shutdown no longer hangs when the guest ignores ACPI ([674d3d4](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/674d3d4b27efc31cd2c72d4bb5f1bb93a3baa5cd))
+* **qemu:** stop VMs fighting over VNC/QMP ports on start ([0f3cd90](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/0f3cd904b9d6f29238ce3837b520969e3263df08))
+* **search:** let our own filter decide, so IP and MAC matches show ([5ebdb62](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/5ebdb62094ace91746690ff34805a01c41bb6765))
+* **tree:** keep IP addresses out of the tree row ([226fbae](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/226fbae6dc8ee8c6c7a669795d8eb7151e4e3cef))
+* **ui:** centered empty states, compact host devices button, tidier notes ([c13dd06](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/c13dd066b628709ef69aa07b8fa2d7d24f5139a9))
+* **ui:** compact refresh button on the host devices card ([69d91f0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/69d91f0f812adf1b3062ac886b4c41cc364041ae))
+* **ui:** show the external badge beside the status, hide Console without a console ([c01068a](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/c01068af07eb7ec929caa2370e2173e48d6fc511))
+
+
+### Features
+
+* device passthrough (USB hot-plug, Linux VFIO, Hyper-V DDA) ([8b766ae](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/8b766aefbb307ef248b14ca153c1271c4d2cd4bc))
+* eject-fill icon and an eject button in the VM settings ([f0a204b](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/f0a204bb092fa386f023106ce364c2603016e6a3))
+* hardware inventory, live stats and quick media eject ([c83ae62](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/c83ae62a867efd2550c089164462459c87ee5487))
+* **icons:** Proxmox marketplace icon, refreshed Hyper-V badge ([b22747f](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/b22747f9f51e62e12facbac05bef429f5910d4ee))
+* overview dashboard with node gauges, all-VMs table and bulk actions ([1ac4389](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/1ac4389a57b1ef8144a7f2474e939976205e4b18))
+* per-VM details dashboard with live charts ([d817237](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/d8172378fb7547a78a6080dea900435e7380e809))
+* **proxmox:** hardware details and guest IP addresses ([b75ec60](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/b75ec601631903c24507934dfaa60dd28df8fdec))
+* **proxmox:** sign in with a session (password, 2FA, OpenID) ([eceb87b](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/eceb87b99fbe6ed7464dfed5e024f579f7a5fe52))
+* **qemu:** ARM64 (aarch64) guests, native on Apple Silicon ([1fa12e9](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/1fa12e956d79dbcd57d13da2485a51fe9545dba6))
+* **qemu:** attach to running VMs and import from folders ([9eab4e9](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/9eab4e963bdc5c224de47ad820543d54d70439fd))
+* **qemu:** live port forwards with ssh/browser actions ([bb89ff7](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/bb89ff78f9b35e457d84d1a529dfba76b53fffa8))
+* **sdk:** conditional connection fields; sign-in method shows its own fields ([c85ca61](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/c85ca611c62389f00db9c62b19f886f6f490a21f))
+* search virtual machines by name, id, IP or MAC ([19e487c](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/19e487c7c419f806b0533c8c791d7d8370692358))
+* **search:** #<id> matches an id prefix ([24a9395](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/24a9395e86ab87b47120a970d9a4182559f25ac8))
+* **tree:** open the details page when a VM is clicked ([e017c15](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/e017c1527f14a11fb93e634514281474bdea6303))
+* **tree:** open the terminal of terminal-only resources, hide serial next to a display ([c35d78f](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/c35d78fecb89998d368aeed8d0f36790eec04b6a))
+* **tree:** show the Proxmox VMID beside the guest name ([21c820b](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/21c820b2a0e9a1ff03887b77a5a9bd1184370bae))
+* **ui:** add port forwards from a + button as an inline table row ([bff7e66](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/bff7e66b9c568f9454541a8fd82787befe65d625))
+* **ui:** show forward direction, compact icon buttons ([f970cb8](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/f970cb83cb4b760d8f0cbbc0f77e88c594ca735b))
+* **ui:** show the VM id on the details page ([f30bde6](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/f30bde605560469211a2ddb2194be95082f66041))
+* **ui:** terminal quick action for terminal-only resources ([3a76a9a](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/3a76a9a62e92832450f045049a5ea0e61a6e994d))
+* use the outline eject icon and name the command Eject ([d51c4d2](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/d51c4d2a7d7001f7962416ec8b432fd0670aca82))
+
+
+### Reverts
+
+* **tree:** clicking a VM always opens its details page ([b01add8](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/b01add8c570e0d3e1b6a8e17b060449cf17ee7d2))
+
 # [0.2.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.1.0...v0.2.0) (2026-11-03)
 
 
