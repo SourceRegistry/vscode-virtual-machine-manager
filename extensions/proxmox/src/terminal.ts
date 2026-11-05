@@ -11,10 +11,11 @@ export function tokenTerminal(client: Client, node: string, vmid: number, verify
 		const url = new URL(client.url(`/nodes/${encodeURIComponent(node)}/${type}/${vmid}/vncwebsocket`, { port: ticket.port, vncticket: ticket.ticket }));
 		url.protocol = 'wss:';
 		const authorization = client.tokenAuthorizationHeader();
-		if (!authorization) throw new ProviderError('No Proxmox API token is configured.', 'permission');
+		const cookie = client.sessionCookie();
+		if (!authorization && !cookie) throw new ProviderError('Not signed in to Proxmox.', 'permission');
 		return {
 			info: { node, vmid, type, ticket, websocketUrl: url.toString(), authMessage: `${ticket.user}:${ticket.ticket}\n` },
-			socket: new WebSocket(url, { headers: { Authorization: authorization, Origin: `https://${url.host}` }, rejectUnauthorized: verifyTls, handshakeTimeout: 30_000 })
+			socket: new WebSocket(url, { headers: { ...(authorization ? { Authorization: authorization } : { Cookie: cookie! }), Origin: `https://${url.host}` }, rejectUnauthorized: verifyTls, handshakeTimeout: 30_000 })
 		};
 	}, { reconnect: false, reconnectIntervalMs: 1500, reconnectMaxAttempts: 0 });
 }

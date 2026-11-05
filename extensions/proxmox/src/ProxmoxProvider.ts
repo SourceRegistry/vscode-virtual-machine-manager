@@ -4,6 +4,7 @@ import { Client } from 'pve-client';
 import { consoleStream } from './console';
 import { proxmoxFetch } from './transport';
 import { tokenTerminal } from './terminal';
+import { openIdLogin, passwordLogin, qualifiedUser, SessionAuth, type Session, type SessionStore, type SessionUi } from './session';
 
 import { ProviderError, validateValues, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type SecretBag, type VmInfo } from '@vmm/sdk';
 
@@ -36,13 +37,42 @@ const schema: FieldSchema[] = [
 	{ key: 'onboot', label: 'Start at boot', type: 'checkbox', default: false }
 ];
 
-export function connectionOptions(cluster: ClusterConfig, secrets: SecretBag) {
+export type AuthMethod = 'token' | 'password' | 'openid';
+
+export type ConnectionOptions = { baseUrl: string; verifyTls: boolean } & (
+	| { method: 'token'; apiToken: string }
+	| { method: 'password'; username: string; password?: string }
+	| { method: 'openid'; realm: string; port: number }
+);
+
+export function connectionOptions(cluster: ClusterConfig, secrets: SecretBag): ConnectionOptions {
 	let url: URL;
 	try { url = new URL(String(cluster.config.endpoint)); } catch { throw new ProviderError('Enter a valid Proxmox HTTPS URL.', 'invalid'); }
 	if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new ProviderError('Use an HTTPS origin such as https://pve.example.com:8006.', 'invalid');
+	const common = { baseUrl: url.origin, verifyTls: cluster.config.verifyTls !== false };
+	const method = String(cluster.config.authMethod ?? 'token');
+	if (method === 'password') {
+		const name = String(cluster.config.username ?? '').trim();
+		if (!name || /\s/.test(name)) throw new ProviderError('Provide a user name, for example root or alice@pve.', 'invalid');
+		if (secrets.password && /[\r\n]/.test(secrets.password)) throw new ProviderError('Invalid password.', 'invalid');
+		return { ...common, method, username: qualifiedUser(name, String(cluster.config.realm ?? '')), password: secrets.password || undefined };
+	}
+	if (method === 'openid') {
+		const realm = String(cluster.config.realm ?? '').trim();
+		const port = Number(cluster.config.oidcPort ?? 8189);
+		if (!/^[\w.-]+$/.test(realm)) throw new ProviderError('Provide the name of the OpenID realm.', 'invalid');
+		if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new ProviderError('The OpenID callback port must be between 1024 and 65535.', 'invalid');
+		return { ...common, method, realm, port };
+	}
+	if (method !== 'token') throw new ProviderError('Unknown sign-in method.', 'invalid');
 	const tokenId = String(cluster.config.tokenId ?? '');
 	if (!/^[^\s!=]+@[^\s!=]+![^\s=]+$/.test(tokenId) || !secrets.tokenSecret || /[\r\n]/.test(secrets.tokenSecret)) throw new ProviderError('Provide a token ID (user@realm!token) and secret.', 'invalid');
-	return { baseUrl: url.origin, apiToken: `${tokenId}=${secrets.tokenSecret}`, verifyTls: cluster.config.verifyTls !== false };
+	return { ...common, method, apiToken: `${tokenId}=${secrets.tokenSecret}` };
+}
+
+/** Everything the provider needs from VS Code. */
+export interface ProxmoxHost extends SessionUi {
+	store: SessionStore;
 }
 
 export class ProxmoxProvider implements HypervisorProvider {
@@ -51,17 +81,54 @@ export class ProxmoxProvider implements HypervisorProvider {
 	readonly icon = 'server-environment';
 	readonly connectionSchema: FieldSchema[] = [
 		{ key: 'endpoint', label: 'Proxmox URL', type: 'text', required: true, placeholder: 'https://pve.example.com:8006' },
-		{ key: 'tokenId', label: 'API token ID', type: 'text', required: true, placeholder: 'user@pve!vscode' },
-		{ key: 'tokenSecret', label: 'API token secret', type: 'password', required: true, secret: true },
+		{ key: 'authMethod', label: 'Sign in with', type: 'select', default: 'token', required: true, options: [{ value: 'token', label: 'API token' }, { value: 'password', label: 'User name and password (session)' }, { value: 'openid', label: 'OpenID Connect (browser)' }], description: 'Sessions last two hours, are renewed automatically and are discarded when VS Code closes.' },
+		{ key: 'tokenId', label: 'API token ID', type: 'text', placeholder: 'user@pve!vscode', group: 'API token' },
+		{ key: 'tokenSecret', label: 'API token secret', type: 'password', secret: true, group: 'API token' },
+		{ key: 'username', label: 'User name', type: 'text', placeholder: 'root or alice@ldap', description: 'Add @realm, or set the realm below.', group: 'Session' },
+		{ key: 'realm', label: 'Realm', type: 'text', placeholder: 'pam', description: 'Default pam. For OpenID: the name of the OpenID realm.', group: 'Session' },
+		{ key: 'password', label: 'Password', type: 'password', secret: true, description: 'Optional. Leave empty to be asked at every sign-in; a two-factor code is always asked.', group: 'Session' },
+		{ key: 'oidcPort', label: 'OpenID callback port', type: 'number', default: 8189, min: 1024, max: 65535, description: 'The identity provider must allow http://localhost:<port>/ as redirect.', group: 'Session' },
 		{ key: 'verifyTls', label: 'Verify TLS certificate', type: 'checkbox', default: true, description: 'Disable only for a trusted server with a self-signed certificate.' }
 	];
-	constructor(private readonly openUrl: (url: string) => PromiseLike<unknown>) {}
+	constructor(private readonly host: ProxmoxHost) {}
 	async connect(cluster: ClusterConfig, secrets: SecretBag): Promise<ProxmoxConnection> {
 		const options = connectionOptions(cluster, secrets);
 		const agent = new Agent({ rejectUnauthorized: options.verifyTls, timeout: 30_000 });
-		const connection = new ProxmoxConnection(new Client({ ...options, agent, fetch: proxmoxFetch(agent, options.verifyTls) }), options.baseUrl, this.openUrl, () => agent.destroy(), options.verifyTls);
-		try { await connection.listNodes(); return connection; } catch (error) { connection.dispose(); throw error; }
+		const transport = proxmoxFetch(agent, options.verifyTls);
+		const open = (client: Client) => new ProxmoxConnection(client, options.baseUrl, (url) => this.host.openUrl(url), () => agent.destroy(), options.verifyTls);
+		try {
+			if (options.method === 'token') {
+				const connection = open(new Client({ baseUrl: options.baseUrl, apiToken: options.apiToken, agent, fetch: transport }));
+				try { await connection.listNodes(); return connection; } catch (error) { connection.dispose(); throw error; }
+			}
+			const stored = options.method === 'password' ? await this.host.store.get(cluster.id, options.baseUrl, options.username) : undefined;
+			for (const reuse of stored ? [true, false] : [false]) {
+				const session = reuse ? stored! : await this.login(options, transport);
+				const auth = new SessionAuth(session, options.baseUrl, transport, (next) => void this.host.store.set(cluster.id, options.baseUrl, next).catch(() => {}));
+				const client = new Client({ baseUrl: options.baseUrl, username: session.username, password: '', agent, fetch: auth.fetch });
+				auth.bind(client);
+				const connection = open(client);
+				try {
+					await connection.listNodes();
+					await this.host.store.set(cluster.id, options.baseUrl, auth.session);
+					return connection;
+				} catch (error) {
+					connection.dispose();
+					if (!reuse) throw error;
+					await this.host.store.remove(cluster.id);
+				}
+			}
+			throw new ProviderError('Could not sign in to Proxmox.', 'permission');
+		} catch (error) { agent.destroy(); throw error; }
 	}
+	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, transport: typeof fetch): Promise<Session> {
+		if (options.method === 'openid') return openIdLogin(transport, options.baseUrl, options.realm, options.port, this.host, AbortSignal.timeout(5 * 60 * 1000));
+		const password = options.password ?? await this.host.prompt({ title: `Proxmox sign-in for ${options.username}`, prompt: 'Password', password: true });
+		if (!password) throw new ProviderError('Sign-in cancelled.', 'permission');
+		return passwordLogin(transport, options.baseUrl, options.username, password, this.host);
+	}
+	/** Forgets every stored session. Called when VS Code closes. */
+	async endSessions(): Promise<void> { await this.host.store.clear(); }
 	async testConnection(cluster: ClusterConfig, secrets: SecretBag): Promise<void> { (await this.connect(cluster, secrets)).dispose(); }
 }
 
@@ -216,7 +283,7 @@ export class ProxmoxConnection implements ClusterConnection {
 			});
 			return console;
 		} catch (error) {
-			if (/HTTP (401|403)|Unexpected server response: (401|403)/.test(String(error))) throw new ProviderError('Proxmox rejected console access for the configured API token. Check its effective VM.Console permission and whether this Proxmox version supports tokens on this console endpoint.', 'permission');
+			if (/HTTP (401|403)|Unexpected server response: (401|403)/.test(String(error))) throw new ProviderError('Proxmox rejected console access for the configured credentials. Check their effective VM.Console permission and whether this Proxmox version supports tokens on this console endpoint.', 'permission');
 			throw error;
 		}
 	}

@@ -4,6 +4,13 @@ Proxmox VE provider for [VM Manager](https://marketplace.visualstudio.com/items?
 
 Add a cluster of type **Proxmox VE**, enter the HTTPS origin (for example `https://pve.example.com:8006`), API token ID (`user@pve!vscode`), and token secret. The secret is saved in VS Code SecretStorage. TLS verification is enabled by default; the connection form allows disabling it for a trusted server with a self-signed certificate.
 
+### Signing in without a token
+
+Under **Sign in with** you can instead choose:
+
+- **User name and password (session)**: any realm the Proxmox login supports with a password (`pam`, `pve`, LDAP, Active Directory). Enter `root`, `alice@ldap`, or a name plus the **Realm** field. The password is optional to save (VS Code SecretStorage); if left empty you are asked at every sign-in. If the account has two-factor authentication you are asked for the TOTP code (or a recovery key). The session ticket is renewed automatically, kept in SecretStorage only (never the password), and deleted when VS Code closes. Proxmox has no logout call, so a ticket also expires on its own after two hours.
+- **OpenID Connect (browser)**: enter the name of the OpenID realm. Your browser opens the identity provider and returns to `http://localhost:<callback port>/` (default 8189), which the provider must allow as a redirect. Not available over Remote-SSH/containers where the browser cannot reach the extension host's localhost.
+
 Create a token under **Datacenter → Permissions → API Tokens** in Proxmox. Grant its user and token the permissions needed for the operations you intend to perform, scoped to the relevant nodes, VMs, storage and networks. Privilege-separated tokens need their own ACLs as well as the user's permissions. See the [Proxmox API documentation](https://pve.proxmox.com/wiki/Proxmox_VE_API).
 
 Supported:
@@ -13,7 +20,7 @@ Supported:
 - Edit name, CPU cores, memory, description and start-at-boot settings.
 - Start, shut down, reboot, force stop and reset, with task completion checks.
 - View CPU, memory, disk throughput, network throughput, reported storage usage and uptime in the VM dashboard. Samples combine per-guest status with a shared, briefly cached cluster resource snapshot. IOPS and disk latency are shown only when a provider supplies those counters.
-- Open graphical VNC and serial terminal consoles inside VS Code. Consoles use the configured API token, which needs effective VM.Console permission. Some older Proxmox versions reject tokens on console endpoints; the extension reports that rejection without prompting for a separate password. Serial terminals require a `serial0: socket` device and a guest OS configured for serial console output.
+- Open graphical VNC and serial terminal consoles inside VS Code. Consoles use the configured credentials (API token or session), which need effective VM.Console permission. Some older Proxmox versions reject tokens on console endpoints; the extension reports that rejection without prompting for a separate password. Serial terminals require a `serial0: socket` device and a guest OS configured for serial console output.
 - Open the VM in the Proxmox web UI (browser sign-in required).
 - Delete VMs and their owned disks. Disk-preserving deletion is rejected.
 
