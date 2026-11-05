@@ -363,13 +363,14 @@
 								{/if}
 							</div>
 							<table class="grid">
-								<thead><tr><th>Protocol</th><th>Host</th><th>Guest</th><th></th></tr></thead>
+								<thead><tr><th>Protocol</th><th>Host (listens)</th><th class="arrow" aria-hidden="true"></th><th>Guest (receives)</th><th></th></tr></thead>
 								<tbody>
 									{#each details.forwards as f (`${f.protocol}${f.hostAddress}${f.hostPort}`)}
 										<tr>
 											<td>{f.protocol.toUpperCase()}</td>
 											<td class="mono">{f.hostAddress ?? '*'}:{f.hostPort}</td>
-											<td>{f.guestPort}</td>
+											<td class="arrow" aria-label="forwarded to">→</td>
+											<td class="mono">{f.guestPort}</td>
 											<td class="actions">
 												{#if sshCommand(f)}
 													<Button transparent title="Copy ssh command" aria-label="Copy ssh command for port {f.hostPort}" onclick={() => forwardCall(() => request('forwardAction', { action: 'copySsh', forward: f }))}><Icon icon="terminal" /></Button>
@@ -392,6 +393,7 @@
 												</select>
 											</td>
 											<td><input form="forward-form" type="number" min="1" max="65535" placeholder="Host port" aria-label="Host port" bind:value={newHostPort} required /></td>
+											<td class="arrow" aria-hidden="true">→</td>
 											<td><input form="forward-form" type="number" min="1" max="65535" placeholder="Guest port" aria-label="Guest port" bind:value={newGuestPort} required /></td>
 											<td class="actions">
 												<Button transparent type="submit" form="forward-form" disabled={forwardBusy} title="Add" aria-label="Confirm port forward"><Icon icon="check-lg" /></Button>
@@ -399,7 +401,7 @@
 											</td>
 										</tr>
 									{:else if !details.forwards.length}
-										<tr><td colspan="4" class="muted">None. Use + to forward a host port to the guest, e.g. SSH.</td></tr>
+										<tr><td colspan="5" class="muted">None. Use + to forward a host port to the guest, e.g. SSH.</td></tr>
 									{/if}
 								</tbody>
 							</table>
@@ -509,6 +511,22 @@
 		margin: 1rem 0 0.15rem;
 		font-weight: 600;
 		color: var(--vscode-descriptionForeground);
+	}
+	.arrow {
+		width: 1.5rem;
+		text-align: center;
+		color: var(--vscode-descriptionForeground);
+	}
+	/* Icon-only buttons in these rows: compact, so they sit level with the text. */
+	.subhead :global(button),
+	.actions :global(button) {
+		padding: 0.1rem 0.3rem;
+		min-height: 0;
+		line-height: 1;
+	}
+	.subhead :global(.bi),
+	.actions :global(.bi) {
+		font-size: 0.95em;
 	}
 	.new-row input,
 	.new-row select {
