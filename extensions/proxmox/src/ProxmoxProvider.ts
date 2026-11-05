@@ -1,10 +1,10 @@
 import { Agent } from 'node:https';
 import { setTimeout as delay } from 'node:timers/promises';
-import { Client } from 'pve-client';
+import { Client, type PveSession } from 'pve-client';
 import { consoleStream } from './console';
 import { proxmoxFetch } from './transport';
 import { tokenTerminal } from './terminal';
-import { openIdLogin, passwordLogin, qualifiedUser, SessionAuth, type Session, type SessionStore, type SessionUi } from './session';
+import { openIdLogin, qualifiedUser, type SessionStore, type SessionUi } from './session';
 
 import { ProviderError, validateValues, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type SecretBag, type VmInfo } from '@vmm/sdk';
 
@@ -96,21 +96,22 @@ export class ProxmoxProvider implements HypervisorProvider {
 		const agent = new Agent({ rejectUnauthorized: options.verifyTls, timeout: 30_000 });
 		const transport = proxmoxFetch(agent, options.verifyTls);
 		const open = (client: Client) => new ProxmoxConnection(client, options.baseUrl, (url) => this.host.openUrl(url), () => agent.destroy(), options.verifyTls);
+		const base = { baseUrl: options.baseUrl, agent, fetch: transport };
 		try {
 			if (options.method === 'token') {
-				const connection = open(new Client({ baseUrl: options.baseUrl, apiToken: options.apiToken, agent, fetch: transport }));
+				const connection = open(new Client({ ...base, apiToken: options.apiToken }));
 				try { await connection.listNodes(); return connection; } catch (error) { connection.dispose(); throw error; }
 			}
 			const stored = options.method === 'password' ? await this.host.store.get(cluster.id, options.baseUrl, options.username) : undefined;
 			for (const reuse of stored ? [true, false] : [false]) {
-				const session = reuse ? stored! : await this.login(options, transport);
-				const auth = new SessionAuth(session, options.baseUrl, transport, (next) => void this.host.store.set(cluster.id, options.baseUrl, next).catch(() => {}));
-				const client = new Client({ baseUrl: options.baseUrl, username: session.username, password: '', agent, fetch: auth.fetch });
-				auth.bind(client);
+				// The password (if any) is only used for the login; the working client holds just the ticket.
+				const session = reuse ? stored! : await this.login(options, base);
+				const client = new Client({ ...base, session });
+				client.onSession((next) => void this.host.store.set(cluster.id, options.baseUrl, next).catch(() => {}));
 				const connection = open(client);
 				try {
 					await connection.listNodes();
-					await this.host.store.set(cluster.id, options.baseUrl, auth.session);
+					await this.host.store.set(cluster.id, options.baseUrl, client.session ?? session);
 					return connection;
 				} catch (error) {
 					connection.dispose();
@@ -121,11 +122,19 @@ export class ProxmoxProvider implements HypervisorProvider {
 			throw new ProviderError('Could not sign in to Proxmox.', 'permission');
 		} catch (error) { agent.destroy(); throw error; }
 	}
-	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, transport: typeof fetch): Promise<Session> {
-		if (options.method === 'openid') return openIdLogin(transport, options.baseUrl, options.realm, options.port, this.host, AbortSignal.timeout(5 * 60 * 1000));
+	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, base: { baseUrl: string; agent: Agent; fetch: typeof fetch }): Promise<PveSession> {
+		if (options.method === 'openid') return openIdLogin(base.fetch, options.baseUrl, options.realm, options.port, this.host, AbortSignal.timeout(5 * 60 * 1000));
 		const password = options.password ?? await this.host.prompt({ title: `Proxmox sign-in for ${options.username}`, prompt: 'Password', password: true });
 		if (!password) throw new ProviderError('Sign-in cancelled.', 'permission');
-		return passwordLogin(transport, options.baseUrl, options.username, password, this.host);
+		const client = new Client({
+			...base, username: options.username, password,
+			tfa: async (challenge) => this.host.prompt({ title: `Proxmox sign-in for ${challenge.username}`, prompt: 'Two-factor code (authenticator app, or a recovery key)', placeholder: '123456' })
+		});
+		try { await client.login(); } catch (error) {
+			if (/HTTP (401|403)/.test(String(error))) throw new ProviderError('Proxmox rejected the sign-in. Check the user name, realm, password and authentication code.', 'permission');
+			throw error;
+		}
+		return client.session!;
 	}
 	/** Forgets every stored session. Called when VS Code closes. */
 	async endSessions(): Promise<void> { await this.host.store.clear(); }

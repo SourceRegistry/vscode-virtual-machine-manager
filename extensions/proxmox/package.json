@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "@vmm/sdk": "*",
-    "pve-client": "^1.5.0",
+    "pve-client": "^1.6.0",
     "ws": "^8.22.1"
   }
 }
