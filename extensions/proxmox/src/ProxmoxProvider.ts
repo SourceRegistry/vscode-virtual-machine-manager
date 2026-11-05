@@ -7,6 +7,23 @@ import { tokenTerminal } from './terminal';
 
 import { ProviderError, validateValues, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type SecretBag, type VmInfo } from '@vmm/sdk';
 
+/** Whether the VM has a graphical display: `vga` is `serialN` (terminal as display) or `none` otherwise absent. */
+export function hasDisplay(config: object): boolean {
+	const vga = String((config as Record<string, unknown>).vga ?? '').split(',')[0]!.trim();
+	return !/^(serial[0-3]|none)$/.test(vga);
+}
+
+/**
+ * Consoles to offer for a guest. The resources endpoint says whether it is a container (a terminal
+ * only); a QEMU VM gets its display, and the serial terminal only when it has no display and a serial
+ * socket device really exists (otherwise there is nothing to connect to). `config` undefined = unknown.
+ */
+export function proxmoxConsoles(container: boolean, config: object | undefined): ConsoleKind[] {
+	if (container) return ['serial'];
+	if (!config || hasDisplay(config)) return ['vnc'];
+	return serialDevice(config) ? ['serial'] : [];
+}
+
 export function serialDevice(config: object): 'serial0' | 'serial1' | 'serial2' | 'serial3' | undefined {
 	return (['serial0', 'serial1', 'serial2', 'serial3'] as const).find((key) => (config as Record<string, unknown>)[key] === 'socket');
 }
@@ -84,8 +101,8 @@ export class ProxmoxConnection implements ClusterConnection {
 		for (const guest of containers) this.containers.add(`${node}/${guest.vmid}`);
 		return Promise.all([...vms.map((v) => ({ ...v, container: false })), ...containers.map((v) => ({ ...v, container: true }))]
 			.filter((v) => !v.template).map(async (v): Promise<VmInfo> => {
-				const serial = !v.container && await api.qemu.vmid(v.vmid).config.get().then((config) => !!serialDevice(config), () => false);
-				return ({ id: String(v.vmid), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: v.container ? ['serial'] : serial ? ['vnc', 'serial'] : ['vnc'], ...(v.container ? { description: 'LXC container' } : {}) });
+				const config = v.container ? undefined : await api.qemu.vmid(v.vmid).config.get().then((c) => c as object, () => undefined);
+				return ({ id: String(v.vmid), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
 			}));
 	}
 	async getCreateSchema(node: string): Promise<FieldSchema[]> {

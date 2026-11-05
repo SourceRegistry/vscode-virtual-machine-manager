@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Client } from 'pve-client';
-import { connectionOptions, ProxmoxConnection } from '../src/ProxmoxProvider';
+import { connectionOptions, hasDisplay, ProxmoxConnection, proxmoxConsoles } from '../src/ProxmoxProvider';
 
 const cluster = { id: 'test', name: 'Test', providerId: 'proxmox', config: { endpoint: 'https://pve.test:8006', tokenId: 'user@pve!vscode' } };
 function fixture() {
@@ -14,6 +14,34 @@ function fixture() {
 	return { connection: new ProxmoxConnection(client as unknown as Client, 'https://pve.test:8006', open), client, request, status, config, open, lxc };
 }
 
+describe('Proxmox console choice', () => {
+	it('gives a container its terminal, from the resource type alone', () => {
+		expect(proxmoxConsoles(true, undefined)).toEqual(['serial']);
+		expect(proxmoxConsoles(true, { vga: 'std' })).toEqual(['serial']);
+	});
+
+	it('gives a VM with a display only the display, even with a serial port', () => {
+		expect(proxmoxConsoles(false, { serial0: 'socket' })).toEqual(['vnc']);
+		expect(proxmoxConsoles(false, { vga: 'virtio,memory=32', serial0: 'socket' })).toEqual(['vnc']);
+		expect(proxmoxConsoles(false, undefined)).toEqual(['vnc']);
+	});
+
+	it('gives a display-less VM the terminal only when a serial socket exists', () => {
+		expect(proxmoxConsoles(false, { vga: 'serial0', serial0: 'socket' })).toEqual(['serial']);
+		expect(proxmoxConsoles(false, { vga: 'serial1', serial1: 'socket' })).toEqual(['serial']);
+		expect(proxmoxConsoles(false, { vga: 'none', serial0: 'socket' })).toEqual(['serial']);
+		expect(proxmoxConsoles(false, { vga: 'serial0' })).toEqual([]);
+		expect(proxmoxConsoles(false, { vga: 'none', serial0: '/dev/ttyS0' })).toEqual([]);
+	});
+
+	it('reads the display type from vga', () => {
+		expect(hasDisplay({})).toBe(true);
+		expect(hasDisplay({ vga: 'qxl' })).toBe(true);
+		expect(hasDisplay({ vga: 'serial2' })).toBe(false);
+		expect(hasDisplay({ vga: 'none' })).toBe(false);
+	});
+});
+
 describe('Proxmox provider', () => {
 	it('validates HTTPS origins and API credentials', () => {
 		expect(connectionOptions(cluster, { tokenSecret: 'secret' })).toMatchObject({ verifyTls: true, apiToken: 'user@pve!vscode=secret' });
@@ -26,10 +54,14 @@ describe('Proxmox provider', () => {
 		expect(await connection.listNodes()).toMatchObject([{ id: 'pve', status: 'online', memoryMB: 4096, memoryUsedMB: 1 }]);
 		expect(await connection.listVms('pve')).toEqual([{ id: '100', name: 'test', state: 'running', cpus: undefined, memoryMB: 2048, uptimeSeconds: undefined, consoles: ['vnc'] }]);
 	});
-	it('offers a terminal only when a QEMU serial socket is attached', async () => {
+	it('offers the terminal of a QEMU VM only without a display and with a serial socket', async () => {
 		const { connection, config } = fixture();
 		config.get.mockResolvedValueOnce({ name: 'test', memory: 2048, cores: 2, onboot: 1, serial1: 'socket' });
-		expect((await connection.listVms('pve'))[0].consoles).toEqual(['vnc', 'serial']);
+		expect((await connection.listVms('pve'))[0].consoles).toEqual(['vnc']);
+		config.get.mockResolvedValueOnce({ name: 'test', vga: 'serial1', serial1: 'socket' });
+		expect((await connection.listVms('pve'))[0].consoles).toEqual(['serial']);
+		config.get.mockResolvedValueOnce({ name: 'test', vga: 'serial1' });
+		expect((await connection.listVms('pve'))[0].consoles).toEqual([]);
 		config.get.mockRejectedValueOnce(new Error('No config permission'));
 		expect((await connection.listVms('pve'))[0].consoles).toEqual(['vnc']);
 	});

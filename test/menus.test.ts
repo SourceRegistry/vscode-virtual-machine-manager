@@ -53,6 +53,7 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 		expect(commandsFor(menu, vmContextValue(vm('stopped'), caps))).toEqual([
 			'vmm.start',
 			'vmm.connectGraphical',
+			'vmm.connectSerial',
 			'vmm.openExternal',
 			'vmm.editVm',
 			'vmm.deleteVm',
@@ -66,6 +67,7 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 			'vmm.reboot',
 			'vmm.stop',
 			'vmm.connectGraphical',
+			'vmm.connectSerial',
 			'vmm.openExternal',
 			'vmm.editVm',
 			'vmm.deleteVm',
@@ -78,6 +80,7 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 		expect(commandsFor(menu, vmContextValue(busy, caps))).toEqual([
 			'vmm.stop',
 			'vmm.connectGraphical',
+			'vmm.connectSerial',
 			'vmm.openExternal',
 			'vmm.editVm',
 			'vmm.deleteVm',
@@ -100,16 +103,6 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 			'vmm.removeCluster',
 			'vmm.forgetConsoleCredentials'
 		]);
-	});
-});
-
-describe.each(['view/item/context', 'webview/context'])('%s serial console', (menu) => {
-	it('is offered only for a resource without a display (LXC), not next to a graphical console', () => {
-		const terminalOnly: Capabilities = { ...caps, consoles: ['vnc', 'serial'], preview: false };
-		expect(commandsFor(menu, vmContextValue({ ...vm('running'), consoles: ['serial'] }, terminalOnly))).toContain('vmm.connectSerial');
-		const withDisplay = commandsFor(menu, vmContextValue({ ...vm('running'), consoles: ['vnc', 'serial'] }, terminalOnly));
-		expect(withDisplay).toContain('vmm.connectGraphical');
-		expect(withDisplay).not.toContain('vmm.connectSerial');
 	});
 });
 
