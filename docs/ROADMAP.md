@@ -26,8 +26,9 @@ Status: `todo` · `in progress` · `testing` · `merged`
 | 7 | `feat/passthrough` | minor | todo |
 | 8 | `feat/hyperv-remote` | minor | todo |
 | 9 | `feat/qemu-remote-ssh` | minor | todo |
+| 10 | `feat/qemu-arm64` | minor | todo |
 
-Order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9. After phase 2, phases 6–9 are mostly independent and can be reordered.
+Order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 (10 is independent and can move up; it fixes slow x86 emulation on Apple Silicon). After phase 2, phases 6–9 are mostly independent and can be reordered.
 
 ## Phase 1: `fix/qemu-shutdown`
 
@@ -136,6 +137,24 @@ Branched from `fix/qemu-shutdown` (phase 1 not merged yet): merge phase 1 first,
 
 - [ ] QEMU cluster over SSH: spawn and control `qemu-system` on a remote host
 - [ ] QMP and VNC tunneled over SSH via system `ssh` (agent and keys), no new dependency
+
+## Phase 10: `feat/qemu-arm64`
+
+Problem: on Apple Silicon `-accel hvf` is invalid for `qemu-system-x86_64` (HVF only accelerates same-architecture guests), so
+QEMU logs `falling back to tcg` and every VM runs in slow software emulation. The provider only knows x86_64 today
+(`detect.ts` looks for `qemu-system-x86_64`; `buildArgs` hardcodes `-machine q35`, `ide-hd`/`ide-cd`, `qemu-xhci`, OVMF).
+
+- [ ] Detect `qemu-system-aarch64` alongside x86_64; report which architectures are installed
+- [ ] `arch` in `VmDefinition` (`x86_64` | `aarch64`); default to the host architecture, so Apple Silicon and arm64 Linux get native speed
+- [ ] aarch64 argument set: `-machine virt` (+ `highmem`), `-cpu host` under HVF/KVM (`max` under TCG), AAVMF/edk2-aarch64 firmware (always UEFI), `virtio-blk`/`virtio-scsi` instead of IDE/AHCI, `virtio-net-pci`, `virtio-gpu-pci`, `usb-ehci`/`qemu-xhci` + `usb-kbd`/`usb-tablet` (no PS/2 on `virt`)
+- [ ] CD/DVD on aarch64: `virtio-scsi` + `scsi-cd` (or `usb-storage`); keep eject/insert (QOM path from `query-block`) working
+- [ ] Accelerator per architecture: only request `hvf`/`kvm`/`whpx` when the guest arch matches the host; otherwise TCG with a one-time notice that emulation is slow
+- [ ] Firmware discovery for `edk2-aarch64-code.fd` / `AAVMF_CODE.fd` and a matching vars template
+- [ ] Create form: architecture select (default host arch), warning when it differs from the host
+- [ ] Existing x86_64 VMs untouched; settings show the architecture read-only
+- [ ] Guest agent channel and QMP/VNC/serial wiring unchanged (shared with x86_64)
+- [ ] Tests: argument sets per architecture, accelerator choice per host/guest pair, firmware detection; opt-in end-to-end boot of an empty aarch64 UEFI VM on an arm64 host
+- [ ] Windows on arm64 hosts: out of scope until someone can test it
 
 ## Log
 
