@@ -179,7 +179,7 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		const [icon, color] = VM_ICONS[vm.state];
 		item.iconPath = new vscode.ThemeIcon(icon, color ? new vscode.ThemeColor(color) : undefined);
 		const label = vm.operation ? OPERATION_LABEL[vm.operation] : stateLabel(vm.state);
-		const parts = [label];
+		const parts = [...(vm.displayId ? [`#${vm.displayId}`] : []), label];
 		if (vm.state === 'running' && vm.ipAddresses?.length) parts.push(vm.ipAddresses[0]);
 		const origin = originLabel(vm);
 		if (origin) parts.push(origin);
@@ -196,6 +196,7 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		const md = new vscode.MarkdownString(
 			`**${escapeMd(vm.name)}** — ${label}\n\n` +
 				`| | |\n|---|---|\n` +
+				(vm.displayId ? `| ID | ${escapeMd(vm.displayId)} |\n` : '') +
 				`| vCPUs | ${vm.cpus ?? '–'} |\n` +
 				`| Memory | ${formatMemory(vm.memoryMB)} |\n` +
 				`| Uptime | ${formatUptime(vm.uptimeSeconds)} |\n` +

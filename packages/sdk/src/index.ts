@@ -155,6 +155,8 @@ export interface VmInfo {
 	ipAddresses?: string[];
 	os?: string;
 	description?: string;
+	/** A number or short id people know the VM by (the Proxmox VMID). Shown beside the name in the tree. */
+	displayId?: string;
 	/** Narrows `Capabilities.consoles` for this VM (e.g. serial port not configured). */
 	consoles?: ConsoleKind[];
 	/** A CD/DVD drive of this VM holds media (an ISO): the core offers a quick eject. */

@@ -52,7 +52,7 @@ describe('Proxmox provider', () => {
 	it('maps nodes and VMs, excluding templates', async () => {
 		const { connection } = fixture();
 		expect(await connection.listNodes()).toMatchObject([{ id: 'pve', status: 'online', memoryMB: 4096, memoryUsedMB: 1 }]);
-		expect(await connection.listVms('pve')).toEqual([{ id: '100', name: 'test', state: 'running', cpus: undefined, memoryMB: 2048, uptimeSeconds: undefined, consoles: ['vnc'] }]);
+		expect(await connection.listVms('pve')).toEqual([{ id: '100', displayId: '100', name: 'test', state: 'running', cpus: undefined, memoryMB: 2048, uptimeSeconds: undefined, consoles: ['vnc'] }]);
 	});
 	it('offers the terminal of a QEMU VM only without a display and with a serial socket', async () => {
 		const { connection, config } = fixture();

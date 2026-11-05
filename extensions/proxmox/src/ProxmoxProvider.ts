@@ -192,7 +192,7 @@ export class ProxmoxConnection implements ClusterConnection {
 		return Promise.all([...vms.map((v) => ({ ...v, container: false })), ...containers.map((v) => ({ ...v, container: true }))]
 			.filter((v) => !v.template).map(async (v): Promise<VmInfo> => {
 				const config = v.container ? undefined : await api.qemu.vmid(v.vmid).config.get().then((c) => c as object, () => undefined);
-				return ({ id: String(v.vmid), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
+				return ({ id: String(v.vmid), displayId: String(v.vmid), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
 			}));
 	}
 	async getCreateSchema(node: string): Promise<FieldSchema[]> {
