@@ -38,6 +38,8 @@ export interface LibvirtDomain {
 	disks: string[];
 	cdrom?: string;
 	uefi?: boolean;
+	/** Guest architecture as libvirt spells it (`x86_64`, `aarch64`, `i686`…). */
+	arch?: string;
 }
 
 const UNIT_TO_KIB: Record<string, number> = { b: 1 / 1024, bytes: 1 / 1024, kb: 1000 / 1024, k: 1, kib: 1, mb: 1000 ** 2 / 1024, m: 1024, mib: 1024, gb: 1000 ** 3 / 1024, g: 1024 ** 2, gib: 1024 ** 2, tb: 1000 ** 4 / 1024, t: 1024 ** 3, tib: 1024 ** 3 };
@@ -72,6 +74,7 @@ export function parseLibvirtXml(xml: string): LibvirtDomain | undefined {
 		if (device === 'cdrom') domain.cdrom ??= decodeXml(source);
 		else if (device === 'disk') domain.disks.push(decodeXml(source));
 	}
+	domain.arch = /<type\b[^>]*\barch\s*=\s*['"]([^'"]+)['"]/.exec(xml)?.[1];
 	domain.uefi = /<os\b[^>]*firmware\s*=\s*['"]efi['"]/.test(xml) || /<loader\b[^>]*type\s*=\s*['"]pflash['"]/.test(xml);
 	return domain;
 }
@@ -89,6 +92,7 @@ export interface FolderCandidate {
 	cpus?: number;
 	memoryMB?: number;
 	uefi?: boolean;
+	arch?: string;
 }
 
 export interface FolderInput {
@@ -97,7 +101,7 @@ export interface FolderInput {
 	/** Contents of the `*.xml` files that look like libvirt domains. */
 	libvirt: ReadonlyMap<string, string>;
 	/** Parsed `vm.json` files of VMs managed by another copy of this extension. */
-	vmJson: ReadonlyMap<string, { name?: string; cpus?: number; memoryMB?: number; disks?: string[]; cdrom?: string; firmware?: string }>;
+	vmJson: ReadonlyMap<string, { name?: string; cpus?: number; memoryMB?: number; disks?: string[]; cdrom?: string; firmware?: string; arch?: string }>;
 }
 
 /**
@@ -121,14 +125,15 @@ export function candidatesFromFolder(input: FolderInput): FolderCandidate[] {
 			cdrom: json.cdrom ? resolve(file, json.cdrom) : undefined,
 			cpus: json.cpus,
 			memoryMB: json.memoryMB,
-			uefi: json.firmware === 'uefi'
+			uefi: json.firmware === 'uefi',
+			arch: json.arch
 		});
 	}
 	for (const [file, xml] of input.libvirt) {
 		const domain = parseLibvirtXml(xml);
 		if (!domain) continue;
 		domain.disks.forEach((d) => used.add(d));
-		result.push({ id: file, name: domain.name, source: 'libvirt', disks: domain.disks, cdrom: domain.cdrom, cpus: domain.cpus, memoryMB: domain.memoryMB, uefi: domain.uefi });
+		result.push({ id: file, name: domain.name, source: 'libvirt', disks: domain.disks, cdrom: domain.cdrom, cpus: domain.cpus, memoryMB: domain.memoryMB, uefi: domain.uefi, arch: domain.arch });
 	}
 
 	const isos = input.files.filter((f) => classifyFile(f) === 'iso');

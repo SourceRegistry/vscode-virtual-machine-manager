@@ -26,9 +26,11 @@ async function detect(): Promise<void> {
 			{ location: vscode.ProgressLocation.Notification, title: 'Detecting QEMU…' },
 			() => detectQemu(configuredPath())
 		);
-		const firmware = qemu.firmwareCode ? 'UEFI firmware found.' : 'No UEFI firmware found — only BIOS guests are available.';
+		const archs = Object.entries(qemu.archs);
+		const missing = archs.filter(([, a]) => !a?.firmwareCode).map(([name]) => name);
+		const firmware = missing.length ? `No UEFI firmware found for ${missing.join(' and ')}${missing.includes('aarch64') ? ' (ARM64 guests need it)' : ' — only BIOS guests are available there'}.` : 'UEFI firmware found.';
 		const choice = await vscode.window.showInformationMessage(
-			`QEMU ${qemu.version} found in ${qemu.directory}. ${firmware}`,
+			`QEMU ${qemu.version} found in ${qemu.directory} (${archs.map(([name]) => name).join(', ')}). ${firmware}`,
 			configuredPath() === qemu.directory ? 'OK' : 'Use This Path',
 			'Add Cluster'
 		);

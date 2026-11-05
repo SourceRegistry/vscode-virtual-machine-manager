@@ -1,5 +1,6 @@
 import type { PortForward } from '@vmm/sdk';
 import { hostfwdOptions } from './forwards';
+import { cpuFor, guestArch, type Arch } from './arch';
 import { diskFormat } from './importers';
 import { vfioDeviceArgument } from './passthrough';
 
@@ -13,6 +14,8 @@ export type Firmware = 'bios' | 'uefi';
 export interface VmDefinition {
 	id: string;
 	name: string;
+	/** Guest architecture. Absent on VMs created before it was stored: x86-64. */
+	arch?: Arch;
 	cpus: number;
 	memoryMB: number;
 	cpuModel: string;
@@ -122,14 +125,17 @@ function accelSpec(name: string): string {
 	return name === 'whpx' ? 'whpx,kernel-irqchip=off' : name;
 }
 
-/** Builds the qemu-system-x86_64 argument vector. */
+/** Builds the `qemu-system-<arch>` argument vector. */
 export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvironment): string[] {
-	const args: string[] = ['-name', escapeOptionValue(def.name), '-machine', 'q35'];
+	const arch = guestArch(def);
+	const arm = arch === 'aarch64';
+	const args: string[] = ['-name', escapeOptionValue(def.name), '-machine', arm ? 'virt' : 'q35'];
 	for (const accel of env.accelerators) args.push('-accel', accel);
-	args.push('-cpu', def.cpuModel || 'max', '-smp', String(Math.max(1, def.cpus)), '-m', `${Math.max(32, def.memoryMB)}M`);
+	args.push('-cpu', cpuFor(arch, def.cpuModel, env.accelerators), '-smp', String(Math.max(1, def.cpus)), '-m', `${Math.max(32, def.memoryMB)}M`);
 
-	if (def.firmware === 'uefi') {
-		if (!env.firmwareCode) throw new Error('UEFI firmware (OVMF / edk2) was not found next to QEMU');
+	// The ARM `virt` machine has no legacy BIOS: it always boots UEFI.
+	if (def.firmware === 'uefi' || arm) {
+		if (!env.firmwareCode) throw new Error(`UEFI firmware (${arm ? 'edk2 aarch64 / AAVMF' : 'OVMF / edk2'}) was not found next to QEMU`);
 		args.push('-drive', `if=pflash,format=raw,readonly=on,file=${escapeOptionValue(env.firmwareCode)}`);
 		if (env.firmwareVars) args.push('-drive', `if=pflash,format=raw,file=${escapeOptionValue(env.firmwareVars)}`);
 	}
@@ -137,20 +143,32 @@ export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvi
 	def.disks.forEach((disk, index) => {
 		const format = diskFormat(disk);
 		args.push('-drive', `file=${escapeOptionValue(disk)},if=none,id=disk${index},format=${format}`);
-		if (def.diskBus === 'virtio') args.push('-device', `virtio-blk-pci,drive=disk${index},bootindex=${index + 1}`);
+		if (arm || def.diskBus === 'virtio') args.push('-device', `virtio-blk-pci,drive=disk${index},bootindex=${index + 1}`);
 		else args.push('-device', `ide-hd,drive=disk${index},bus=ide.${index},bootindex=${index + 1}`);
 	});
 
 	if (def.cdrom) {
-		// The AHCI controller of q35 has six ports (ide.0 … ide.5); the CD takes the last one.
 		args.push('-drive', `file=${escapeOptionValue(def.cdrom)},if=none,id=cd0,media=cdrom,readonly=on`);
-		args.push('-device', `ide-cd,drive=cd0,bus=ide.5,bootindex=${def.disks.length + 1}`);
+		if (arm) {
+			// No IDE/AHCI on `virt`: a virtio-scsi controller carries the CD (removable, so eject/insert work).
+			args.push('-device', 'virtio-scsi-pci,id=scsi0');
+			args.push('-device', `scsi-cd,drive=cd0,bus=scsi0.0,bootindex=${def.disks.length + 1}`);
+		} else {
+			// The AHCI controller of q35 has six ports (ide.0 … ide.5); the CD takes the last one.
+			args.push('-device', `ide-cd,drive=cd0,bus=ide.5,bootindex=${def.disks.length + 1}`);
+		}
 	}
 
 	args.push('-nic', def.nic === 'none' ? 'none' : `user,model=${def.nic}${def.mac ? `,mac=${def.mac}` : ''}${hostfwdOptions(def.forwards)}`);
 	for (const address of def.pciDevices ?? []) args.push('-device', vfioDeviceArgument(address));
-	args.push('-vga', def.vga || 'std');
-	args.push('-device', 'qemu-xhci', '-device', 'usb-tablet');
+	if (arm) {
+		// `virt` has no VGA and no PS/2: virtio-gpu for the display, USB for keyboard and pointer.
+		args.push('-device', 'virtio-gpu-pci');
+		args.push('-device', 'qemu-xhci', '-device', 'usb-kbd', '-device', 'usb-tablet');
+	} else {
+		args.push('-vga', def.vga || 'std');
+		args.push('-device', 'qemu-xhci', '-device', 'usb-tablet');
+	}
 	args.push('-display', 'none');
 	args.push('-vnc', `127.0.0.1:${runtime.vncPort - 5900}`);
 	args.push('-qmp', `tcp:127.0.0.1:${runtime.qmpPort},server=on,wait=off`);

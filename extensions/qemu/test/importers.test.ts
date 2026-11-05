@@ -30,7 +30,7 @@ describe('diskFormat / classifyFile', () => {
 
 describe('parseLibvirtXml', () => {
 	it('reads name, configured memory, vcpus, disks, cdrom and firmware', () => {
-		expect(parseLibvirtXml(XML)).toEqual({ name: 'web & db', memoryMB: 2048, cpus: 4, disks: ['/var/lib/libvirt/images/web.qcow2'], cdrom: '/isos/debian.iso', uefi: true });
+		expect(parseLibvirtXml(XML)).toEqual({ name: 'web & db', memoryMB: 2048, cpus: 4, disks: ['/var/lib/libvirt/images/web.qcow2'], cdrom: '/isos/debian.iso', uefi: true, arch: 'x86_64' });
 	});
 	it('converts units', () => {
 		expect(parseLibvirtXml("<domain><name>a</name><memory unit='GiB'>2</memory></domain>")?.memoryMB).toBe(2048);

@@ -164,17 +164,19 @@ Problem: on Apple Silicon `-accel hvf` is invalid for `qemu-system-x86_64` (HVF 
 QEMU logs `falling back to tcg` and every VM runs in slow software emulation. The provider only knows x86_64 today
 (`detect.ts` looks for `qemu-system-x86_64`; `buildArgs` hardcodes `-machine q35`, `ide-hd`/`ide-cd`, `qemu-xhci`, OVMF).
 
-- [ ] Detect `qemu-system-aarch64` alongside x86_64; report which architectures are installed
-- [ ] `arch` in `VmDefinition` (`x86_64` | `aarch64`); default to the host architecture, so Apple Silicon and arm64 Linux get native speed
-- [ ] aarch64 argument set: `-machine virt` (+ `highmem`), `-cpu host` under HVF/KVM (`max` under TCG), AAVMF/edk2-aarch64 firmware (always UEFI), `virtio-blk`/`virtio-scsi` instead of IDE/AHCI, `virtio-net-pci`, `virtio-gpu-pci`, `usb-ehci`/`qemu-xhci` + `usb-kbd`/`usb-tablet` (no PS/2 on `virt`)
-- [ ] CD/DVD on aarch64: `virtio-scsi` + `scsi-cd` (or `usb-storage`); keep eject/insert (QOM path from `query-block`) working
-- [ ] Accelerator per architecture: only request `hvf`/`kvm`/`whpx` when the guest arch matches the host; otherwise TCG with a one-time notice that emulation is slow
-- [ ] Firmware discovery for `edk2-aarch64-code.fd` / `AAVMF_CODE.fd` and a matching vars template
-- [ ] Create form: architecture select (default host arch), warning when it differs from the host
-- [ ] Existing x86_64 VMs untouched; settings show the architecture read-only
-- [ ] Guest agent channel and QMP/VNC/serial wiring unchanged (shared with x86_64)
-- [ ] Tests: argument sets per architecture, accelerator choice per host/guest pair, firmware detection; opt-in end-to-end boot of an empty aarch64 UEFI VM on an arm64 host
+- [x] Detect `qemu-system-aarch64` alongside x86_64 (`QemuInstallation.archs`, each with its binary, accelerators and firmware); the node shows the guest architectures and which are native
+- [x] `arch` in `VmDefinition` (absent = x86_64); new VMs default to the host architecture, so Apple Silicon and arm64 Linux get native speed
+- [x] aarch64 argument set (`arch.ts` + `buildArgs`): `-machine virt`, `-cpu host` under HVF/KVM (`max` under TCG), edk2/AAVMF UEFI always, `virtio-blk-pci`, virtio-scsi + `scsi-cd` for the CD, `virtio-gpu-pci`, `qemu-xhci` + `usb-kbd` + `usb-tablet`
+- [x] CD/DVD on aarch64: eject/insert verified against a real ARM64 VM
+- [x] Accelerator per architecture: hvf/kvm/whpx only for a guest of the host's architecture, otherwise TCG (also overrides a forced accelerator that cannot work)
+- [x] Firmware discovery: `edk2-aarch64-code.fd` / `AAVMF_CODE.fd` with `edk2-arm-vars.fd` / `AAVMF_VARS.fd` (aarch64 has no `-aarch64-vars` file; the 64 MiB sizes match)
+- [x] Create form: architecture select (only when both are installed), labelled native / emulated with the slowdown warning; x86 form defaults (BIOS, SATA, e1000, VGA) are replaced by their ARM equivalents
+- [x] Existing x86_64 VMs untouched; settings show the architecture read-only, and firmware/disk controller/display read-only on ARM
+- [x] Guest agent channel and QMP/VNC/serial wiring unchanged; import of libvirt/`vm.json` and attach read the architecture; unsupported ones (ppc64, riscv…) are refused clearly
+- [x] Tests: argument sets per architecture, accelerator choice per host/guest pair, CPU choice, firmware detection, hardware normalisation; e2e boots an empty ARM64 UEFI VM natively on an arm64 host
+- [~] One-time "emulation is slow" notice: the create form and settings say so and the VM list marks emulated guests, but there is no pop-up
 - [ ] Windows on arm64 hosts: out of scope until someone can test it
+- Not verified: a full guest OS install on ARM64 (only firmware boot, devices, CD hot-swap), KVM on arm64 Linux, AAVMF on Debian/Ubuntu (path knowledge only)
 
 ## Log
 

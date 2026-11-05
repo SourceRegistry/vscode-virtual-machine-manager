@@ -27,7 +27,7 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 		);
 		iso = path.join(dir, 'install.iso');
 		fs.writeFileSync(iso, Buffer.alloc(2 * 1024 * 1024));
-		const vm = await connection.createVm('local', { name: 'e2e', cpus: 1, memoryMB: 256, diskGB: 1, cdrom: iso, firmware: 'uefi', diskBus: 'sata', nic: 'none', serial: false });
+		const vm = await connection.createVm('local', { name: 'e2e', arch: 'x86_64', cpus: 1, memoryMB: 256, diskGB: 1, cdrom: iso, firmware: 'uefi', diskBus: 'sata', nic: 'none', serial: false });
 		vmId = vm.id;
 	}, 30_000);
 
@@ -86,7 +86,7 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 	}, 60_000);
 
 	it('adds and removes a port forward on a running VM and remembers it', async () => {
-		const nicVm = await connection.createVm('local', { name: 'e2e-net', cpus: 1, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'e1000', serial: false });
+		const nicVm = await connection.createVm('local', { name: 'e2e-net', arch: 'x86_64', cpus: 1, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'e1000', serial: false });
 		const listening = (port: number) =>
 			new Promise<boolean>((resolve) => {
 				const socket = net.connect({ port, host: '127.0.0.1' });
@@ -138,6 +138,33 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 			await connection.power('local', vmId, 'stop').catch(() => undefined);
 		}
 	}, 60_000);
+
+	it.skipIf(process.arch !== 'arm64')('boots an empty ARM64 UEFI VM natively, with a CD that can be ejected and inserted', async () => {
+		const arm = await connection.createVm('local', { name: 'e2e-arm', arch: 'aarch64', cpus: 2, memoryMB: 512, diskGB: 1, cdrom: iso, firmware: 'bios', diskBus: 'sata', nic: 'e1000', serial: false });
+		try {
+			// x86 form defaults were replaced by what the ARM machine has
+			const config = await connection.getVmConfig('local', arm.id);
+			expect(config.values).toMatchObject({ firmware: 'uefi', diskBus: 'virtio', nic: 'virtio-net-pci', vga: 'virtio' });
+			expect(String(config.values.arch)).toContain('ARM64');
+			expect(config.schema.find((f) => f.key === 'firmware')).toMatchObject({ readonly: true });
+
+			await connection.power('local', arm.id, 'start');
+			await new Promise((r) => setTimeout(r, 2500));
+			expect((await connection.listVms('local')).find((v) => v.id === arm.id)).toMatchObject({ state: 'running', mediaInserted: true });
+			const details = await connection.getVmDetails!('local', arm.id);
+			expect(details.disks.find((d) => d.kind === 'disk')).toMatchObject({ format: 'qcow2' });
+			expect(details.disks.find((d) => d.kind === 'cdrom')).toMatchObject({ id: 'cd0', path: iso });
+			expect(details.devices.some((d) => /virtio/i.test(d.label) || /display|vga|3d/i.test(d.label))).toBe(true);
+
+			await connection.ejectMedia!('local', arm.id, 'cd0');
+			expect((await connection.getVmDetails!('local', arm.id)).disks.find((d) => d.id === 'cd0')?.path).toBeUndefined();
+			await connection.insertMedia!('local', arm.id, 'cd0', iso);
+			expect((await connection.getVmDetails!('local', arm.id)).disks.find((d) => d.id === 'cd0')?.path).toBe(iso);
+			expect((await connection.getVmStats!('local', arm.id)).memoryUsedMB).toBeGreaterThan(0);
+		} finally {
+			await connection.power('local', arm.id, 'stop').catch(() => undefined);
+		}
+	}, 90_000);
 
 	describe.skipIf(process.platform === 'win32')('QEMU started outside the extension', () => {
 		let child: ReturnType<typeof spawn> | undefined;

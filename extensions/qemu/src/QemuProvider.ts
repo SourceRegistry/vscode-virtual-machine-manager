@@ -38,8 +38,9 @@ import {
 	type VmState,
 	type VmStats
 } from '@vmm/sdk';
-import { buildArgs, defaultAccelerators, usableAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
-import { detectQemu, type QemuInstallation } from './detect';
+import { ARCHS, ARCH_LABEL, acceleratorsFor, archFromName, guestArch, isNative, normalizeHardware, type Arch } from './arch';
+import { buildArgs, usableAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
+import { detectQemu, type ArchInstallation, type QemuInstallation } from './detect';
 import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
 import { availableMemoryMB, CpuLoadSampler } from './hostInfo';
@@ -230,6 +231,24 @@ export class QemuConnection implements ClusterConnection {
 		private readonly shutdownTimeoutMs = 30_000
 	) {}
 
+	/** The emulator, accelerators and firmware for a guest architecture. */
+	private install(arch: Arch): ArchInstallation {
+		const found = this.qemu.archs[arch];
+		if (!found) {
+			throw new ProviderError(`${ARCH_LABEL[arch]} guests need qemu-system-${arch}, which was not found in ${this.qemu.directory}.`, 'unavailable');
+		}
+		return found;
+	}
+
+	private installedArchs(): Arch[] {
+		return ARCHS.filter((a) => this.qemu.archs[a]);
+	}
+
+	/** Accelerators for a guest: the hypervisor only for the host's own architecture, TCG otherwise. */
+	private acceleratorsOf(arch: Arch): string[] {
+		return usableAccelerators(acceleratorsFor(arch, process.platform, this.accelerator), this.install(arch).accelerators);
+	}
+
 	// -----------------------------------------------------------------------------------------
 	// Storage
 	// -----------------------------------------------------------------------------------------
@@ -339,8 +358,9 @@ export class QemuConnection implements ClusterConnection {
 	async listNodes(): Promise<NodeInfo[]> {
 		const total = Math.round(os.totalmem() / 1024 / 1024);
 		const available = await availableMemoryMB();
-		const accelerators = usableAccelerators(defaultAccelerators(process.platform, this.accelerator), this.qemu.accelerators);
-		const active = accelerators[0]?.split(',')[0] ?? 'tcg';
+		const installed = this.installedArchs();
+		const native = installed.find((a) => isNative(a)) ?? installed[0]!;
+		const active = this.acceleratorsOf(native)[0]?.split(',')[0] ?? 'tcg';
 		return [
 			{
 				id: NODE_ID,
@@ -353,7 +373,8 @@ export class QemuConnection implements ClusterConnection {
 				description: `QEMU ${this.qemu.version}`,
 				facts: [
 					{ label: 'QEMU', value: this.qemu.version },
-					{ label: 'Acceleration', value: active === 'tcg' ? 'Software emulation (TCG)' : active.toUpperCase() },
+					{ label: 'Acceleration', value: active === 'tcg' ? 'Software emulation (TCG)' : `${active.toUpperCase()}${installed.length > 1 ? ` (${native})` : ''}` },
+					{ label: 'Guest architectures', value: installed.map((a) => (isNative(a) ? `${a} (native)` : `${a} (emulated, slow)`)).join(', ') },
 					{ label: 'Platform', value: `${os.platform()} ${os.arch()}` }
 				]
 			}
@@ -394,7 +415,7 @@ export class QemuConnection implements ClusterConnection {
 					memoryMB: def.memoryMB,
 					uptimeSeconds: runtime ? Math.floor((Date.now() - runtime.startedAt) / 1000) : undefined,
 					description: def.notes,
-					os: `${def.firmware.toUpperCase()} · ${def.diskBus.toUpperCase()}`,
+					os: `${guestArch(def) === 'x86_64' && isNative(guestArch(def)) ? '' : `${guestArch(def)}${isNative(guestArch(def)) ? '' : ' (emulated)'} · `}${def.firmware.toUpperCase()} · ${(guestArch(def) === 'aarch64' ? 'virtio' : def.diskBus).toUpperCase()}`,
 					consoles,
 					mediaInserted,
 					origin: def.origin,
@@ -405,8 +426,25 @@ export class QemuConnection implements ClusterConnection {
 	}
 
 	async getCreateSchema(): Promise<FieldSchema[]> {
+		const installed = this.installedArchs();
+		const defaultArch = installed.find((a) => isNative(a)) ?? installed[0]!;
+		const archField: FieldSchema[] =
+			installed.length > 1
+				? [
+						{
+							key: 'arch',
+							label: 'Architecture',
+							type: 'select',
+							required: true,
+							default: defaultArch,
+							options: installed.map((a) => ({ value: a, label: `${ARCH_LABEL[a]}${isNative(a) ? ' — native, full speed' : ' — emulated, much slower'}` })),
+							description: 'A guest of the same architecture as this computer runs with hardware acceleration. Any other is emulated in software, typically 10 to 50 times slower.'
+						}
+					]
+				: [];
 		return [
 			{ key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'my-vm', description: 'Letters, digits, spaces and . _ ( ) -' },
+			...archField,
 			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: os.cpus().length, default: Math.min(2, os.cpus().length), required: true },
 			{ key: 'memoryMB', label: 'Memory', type: 'number', unit: 'MB', min: 128, default: 2048, required: true },
 			{ key: 'diskGB', label: 'Disk size', type: 'number', unit: 'GB', min: 1, max: 16384, default: 32, required: true },
@@ -416,8 +454,9 @@ export class QemuConnection implements ClusterConnection {
 				label: 'Firmware',
 				type: 'select',
 				required: true,
-				default: this.qemu.firmwareCode ? 'uefi' : 'bios',
-				options: this.qemu.firmwareCode ? FIRMWARE_OPTIONS : FIRMWARE_OPTIONS.filter((o) => o.value === 'bios')
+				default: this.install(defaultArch).firmwareCode ? 'uefi' : 'bios',
+				options: this.install(defaultArch).firmwareCode ? FIRMWARE_OPTIONS : FIRMWARE_OPTIONS.filter((o) => o.value === 'bios'),
+				description: 'ARM64 guests always use UEFI.'
 			},
 			{ key: 'diskBus', label: 'Disk controller', type: 'select', required: true, default: 'sata', options: DISK_BUS_OPTIONS, advanced: true },
 			{ key: 'nic', label: 'Network adapter', type: 'select', required: true, default: 'e1000', options: NIC_OPTIONS, advanced: true },
@@ -433,6 +472,18 @@ export class QemuConnection implements ClusterConnection {
 		if ((await this.definitions()).some((d) => d.name.toLowerCase() === name.toLowerCase())) {
 			throw new ProviderError(`A virtual machine named "${name}" already exists`, 'invalid');
 		}
+		const installed = this.installedArchs();
+		const arch = (values.arch as Arch | undefined) ?? installed.find((a) => isNative(a)) ?? installed[0]!;
+		const firmwareCode = this.install(arch).firmwareCode;
+		const hardware = normalizeHardware(arch, {
+			firmware: (values.firmware as Firmware) ?? 'bios',
+			diskBus: (values.diskBus as DiskBus) ?? 'sata',
+			nic: (values.nic as NicModel) ?? 'e1000',
+			vga: (values.vga as VgaModel) ?? 'std'
+		});
+		if (hardware.firmware === 'uefi' && !firmwareCode) {
+			throw new ProviderError(`UEFI firmware for ${ARCH_LABEL[arch]} was not found next to QEMU (edk2-${arch === 'aarch64' ? 'aarch64' : 'x86_64'}-code.fd).`, 'unavailable');
+		}
 		const id = randomUUID();
 		const dir = this.dir(id);
 		await fs.promises.mkdir(dir, { recursive: true });
@@ -443,16 +494,17 @@ export class QemuConnection implements ClusterConnection {
 			const def: VmDefinition = {
 				id,
 				name,
+				arch,
 				cpus: Number(values.cpus ?? 2),
 				memoryMB: Number(values.memoryMB ?? 2048),
 				cpuModel: 'max',
-				firmware: (values.firmware as Firmware) ?? 'bios',
+				firmware: hardware.firmware,
 				disks: [disk],
-				diskBus: (values.diskBus as DiskBus) ?? 'sata',
+				diskBus: hardware.diskBus,
 				cdrom: (values.cdrom as string | undefined) || undefined,
-				nic: (values.nic as NicModel) ?? 'e1000',
+				nic: hardware.nic,
 				mac: randomMac(),
-				vga: (values.vga as VgaModel) ?? 'std',
+				vga: hardware.vga,
 				serial: values.serial !== false,
 				notes: (values.notes as string | undefined) || undefined,
 				createdAt: Date.now()
@@ -470,8 +522,9 @@ export class QemuConnection implements ClusterConnection {
 	private async ensureVars(def: VmDefinition): Promise<string | undefined> {
 		const vars = path.join(this.dir(def.id), 'efivars.fd');
 		if (fs.existsSync(vars)) return vars;
-		if (!this.qemu.firmwareVarsTemplate) return undefined;
-		await fs.promises.copyFile(this.qemu.firmwareVarsTemplate, vars);
+		const template = this.install(guestArch(def)).firmwareVarsTemplate;
+		if (!template) return undefined;
+		await fs.promises.copyFile(template, vars);
 		return vars;
 	}
 
@@ -479,27 +532,32 @@ export class QemuConnection implements ClusterConnection {
 		const def = await this.definition(vmId);
 		const running = !!(await this.runtime(vmId));
 		const restart = running ? 'Applies after the next start.' : undefined;
+		const arch = guestArch(def);
+		const arm = arch === 'aarch64';
+		const fixed = (what: string) => (arm ? `${what} is fixed for ARM64 guests.` : restart);
 		const schema: FieldSchema[] = [
 			{ key: 'name', label: 'Name', type: 'text', required: true, group: 'General' },
+			{ key: 'arch', label: 'Architecture', type: 'text', readonly: true, group: 'General', description: isNative(arch) ? 'Runs with hardware acceleration.' : 'Emulated in software: much slower than a native guest.' },
 			{ key: 'notes', label: 'Notes', type: 'textarea', group: 'General' },
 			{ key: 'location', label: 'Location', type: 'text', readonly: true, group: 'General' },
 			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: os.cpus().length, required: true, group: 'Hardware', description: restart },
 			{ key: 'memoryMB', label: 'Memory', type: 'number', unit: 'MB', min: 128, required: true, group: 'Hardware', description: restart },
 			{ key: 'cpuModel', label: 'CPU model', type: 'text', required: true, group: 'Hardware', description: 'QEMU -cpu value, e.g. max, host, qemu64' },
 			{ key: 'disks', label: 'Disks', type: 'text', readonly: true, group: 'Storage' },
-			{ key: 'diskBus', label: 'Disk controller', type: 'select', required: true, options: DISK_BUS_OPTIONS, group: 'Storage', description: restart },
+			{ key: 'diskBus', label: 'Disk controller', type: 'select', required: true, readonly: arm, options: DISK_BUS_OPTIONS, group: 'Storage', description: fixed('The controller') },
 			{ key: 'cdrom', label: 'CD/DVD (ISO)', type: 'file', filters: { 'Disk images': ['iso', 'img'] }, mediaDevice: 'cd0', group: 'Storage' },
 			{ key: 'nic', label: 'Network adapter', type: 'select', required: true, options: NIC_OPTIONS, group: 'Network', description: restart },
-			{ key: 'vga', label: 'Display adapter', type: 'select', required: true, options: VGA_OPTIONS, group: 'Display', description: restart },
+			{ key: 'vga', label: 'Display adapter', type: 'select', required: true, readonly: arm, options: VGA_OPTIONS, group: 'Display', description: fixed('The display adapter') },
 			{ key: 'serial', label: 'Serial console', type: 'checkbox', group: 'Display', description: restart },
 			{
 				key: 'firmware',
 				label: 'Firmware',
 				type: 'select',
 				required: true,
-				options: this.qemu.firmwareCode ? FIRMWARE_OPTIONS : FIRMWARE_OPTIONS.filter((o) => o.value === 'bios' || o.value === def.firmware),
+				readonly: arm,
+				options: this.qemu.archs[arch]?.firmwareCode ? FIRMWARE_OPTIONS : FIRMWARE_OPTIONS.filter((o) => o.value === 'bios' || o.value === def.firmware),
 				group: 'Advanced',
-				description: restart
+				description: fixed('The firmware')
 			},
 			{ key: 'extraArgs', label: 'Extra QEMU arguments', type: 'text', group: 'Advanced', description: 'Appended to the command line, e.g. -device virtio-rng-pci' }
 		];
@@ -509,6 +567,7 @@ export class QemuConnection implements ClusterConnection {
 				name: def.name,
 				notes: def.notes,
 				location: this.dir(def.id),
+				arch: `${ARCH_LABEL[arch]}${isNative(arch) ? '' : ' (emulated)'}`,
 				cpus: def.cpus,
 				memoryMB: def.memoryMB,
 				cpuModel: def.cpuModel,
@@ -541,6 +600,8 @@ export class QemuConnection implements ClusterConnection {
 		if (values.vga !== undefined) def.vga = values.vga as VgaModel;
 		if (values.serial !== undefined) def.serial = Boolean(values.serial);
 		if (values.firmware !== undefined) def.firmware = values.firmware as Firmware;
+		// What the architecture cannot have stays as it is (the form shows those fields read-only).
+		Object.assign(def, normalizeHardware(guestArch(def), { firmware: def.firmware, diskBus: def.diskBus, nic: def.nic, vga: def.vga }));
 		def.cdrom = (values.cdrom as string | undefined) || undefined;
 		def.notes = (values.notes as string | undefined) || undefined;
 		def.extraArgs = (values.extraArgs as string | undefined) || undefined;
@@ -564,7 +625,7 @@ export class QemuConnection implements ClusterConnection {
 	async getVmDetails(_nodeId: string, vmId: string): Promise<VmDetails> {
 		const def = await this.definition(vmId);
 		const runtime = await this.runtime(vmId);
-		const context = { diskBus: def.diskBus };
+		const context = { diskBus: guestArch(def) === 'aarch64' ? 'virtio' : def.diskBus };
 		let blocks: QmpBlock[] | undefined;
 		let pci: QmpPciBus[] = [];
 		if (runtime) {
@@ -607,7 +668,7 @@ export class QemuConnection implements ClusterConnection {
 		const cd = def.cdrom ? await this.imageInfo(def.cdrom) : undefined;
 		return [
 			...disks,
-			{ id: 'cd0', kind: 'cdrom' as const, label: 'CD/DVD drive', path: def.cdrom, sizeBytes: cd?.['virtual-size'], format: cd?.format, bus: 'sata', readOnly: true, removable: true }
+			{ id: 'cd0', kind: 'cdrom' as const, label: 'CD/DVD drive', path: def.cdrom, sizeBytes: cd?.['virtual-size'], format: cd?.format, bus: guestArch(def) === 'aarch64' ? 'scsi' : 'sata', readOnly: true, removable: true }
 		];
 	}
 
@@ -873,14 +934,15 @@ export class QemuConnection implements ClusterConnection {
 	private async launch(def: VmDefinition, runtime: VmRuntime): Promise<void> {
 		const dir = this.dir(def.id);
 		const args = buildArgs(def, runtime, {
-			accelerators: usableAccelerators(defaultAccelerators(process.platform, this.accelerator), this.qemu.accelerators),
-			firmwareCode: this.qemu.firmwareCode,
+			accelerators: this.acceleratorsOf(guestArch(def)),
+			firmwareCode: this.install(guestArch(def)).firmwareCode,
 			firmwareVars: def.firmware === 'uefi' ? await this.ensureVars(def) : undefined
 		});
 		const logPath = path.join(dir, 'qemu.log');
 		const logFd = fs.openSync(logPath, 'w');
-		this.log.info(`Starting ${def.name}: ${this.qemu.system} ${args.join(' ')}`);
-		const child = spawn(this.qemu.system, args, { detached: true, stdio: ['ignore', logFd, logFd], windowsHide: true, cwd: dir });
+		const system = this.install(guestArch(def)).system;
+		this.log.info(`Starting ${def.name}: ${system} ${args.join(' ')}`);
+		const child = spawn(system, args, { detached: true, stdio: ['ignore', logFd, logFd], windowsHide: true, cwd: dir });
 		fs.closeSync(logFd);
 		if (!child.pid) throw new ProviderError('QEMU could not be started');
 		let exited = false;
@@ -1153,6 +1215,7 @@ export class QemuConnection implements ClusterConnection {
 				cpus: found.cpus,
 				memoryMB: found.memoryMB,
 				cpuModel: 'unknown',
+				arch: archFromName(found.binary),
 				firmware: 'bios',
 				disks: found.disks,
 				diskBus: 'sata',
@@ -1274,20 +1337,24 @@ export class QemuConnection implements ClusterConnection {
 						disks.push(disk);
 					}
 				}
-				const uefi = !!candidate.uefi && !!this.qemu.firmwareCode;
+				const arch = candidate.arch === undefined ? (this.installedArchs().find((a) => isNative(a)) ?? 'x86_64') : archFromName(candidate.arch);
+				if (!arch) throw new ProviderError(`${candidate.name}: the architecture "${candidate.arch}" is not supported (x86-64 and ARM64 only).`, 'unsupported');
+				const hardware = normalizeHardware(arch, { firmware: candidate.uefi ? 'uefi' : 'bios', diskBus: 'sata', nic: 'e1000', vga: 'std' });
+				const uefi = hardware.firmware === 'uefi' && !!this.install(arch).firmwareCode;
 				const def: VmDefinition = {
 					id,
 					name: await this.uniqueName(candidate.name),
+					arch,
 					cpus: Math.max(1, candidate.cpus ?? 2),
 					memoryMB: Math.max(128, candidate.memoryMB ?? 2048),
 					cpuModel: 'max',
 					firmware: uefi ? 'uefi' : 'bios',
 					disks,
-					diskBus: 'sata',
+					diskBus: hardware.diskBus,
 					cdrom: candidate.cdrom,
-					nic: 'e1000',
+					nic: hardware.nic,
 					mac: randomMac(),
-					vga: 'std',
+					vga: hardware.vga,
 					serial: true,
 					notes: options.copy ? `Imported (copied) from ${candidate.id}.` : `Imported from ${candidate.id}; the disks stay where they are.`,
 					origin: 'imported',
