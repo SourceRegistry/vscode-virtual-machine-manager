@@ -6,7 +6,6 @@ import { OPERATION_LABEL } from '../../shared/operations';
 import type { ConnectionManager, ClusterRuntime } from '../clusters/ConnectionManager';
 import type { ProviderRegistry } from '../registry/ProviderRegistry';
 import { originLabel } from '../../shared/origin';
-import { primaryAction } from '../../shared/primaryAction';
 
 export type TreeNode =
 	| { kind: 'cluster'; clusterId: string }
@@ -186,13 +185,11 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		if (origin) parts.push(origin);
 		item.description = parts.join(' · ');
 		item.contextValue = vmContextValue(vm, caps);
-		// Clicking opens the terminal of a terminal-only resource (LXC), else the details page; providers
-		// with neither keep a plain, selectable row.
-		const primary = primaryAction(vm, caps);
-		if (primary) {
+		// Clicking a VM opens its details (providers without inventory/stats keep a plain, selectable row).
+		if (caps?.details || caps?.stats) {
 			item.command = {
-				command: primary,
-				title: primary === 'vmm.connectSerial' ? 'Open Terminal' : 'Show Details',
+				command: 'vmm.openVmDashboard',
+				title: 'Show Details',
 				arguments: [{ clusterId: ref.clusterId, nodeId: ref.nodeId, vmId: ref.vmId }]
 			};
 		}
