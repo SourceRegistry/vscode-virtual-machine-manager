@@ -64,7 +64,7 @@ Branched from `fix/qemu-shutdown` (phase 1 not merged yet): merge phase 1 first,
 - [x] QEMU: new VMs get a stored MAC (`mac` in `vm.json`); older VMs show QEMU's default `52:54:00:12:34:56`
 - [x] QEMU bug fix: `eject` / `blockdev-change-medium` need the device's QOM path (`qdev`) on QEMU 11. The old `id: 'cd0'` failed silently, so changing the ISO in settings of a running VM never worked
 - [x] Hyper-V: `Get-VMHardDiskDrive`, `Get-VMDvdDrive`, `Get-VMNetworkAdapter`, CPU/memory from `Get-VM`, `Set-VMDvdDrive`. Disk/net counters not included (Hyper-V needs perf counters, phase 3)
-- [x] Quick eject: `VM: Eject Media` / `VM: Change ISO…` commands, context menus (tree and overview), inline eject button on running VMs with media
+- [x] Quick eject: `VM: Eject` / `VM: Change ISO…` commands, context menus (tree and overview), inline eject button on running VMs with media
 - [x] Tests: parsers against real QMP output, menus, Hyper-V mapping, opt-in end-to-end against real QEMU
 - [ ] **Hyper-V code is untested** (no Windows host): scripts in `extensions/hyperv/src/scripts.ts` (`VM_DETAILS`, `VM_STATS`, `SET_MEDIA`) need a run on Hyper-V
 - [ ] Windows `sampleProcess` (PowerShell per sample, ~0.3 s) untested; phase 3 should sample less often there

@@ -144,7 +144,7 @@
       },
       {
         "command": "vmm.ejectMedia",
-        "title": "Eject Media",
+        "title": "Eject",
         "category": "VM",
         "icon": {
           "light": "media/icons/eject-light.svg",

@@ -225,7 +225,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			if (!drive) return;
 			await connection.ejectMedia(location.ref.nodeId, location.ref.vmId, drive.id);
 			await manager.refresh(location.ref.clusterId);
-			void vscode.window.setStatusBarMessage(`$(circle-slash) Ejected ${drive.path ? path.basename(drive.path) : 'media'} from ${location.vm.name}`, 4000);
+			void vscode.window.setStatusBarMessage(`Ejected ${drive.path ? path.basename(drive.path) : 'media'} from ${location.vm.name}`, 4000);
 		} catch (error) {
 			await showError(`Could not eject media from ${location.vm.name}`, error);
 		}
@@ -247,7 +247,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			if (!picked?.[0]) return;
 			await connection.insertMedia(location.ref.nodeId, location.ref.vmId, drive.id, picked[0].fsPath);
 			await manager.refresh(location.ref.clusterId);
-			void vscode.window.setStatusBarMessage(`$(files) Inserted ${path.basename(picked[0].fsPath)} into ${location.vm.name}`, 4000);
+			void vscode.window.setStatusBarMessage(`Inserted ${path.basename(picked[0].fsPath)} into ${location.vm.name}`, 4000);
 		} catch (error) {
 			await showError(`Could not change the media of ${location.vm.name}`, error);
 		}

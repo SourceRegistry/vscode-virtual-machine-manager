@@ -121,7 +121,7 @@
 								aria-label="Eject {field.label}"
 								onclick={() => eject(field)}
 							>
-								<Icon icon="eject-fill" />
+								<Icon icon="eject" />
 							</Button>
 						{/if}
 					{/if}
