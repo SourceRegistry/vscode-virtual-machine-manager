@@ -220,3 +220,15 @@ describe('forget console sign-in', () => {
 		}
 	});
 });
+
+describe('cancel sign-in', () => {
+	it('is offered on a cluster that is still connecting, and only then', () => {
+		const connecting = clusterContextValue('connecting');
+		expect(commandsFor('view/item/context', connecting, { inline: true })).toContain('vmm.cancelConnect');
+		expect(commandsFor('view/item/context', connecting)).toContain('vmm.cancelConnect');
+		for (const status of ['connected', 'disconnected', 'error'] as const) {
+			expect(commandsFor('view/item/context', clusterContextValue(status), { inline: true })).not.toContain('vmm.cancelConnect');
+			expect(commandsFor('view/item/context', clusterContextValue(status))).not.toContain('vmm.cancelConnect');
+		}
+	});
+});

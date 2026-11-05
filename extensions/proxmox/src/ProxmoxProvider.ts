@@ -7,7 +7,7 @@ import { tokenTerminal } from './terminal';
 import { agentAddresses, allAddresses, containerAddresses, diskDevices, hostDevices, mergeAddresses, nicDevices } from './inventory';
 import { openIdLogin, qualifiedUser, type SessionStore, type SessionUi } from './session';
 
-import { ProviderError, validateValues, type Capabilities, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type VmDetails, type SecretBag, type VmInfo } from '@vmm/sdk';
+import { ProviderError, validateValues, type Capabilities, type ClusterConfig, type ProviderContext, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type VmDetails, type SecretBag, type VmInfo } from '@vmm/sdk';
 
 /** Whether the VM has a graphical display: `vga` is `serialN` (terminal as display) or `none` otherwise absent. */
 export function hasDisplay(config: object): boolean {
@@ -103,7 +103,7 @@ export class ProxmoxProvider implements HypervisorProvider {
 	constructor(private readonly host: ProxmoxHost) {}
 	/** Clusters the user signed out of: the next sign-in asks for everything again, saved password included. */
 	private readonly askAgain = new Set<string>();
-	async connect(cluster: ClusterConfig, secrets: SecretBag): Promise<ProxmoxConnection> {
+	async connect(cluster: ClusterConfig, secrets: SecretBag, context?: ProviderContext): Promise<ProxmoxConnection> {
 		let options = connectionOptions(cluster, secrets);
 		const again = this.askAgain.has(cluster.id) && options.method !== 'token';
 		if (again && options.method === 'password') {
@@ -123,7 +123,7 @@ export class ProxmoxProvider implements HypervisorProvider {
 			const stored = options.method === 'password' ? await this.host.store.get(cluster.id, options.baseUrl, options.username) : undefined;
 			for (const reuse of stored ? [true, false] : [false]) {
 				// The password (if any) is only used for the login; the working client holds just the ticket.
-				const session = reuse ? stored! : await this.login(options, again, base);
+				const session = reuse ? stored! : await this.login(options, again, context?.signal, base);
 				const client = new Client({ ...base, session });
 				client.onSession((next) => void this.host.store.set(cluster.id, options.baseUrl, next).catch(() => {}));
 				const connection = open(client);
@@ -141,8 +141,8 @@ export class ProxmoxProvider implements HypervisorProvider {
 			throw new ProviderError('Could not sign in to Proxmox.', 'permission');
 		} catch (error) { agent.destroy(); throw error; }
 	}
-	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, again: boolean, base: { baseUrl: string; agent: Agent; fetch: typeof fetch }): Promise<PveSession> {
-		if (options.method === 'openid') return openIdLogin(base.fetch, options.baseUrl, options.realm, options.port, this.host, AbortSignal.timeout(5 * 60 * 1000), again);
+	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, again: boolean, signal: AbortSignal | undefined, base: { baseUrl: string; agent: Agent; fetch: typeof fetch }): Promise<PveSession> {
+		if (options.method === 'openid') return openIdLogin(base.fetch, options.baseUrl, options.realm, options.port, this.host, AbortSignal.any([AbortSignal.timeout(5 * 60 * 1000), ...(signal ? [signal] : [])]), again);
 		const password = options.password ?? await this.host.prompt({ title: `Proxmox sign-in for ${options.username}`, prompt: 'Password', password: true });
 		if (!password) throw new ProviderError('Sign-in cancelled.', 'permission');
 		const client = new Client({

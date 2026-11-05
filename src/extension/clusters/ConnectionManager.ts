@@ -26,6 +26,9 @@ export interface ClusterRuntime {
 	changeSubscription?: vscode.Disposable;
 	/** The user ended the session: do not reconnect (and ask for credentials) until they ask. */
 	signedOut?: boolean;
+	/** The user cancelled a connection attempt; shown as such until they try again. */
+	cancelled?: boolean;
+	abort?: AbortController;
 }
 
 export interface VmLocation {
@@ -138,22 +141,37 @@ export class ConnectionManager implements vscode.Disposable {
 				this.setStatus(rt, 'missingProvider', `Provider "${rt.cluster.providerId}" is not installed`);
 				throw new Error(rt.error);
 			}
+			const abort = (rt.abort = new AbortController());
 			try {
 				const secrets = await this.store.secrets(rt.cluster);
-				const connection = await provider.connect(rt.cluster, secrets, {
+				const attempt = provider.connect(rt.cluster, secrets, {
 					storagePath: this.storagePath(rt.cluster),
-					log: scopedLogger(`${provider.id}:${rt.cluster.name}`)
+					log: scopedLogger(`${provider.id}:${rt.cluster.name}`),
+					signal: abort.signal
 				});
+				// A provider that is waiting on the user cannot always be interrupted: stop waiting for it anyway.
+				const cancelled = new Promise<never>((_, reject) => abort.signal.addEventListener('abort', () => reject(new Error('Connection cancelled.')), { once: true }));
+				// If the provider finishes after the user cancelled, nobody owns that connection any more.
+				attempt.then((late) => { if (abort.signal.aborted) late.dispose(); }, () => {});
+				const connection = await Promise.race([attempt, cancelled]);
 				rt.connection = connection;
 				rt.changeSubscription = connection.onDidChange?.(() => void this.refresh(clusterId));
 				this.setStatus(rt, 'connected');
 				return connection;
 			} catch (error) {
+				if (abort.signal.aborted) {
+					// Cancelled by the user: not a failure. Stay idle until they connect again.
+					rt.signedOut = true;
+					rt.cancelled = true;
+					this.setStatus(rt, 'disconnected');
+					throw error;
+				}
 				this.setStatus(rt, 'error', errorMessage(error));
 				throw error;
 			}
 		})().finally(() => {
 			rt.connecting = undefined;
+			rt.abort = undefined;
 		});
 		return rt.connecting;
 	}
@@ -170,11 +188,17 @@ export class ConnectionManager implements vscode.Disposable {
 			const rt = this.runtimes.get(clusterId);
 			if (rt) {
 				rt.signedOut = false;
+				rt.cancelled = false;
 				await this.refreshRuntime(rt);
 			}
 			return;
 		}
 		await Promise.all(this.clusters().filter((rt) => !rt.signedOut).map((rt) => this.refreshRuntime(rt)));
+	}
+
+	/** Stops a connection attempt that is still running (typically a sign-in waiting for the user). */
+	cancelConnect(clusterId: string): void {
+		this.runtimes.get(clusterId)?.abort?.abort();
 	}
 
 	/** Ends the provider's sign-in session, drops the connection and stays disconnected until asked to connect. */
@@ -190,6 +214,7 @@ export class ConnectionManager implements vscode.Disposable {
 		rt.nodes = [];
 		rt.loaded = false;
 		rt.signedOut = true;
+		rt.cancelled = false;
 		this.setStatus(rt, 'disconnected');
 		this.updateContextKeys();
 	}
@@ -198,6 +223,7 @@ export class ConnectionManager implements vscode.Disposable {
 		const rt = this.runtimes.get(clusterId);
 		if (!rt) return;
 		rt.signedOut = false;
+		rt.cancelled = false;
 		this.disconnect(rt);
 		rt.loaded = false;
 		this.setStatus(rt, 'disconnected');
@@ -232,6 +258,7 @@ export class ConnectionManager implements vscode.Disposable {
 				this.emitter.fire(rt.cluster.id);
 				this.updateContextKeys();
 			} catch (error) {
+				if (rt.cancelled) return;
 				rt.loaded = true;
 				if (rt.status !== 'missingProvider') this.setStatus(rt, 'error', errorMessage(error));
 				log.warn(`Refreshing ${rt.cluster.name} failed: ${errorMessage(error)}`);

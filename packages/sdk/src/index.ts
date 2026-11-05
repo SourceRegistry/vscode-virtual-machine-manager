@@ -345,6 +345,8 @@ export interface ProviderContext {
 	/** Directory reserved for this provider + cluster (created on demand by the provider). */
 	storagePath: string;
 	log: Logger;
+	/** Aborted when the user cancels the connection attempt (e.g. a sign-in waiting on a browser). */
+	signal?: AbortSignal;
 }
 
 export interface ChangeEvent {

@@ -81,6 +81,20 @@ describe('Proxmox OpenID login', () => {
 		expect(withParam('https://a.test/x?prompt=none', 'prompt', 'login')).toBe('https://a.test/x?prompt=login');
 	});
 
+	it('can be cancelled while waiting, and the port is free to start again', async () => {
+		const port = 21000 + Math.floor(Math.random() * 1000);
+		const transport = vi.fn(async () => json('https://idp.test/auth')) as unknown as typeof fetch;
+		const controller = new AbortController();
+		const prompts = ui();
+		prompts.openUrl.mockImplementation(async () => { setTimeout(() => controller.abort(), 20); });
+		await expect(openIdLogin(transport, base, 'oidc', port, prompts, controller.signal)).rejects.toMatchObject({ code: 'permission' });
+		// A second attempt on the same port must not hit "address in use".
+		const retry = ui();
+		retry.openUrl.mockImplementation(async () => { void fetch(`http://localhost:${port}/?code=C&state=S`); });
+		const again = vi.fn(async (input: unknown) => String(input).includes('auth-url') ? json('https://idp.test/auth') : json({ ticket: 'T', CSRFPreventionToken: 'C', username: 'u@oidc' })) as unknown as typeof fetch;
+		await expect(openIdLogin(again, base, 'oidc', port, retry, AbortSignal.timeout(10_000))).resolves.toMatchObject({ username: 'u@oidc' });
+	});
+
 	it('rejects an identity provider error', async () => {
 		const port = 19000 + Math.floor(Math.random() * 1000);
 		const transport = vi.fn(async () => json('https://idp.test/auth')) as unknown as typeof fetch;

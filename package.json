@@ -107,6 +107,12 @@
         "icon": "$(plug)"
       },
       {
+        "command": "vmm.cancelConnect",
+        "title": "Cancel Sign-in",
+        "category": "VM",
+        "icon": "$(debug-stop)"
+      },
+      {
         "command": "vmm.signOut",
         "title": "Sign Out",
         "category": "VM",
@@ -298,6 +304,10 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "vmm.cancelConnect",
+          "when": "false"
+        },
+        {
           "command": "vmm.forgetConsoleCredentials",
           "when": "vmm.hasRdpClusters"
         },
@@ -451,6 +461,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "vmm.cancelConnect",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;status=connecting;/",
+          "group": "inline@7"
+        },
+        {
+          "command": "vmm.cancelConnect",
+          "when": "view == vmm.clusters && viewItem =~ /^cluster;status=connecting;/",
+          "group": "1_connection@3"
+        },
         {
           "command": "vmm.signOut",
           "when": "view == vmm.clusters && viewItem =~ /^cluster;.*\\bsignout;/",
