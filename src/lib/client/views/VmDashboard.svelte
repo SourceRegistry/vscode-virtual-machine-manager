@@ -8,7 +8,7 @@
 	import Icon from '#lib/client-lib/components/icons/Icon.svelte';
 	import Loader from '#lib/client-lib/components/feedback/Loader.svelte';
 	import Status from '#lib/client-lib/components/feedback/Status.svelte';
-	import { formatMemory, formatUptime, type Capabilities, type VmDetails, type VmInfo, type VmStats } from '@vmm/sdk';
+	import { formatMemory, formatUptime, type Capabilities, type PassthroughInfo, type VmDetails, type VmInfo, type VmStats } from '@vmm/sdk';
 	import type { BootData, OverviewCommand } from '../../../shared/protocol';
 	import { originLabel } from '../../../shared/origin';
 	import { browserUrl, GUEST_HOST_ADDRESS, sshCommand } from '../../../shared/forwards';
@@ -37,6 +37,38 @@
 	let caps = $state<Capabilities | undefined>();
 	let details = $state<VmDetails | undefined>();
 	let detailsError = $state<string | undefined>();
+
+	// Host devices (passthrough). Loaded on demand: listing USB can take a second on some hosts.
+	let passthrough = $state<PassthroughInfo | undefined>();
+	let passthroughError = $state<string | undefined>();
+	let passthroughBusy = $state<string | undefined>();
+	let passthroughLoaded = $state(false);
+
+	async function loadPassthrough() {
+		passthroughBusy = 'refresh';
+		try {
+			passthrough = await request('getPassthrough');
+			passthroughError = undefined;
+		} catch (error) {
+			passthroughError = (error as Error).message;
+		} finally {
+			passthroughBusy = undefined;
+			passthroughLoaded = true;
+		}
+	}
+
+	async function changeDevice(deviceId: string, action: 'attach' | 'detach') {
+		passthroughBusy = deviceId;
+		actionError = undefined;
+		try {
+			const { changed } = await request('changePassthrough', { deviceId, action });
+			if (changed) await Promise.all([loadPassthrough(), loadDetails()]);
+		} catch (error) {
+			actionError = (error as Error).message;
+		} finally {
+			passthroughBusy = undefined;
+		}
+	}
 	let loading = $state(true);
 	let points = $state.raw<MetricPoint[]>([]);
 	let statsError = $state<string | undefined>();
@@ -419,6 +451,52 @@
 							<p class="muted hint">Forwards listen on 127.0.0.1 only. From the guest, the host is reachable at <span class="mono">{GUEST_HOST_ADDRESS}</span>.</p>
 						{/if}
 					</Card>
+					{#if caps?.passthrough}
+						<Card title="Host devices">
+							{#snippet header()}
+								<Button transparent title="Refresh the list of host devices" aria-label="Refresh host devices" disabled={passthroughBusy !== undefined} onclick={loadPassthrough}><Icon icon="arrow-clockwise" /></Button>
+							{/snippet}
+							{#if !passthroughLoaded && !passthroughBusy}
+								<p class="muted">Give a USB or PCI device of this computer to the virtual machine.</p>
+								<Button onclick={loadPassthrough}><Icon icon="usb-symbol" margin="right" />Show host devices</Button>
+							{:else if passthroughBusy === 'refresh' && !passthrough}
+								<Flexbox justify="center" style="padding: 1rem 0;"><Loader /></Flexbox>
+							{:else if passthroughError}
+								<p class="error">{passthroughError}</p>
+							{:else if passthrough}
+								{#if !passthrough.usb.supported}<p class="muted">USB: {passthrough.usb.reason}</p>{/if}
+								{#if !passthrough.pci.supported}<p class="muted">PCI: {passthrough.pci.reason}</p>{/if}
+								{#if passthrough.pci.supported && passthrough.pci.experimental}<p class="muted">PCI passthrough (VFIO) is experimental.</p>{/if}
+								{#if passthrough.devices.length}
+									<div class="scroll devices">
+										<table class="grid">
+											<thead><tr><th>Type</th><th>Device</th><th>Address</th><th></th></tr></thead>
+											<tbody>
+												{#each passthrough.devices as d (d.id)}
+													<tr>
+														<td>{d.kind.toUpperCase()}</td>
+														<td>{d.label}{#if d.detail}<div class="muted small">{d.detail}</div>{/if}</td>
+														<td class="mono">{d.address}</td>
+														<td class="actions">
+															{#if d.attached}
+																<Button transparent disabled={passthroughBusy !== undefined} onclick={() => changeDevice(d.id, 'detach')}>Detach</Button>
+															{:else if d.unavailable}
+																<span class="muted small" title={d.unavailable}>Unavailable</span>
+															{:else}
+																<Button transparent disabled={passthroughBusy !== undefined} onclick={() => changeDevice(d.id, 'attach')}>Attach</Button>
+															{/if}
+														</td>
+													</tr>
+												{/each}
+											</tbody>
+										</table>
+									</div>
+								{:else if passthrough.usb.supported || passthrough.pci.supported}
+									<p class="muted">No devices found.</p>
+								{/if}
+							{/if}
+						</Card>
+					{/if}
 					{#if details.devices.length}
 						<Card title="Devices">
 							<table class="grid">
@@ -558,6 +636,13 @@
 	}
 	.new-row input {
 		width: 7rem;
+	}
+	.small {
+		font-size: 0.85em;
+	}
+	.devices {
+		max-height: 22rem;
+		overflow-y: auto;
 	}
 	.hint {
 		margin: 0.5rem 0 0;

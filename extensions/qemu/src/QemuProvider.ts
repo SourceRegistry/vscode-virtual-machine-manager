@@ -24,6 +24,9 @@ import {
 	type HypervisorProvider,
 	type ImportCandidate,
 	type ImportOptions,
+	type PassthroughDevice,
+	type PassthroughInfo,
+	type PassthroughPlan,
 	type Logger,
 	type NodeInfo,
 	type PortForward,
@@ -41,6 +44,21 @@ import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
 import { availableMemoryMB, CpuLoadSampler } from './hostInfo';
 import { listProcesses, processStartedAt, sampleProcess, walkFiles } from './hostProcess';
+import { iommuEnabled, listPciHost, listUsbHost, pciDriver, runPrivileged } from './hostDevices';
+import {
+	assessVfio,
+	bindScript,
+	isBridge,
+	pciClassName,
+	PCI_ADDRESS,
+	parseUsbDeviceId,
+	releaseScript,
+	usbAddArguments,
+	usbDeviceId,
+	usbKey,
+	USB_ID_PREFIX,
+	type PciHostDevice
+} from './passthrough';
 import { candidatesFromFolder, classifyFile, type FolderCandidate, type FolderInput } from './importers';
 import { findExternalVms, type ExternalVm } from './scan';
 import {
@@ -193,6 +211,7 @@ export class QemuConnection implements ClusterConnection {
 		details: true,
 		forwards: true,
 		adopt: true,
+		passthrough: true,
 		importFolder: true,
 		stats: true
 	};
@@ -820,6 +839,13 @@ export class QemuConnection implements ClusterConnection {
 			if (!fs.existsSync(disk)) throw new ProviderError(`Disk not found: ${disk}`, 'invalid');
 		}
 		if (def.cdrom && !fs.existsSync(def.cdrom)) throw new ProviderError(`ISO not found: ${def.cdrom}`, 'invalid');
+		for (const address of def.pciDevices ?? []) {
+			// QEMU only opens devices that vfio-pci owns; say so instead of showing its terse failure.
+			if (process.platform !== 'linux') throw new ProviderError(`${def.name} has PCI passthrough devices, which need a Linux host.`, 'unsupported');
+			if (pciDriver(address) !== 'vfio-pci') {
+				throw new ProviderError(`PCI device ${address} is not bound to vfio-pci (it was rebound or the host restarted). Detach it in the VM details and attach it again.`, 'unavailable');
+			}
+		}
 		// A port that something else (another program, a VM of another window) took after our probe:
 		// QEMU says so and exits; try again with different ports.
 		const rejected = new Set<number>();
@@ -917,6 +943,173 @@ export class QemuConnection implements ClusterConnection {
 		});
 		socket.setNoDelay(true);
 		return { stream: socket, dispose: () => socket.destroy() };
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Device passthrough (USB hot-plug, Linux VFIO)
+	// -----------------------------------------------------------------------------------------
+
+	async getPassthrough(_nodeId: string, vmId: string): Promise<PassthroughInfo> {
+		const def = await this.definition(vmId);
+		const runtime = await this.runtime(vmId);
+		const devices: PassthroughDevice[] = [];
+		const info: PassthroughInfo = { usb: { supported: true }, pci: { supported: true, experimental: true }, devices };
+
+		// USB
+		try {
+			const attached = new Set<string>();
+			if (runtime && hasControlChannel(runtime)) {
+				const list = await (await this.client(vmId, runtime)).execute<Array<{ name: string }>>('qom-list', { path: '/machine/peripheral' }).catch(() => []);
+				for (const item of list) {
+					const parsed = item.name.startsWith(USB_ID_PREFIX) ? parseUsbDeviceId(item.name) : undefined;
+					if (parsed) attached.add(usbKey(parsed));
+				}
+			}
+			for (const usb of await listUsbHost()) {
+				devices.push({
+					id: `usb:${usbKey(usb)}`,
+					kind: 'usb',
+					label: usb.name,
+					address: usbKey(usb),
+					attached: attached.has(usbKey(usb)),
+					unavailable: runtime ? undefined : 'Start the VM first: USB devices are hot-plugged'
+				});
+			}
+		} catch (error) {
+			info.usb = { supported: false, reason: (error as Error).message };
+		}
+
+		// PCI
+		if (process.platform !== 'linux') {
+			info.pci = { supported: false, reason: `PCI passthrough (VFIO) needs a Linux host; this is ${process.platform === 'darwin' ? 'macOS' : process.platform}.` };
+		} else {
+			try {
+				const all = await listPciHost();
+				const iommu = iommuEnabled();
+				if (!iommu) info.pci = { supported: false, experimental: true, reason: 'The IOMMU is not enabled (boot with intel_iommu=on or amd_iommu=on and enable VT-d / AMD-Vi in the firmware).' };
+				else {
+					const mine = new Set(def.pciDevices ?? []);
+					for (const pci of all.filter((d) => !isBridge(d))) {
+						const verdict = assessVfio(pci, all, iommu);
+						devices.push({
+							id: `pci:${pci.address}`,
+							kind: 'pci',
+							label: pciClassName(pci.classCode),
+							address: pci.address,
+							detail: `${pci.vendorId.toString(16).padStart(4, '0')}:${pci.deviceId.toString(16).padStart(4, '0')}${pci.driver ? ` · driver ${pci.driver}` : ''}${pci.iommuGroup !== undefined ? ` · IOMMU group ${pci.iommuGroup}` : ''}`,
+							attached: mine.has(pci.address),
+							unavailable: verdict.eligible ? (runtime && !mine.has(pci.address) ? 'Stop the VM first: PCI devices are attached at start' : undefined) : verdict.warnings[0]
+						});
+					}
+				}
+			} catch (error) {
+				info.pci = { supported: false, experimental: true, reason: (error as Error).message };
+			}
+		}
+		return info;
+	}
+
+	async planPassthrough(_nodeId: string, vmId: string, deviceId: string, action: 'attach' | 'detach'): Promise<PassthroughPlan> {
+		const def = await this.definition(vmId);
+		const runtime = await this.runtime(vmId);
+		if (deviceId.startsWith('usb:')) {
+			const usb = this.parseUsbId(deviceId);
+			if (action === 'attach' && !runtime) throw new ProviderError('Start the VM first: USB devices are hot-plugged.', 'unavailable');
+			// QEMU would accept an absent device and wait for it to show up; a stale selection is more likely a mistake.
+			if (action === 'attach' && !(await listUsbHost().then((list) => list.some((d) => usbKey(d) === usbKey(usb)), () => true))) {
+				throw new ProviderError(`USB device ${usbKey(usb)} is not connected to the host any more. Refresh the list.`, 'notFound');
+			}
+			return {
+				title: `${action === 'attach' ? 'Attach' : 'Detach'} USB device ${usbKey(usb)}`,
+				steps: action === 'attach' ? [`device_add usb-host vendorid=0x${usbKey(usb).slice(0, 4)} productid=0x${usbKey(usb).slice(5)}`] : [`device_del ${usbDeviceId(usb)}`],
+				warnings:
+					action === 'attach'
+						? ['The host loses the device while the VM has it (a keyboard or mouse stops working on the host).', ...(process.platform === 'darwin' ? ['macOS may refuse to hand over devices that a driver or the system has claimed.'] : [])]
+						: [],
+				needsConfirmation: false
+			};
+		}
+		const address = this.parsePciId(deviceId);
+		if (process.platform !== 'linux') throw new ProviderError('PCI passthrough (VFIO) needs a Linux host.', 'unsupported');
+		if (runtime) throw new ProviderError('Stop the VM first: PCI devices are attached at start.', 'unavailable');
+		const all = await listPciHost();
+		const device = all.find((d) => d.address === address);
+		if (!device) throw new ProviderError(`PCI device ${address} not found`, 'notFound');
+		if (action === 'attach') {
+			const verdict = assessVfio(device, all, iommuEnabled());
+			if (!verdict.eligible) throw new ProviderError(verdict.warnings[0] ?? 'This device cannot be passed through', 'unavailable');
+			const uid = this.uid();
+			return {
+				title: `Attach PCI device ${address} to ${def.name}`,
+				steps: [
+					'Run as root (asks for authentication through polkit):',
+					...bindScript(address, device.iommuGroup!, uid).map((line) => `    ${line}`),
+					`Add the device to ${def.name}: QEMU opens it with -device vfio-pci,host=${address} at every start.`,
+					'The device stays on vfio-pci after the VM stops until you detach it here, which returns it to its host driver.'
+				],
+				warnings: verdict.warnings,
+				needsConfirmation: true,
+				experimental: true
+			};
+		}
+		return {
+			title: `Detach PCI device ${address} from ${def.name}`,
+			steps: ['Remove the device from the VM.', 'Run as root (asks for authentication through polkit):', ...releaseScript(address).map((line) => `    ${line}`)],
+			warnings: [`The host driver${device.driver && device.driver !== 'vfio-pci' ? '' : ' (if any)'} takes the device back; a GPU used by the host may reset its display.`],
+			needsConfirmation: true,
+			experimental: true
+		};
+	}
+
+	async changePassthrough(nodeId: string, vmId: string, deviceId: string, action: 'attach' | 'detach', options: { confirmed: boolean }): Promise<void> {
+		const plan = await this.planPassthrough(nodeId, vmId, deviceId, action);
+		if (plan.needsConfirmation && !options.confirmed) throw new ProviderError('This change needs the explicit confirmation of the user.', 'permission');
+		const def = await this.definition(vmId);
+		if (deviceId.startsWith('usb:')) {
+			const usb = this.parseUsbId(deviceId);
+			const runtime = await this.runtime(vmId);
+			if (!runtime || !hasControlChannel(runtime)) throw new ProviderError(`${def.name} is not running or has no control socket`, 'unavailable');
+			const client = await this.client(vmId, runtime);
+			try {
+				if (action === 'attach') await client.execute('device_add', usbAddArguments(usb));
+				else await client.execute('device_del', { id: usbDeviceId(usb) });
+			} catch (error) {
+				throw new ProviderError(`${action === 'attach' ? 'Could not attach' : 'Could not detach'} ${usbKey(usb)}: ${(error as Error).message}`, 'failed');
+			}
+			this.changes.fire({ nodeId: NODE_ID, vmId });
+			return;
+		}
+		const address = this.parsePciId(deviceId);
+		if (action === 'attach') {
+			const device = (await listPciHost()).find((d) => d.address === address)!;
+			await runPrivileged(bindScript(address, device.iommuGroup!, this.uid()));
+			def.pciDevices = [...new Set([...(def.pciDevices ?? []), address])];
+		} else {
+			def.pciDevices = (def.pciDevices ?? []).filter((a) => a !== address);
+			await this.saveDefinition(def);
+			await runPrivileged(releaseScript(address));
+		}
+		await this.saveDefinition(def);
+		this.log.info(`${action === 'attach' ? 'Attached' : 'Detached'} PCI device ${address} ${action === 'attach' ? 'to' : 'from'} ${def.name}`);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
+	private parseUsbId(deviceId: string): { vendorId: number; productId: number } {
+		const match = /^usb:([0-9a-f]{4}):([0-9a-f]{4})$/.exec(deviceId);
+		if (!match) throw new ProviderError(`Invalid USB device: ${deviceId}`, 'invalid');
+		return { vendorId: parseInt(match[1]!, 16), productId: parseInt(match[2]!, 16) };
+	}
+
+	private parsePciId(deviceId: string): string {
+		const address = deviceId.startsWith('pci:') ? deviceId.slice(4) : '';
+		if (!PCI_ADDRESS.test(address)) throw new ProviderError(`Invalid PCI device: ${deviceId}`, 'invalid');
+		return address;
+	}
+
+	private uid(): number {
+		const uid = process.getuid?.();
+		if (uid === undefined) throw new ProviderError('Cannot determine the current user', 'unsupported');
+		return uid;
 	}
 
 	// -----------------------------------------------------------------------------------------

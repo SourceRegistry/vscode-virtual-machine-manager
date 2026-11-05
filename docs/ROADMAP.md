@@ -131,16 +131,18 @@ Stacked on `feat/vm-dashboard` (phases 1-3 not merged yet).
 
 ## Phase 7: `feat/passthrough`
 
-- [ ] USB: list host devices (`lsusb` / `system_profiler` / PnP), hot-plug via `device_add usb-host`
-- [ ] PCI VFIO (Linux only):
-  - [ ] check IOMMU, groups, current driver
-  - [ ] bind-to-`vfio-pci` helper (root via pkexec/sudo, always explicit confirmation)
-  - [ ] attach with `-device vfio-pci`
-  - [ ] warn on shared IOMMU groups
-  - [ ] show rebind / unbind-on-stop behaviour, never silent
-- [ ] macOS / Windows: clear "not supported" state
-- [ ] Hyper-V DDA (`Add-VMAssignableDevice`) with the same confirmation rules, gated by capability detection
-- [ ] Mark VFIO experimental until validated on a Linux host (cannot be fully tested on the macOS dev machine)
+Details page, card **Host devices** (loaded on demand: listing USB can be slow). Host-changing steps are always confirmed in a modal that lists the exact commands and warnings.
+
+- [x] USB: list host devices (`system_profiler` on macOS, `lsusb` or sysfs on Linux), hot-plug with QMP `device_add usb-host` / `device_del`, attached state read back through `qom-list`. Refuses a device that is no longer on the host (QEMU would silently wait for it). Not persisted: re-attach after a restart. Windows: clearly unsupported. The macOS parser is written against the documented `system_profiler` JSON; the dev machine reported no USB devices, so it is covered by fixtures only
+- [x] PCI VFIO (Linux only, **experimental**):
+  - [x] IOMMU check, groups, current driver, boot display (`/sys/bus/pci`, `/sys/kernel/iommu_groups`)
+  - [x] bind-to-`vfio-pci` helper: `pkexec` runs a short, validated script (`driver_override`, unbind, `drivers_probe`, `chown` of `/dev/vfio/<group>`); the commands are shown verbatim before running; no `sudo` fallback
+  - [x] attach with `-device vfio-pci,host=…` at start (cold-plug, stored in the definition; the VM must be stopped to change it)
+  - [x] warn on shared IOMMU groups, host drivers being unbound, the boot GPU
+  - [x] rebind behaviour shown, never silent: the device stays on vfio-pci after the VM stops until it is detached, which returns it to its host driver (confirmed). Start checks the binding and explains instead of surfacing QEMU's terse error
+- [x] macOS / Windows: clear "not supported" state with the reason
+- [x] Hyper-V DDA (`Dismount-VMHostAssignableDevice` + `Add-VMAssignableDevice`, and back) with the same confirmation rules, gated by detection (Windows Server, cmdlets present). USB is reported unsupported
+- [x] VFIO and DDA are marked experimental in the UI. **Not validated on real hardware**: VFIO needs a Linux host with an IOMMU, DDA a Windows Server host. Both are covered by unit tests of parsing, assessment, script building and input validation only
 
 ## Phase 8: `feat/hyperv-remote`
 

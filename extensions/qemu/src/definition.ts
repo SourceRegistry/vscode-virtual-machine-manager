@@ -1,6 +1,7 @@
 import type { PortForward } from '@vmm/sdk';
 import { hostfwdOptions } from './forwards';
 import { diskFormat } from './importers';
+import { vfioDeviceArgument } from './passthrough';
 
 /** On-disk VM definition (`<vmDirectory>/<id>/vm.json`). Pure module: no I/O, unit tested. */
 
@@ -22,6 +23,8 @@ export interface VmDefinition {
 	nic: NicModel;
 	/** MAC of the first NIC. Absent on VMs created before it was stored (QEMU's default then applies). */
 	mac?: string;
+	/** Host PCI devices (VFIO) passed through at start; the VM must be stopped to change them. */
+	pciDevices?: string[];
 	/** Host → guest port forwards of the user-mode NIC. */
 	forwards?: PortForward[];
 	vga: VgaModel;
@@ -145,6 +148,7 @@ export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvi
 	}
 
 	args.push('-nic', def.nic === 'none' ? 'none' : `user,model=${def.nic}${def.mac ? `,mac=${def.mac}` : ''}${hostfwdOptions(def.forwards)}`);
+	for (const address of def.pciDevices ?? []) args.push('-device', vfioDeviceArgument(address));
 	args.push('-vga', def.vga || 'std');
 	args.push('-device', 'qemu-xhci', '-device', 'usb-tablet');
 	args.push('-display', 'none');

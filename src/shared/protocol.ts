@@ -11,6 +11,7 @@ import type {
 	PowerAction,
 	PreviewFrame,
 	VmConfig,
+	PassthroughInfo,
 	VmDetails,
 	VmInfo,
 	VmStats
@@ -123,6 +124,13 @@ export interface RpcMethods {
 	getDetails: { params: void; result: VmDetails | undefined };
 	/** `undefined` while the panel is hidden (no work done) or the provider has no statistics. */
 	getStats: { params: void; result: VmStats | undefined };
+	/** Host devices (USB, PCI) that can be given to this VM. Slow on some hosts: not part of `getDetails`. */
+	getPassthrough: { params: void; result: PassthroughInfo | undefined };
+	/**
+	 * Attaches or detaches a host device. The host side asks the user to confirm the provider's plan
+	 * when it changes the host (VFIO rebinds, shared groups); `changed` is false when they declined.
+	 */
+	changePassthrough: { params: { deviceId: string; action: 'attach' | 'detach' }; result: { changed: boolean } };
 	addForward: { params: { forward: PortForward }; result: void };
 	removeForward: { params: { forward: PortForward }; result: void };
 	/** Copies the ssh command or opens the forward in the browser. */

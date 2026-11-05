@@ -113,6 +113,32 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 		}
 	}, 60_000);
 
+	it('reports passthrough support and handles a USB device that does not exist', async () => {
+		await connection.power('local', vmId, 'start');
+		await new Promise((r) => setTimeout(r, 1500));
+		try {
+			const info = await connection.getPassthrough!('local', vmId);
+			if (process.platform === 'linux') expect(info.pci.experimental).toBe(true);
+			else expect(info.pci).toMatchObject({ supported: false });
+			expect(info.devices.every((d) => d.kind === 'usb' || d.kind === 'pci')).toBe(true);
+
+			// A device the host does not have is refused up front (QEMU itself would wait for it to appear).
+			await expect(connection.planPassthrough!('local', vmId, 'usb:dead:beef', 'attach')).rejects.toMatchObject({ code: 'notFound' });
+			await expect(connection.changePassthrough!('local', vmId, 'usb:dead:beef', 'attach', { confirmed: false })).rejects.toMatchObject({ code: 'notFound' });
+			const real = info.devices.find((d) => d.kind === 'usb' && !d.unavailable);
+			if (real) {
+				const plan = await connection.planPassthrough!('local', vmId, real.id, 'attach');
+				expect(plan).toMatchObject({ needsConfirmation: false });
+				expect(plan.steps[0]).toContain('device_add usb-host');
+			}
+			// PCI: never without the user's confirmation, and never while the VM runs.
+			await expect(connection.planPassthrough!('local', vmId, 'pci:0000:00:02.0', 'attach')).rejects.toBeDefined();
+			await expect(connection.changePassthrough!('local', vmId, 'pci;rm -rf /', 'attach', { confirmed: true })).rejects.toMatchObject({ code: 'invalid' });
+		} finally {
+			await connection.power('local', vmId, 'stop').catch(() => undefined);
+		}
+	}, 60_000);
+
 	describe.skipIf(process.platform === 'win32')('QEMU started outside the extension', () => {
 		let child: ReturnType<typeof spawn> | undefined;
 		afterAll(() => child?.kill('SIGKILL'));

@@ -14,6 +14,8 @@ import {
 	type HypervisorProvider,
 	type Logger,
 	type NodeInfo,
+	type PassthroughInfo,
+	type PassthroughPlan,
 	type PowerAction,
 	type PreviewFrame,
 	type ProviderContext,
@@ -27,6 +29,7 @@ import {
 import { PowerShellError, PowerShellSession } from './PowerShellSession';
 import { createWindowsSecurityContext } from './sspi';
 import * as scripts from './scripts';
+import { parseDeviceId, planAttach, planDetach, toPassthroughInfo, type RawDdaInfo } from './dda';
 import { toDetails, toStats, type RawDetails, type RawStats } from './inspect';
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -223,6 +226,7 @@ export class HyperVConnection implements ClusterConnection {
 		external: true,
 		media: true,
 		details: true,
+		passthrough: true,
 		stats: true
 	};
 
@@ -500,6 +504,30 @@ export class HyperVConnection implements ClusterConnection {
 
 	async insertMedia(_nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void> {
 		await this.run(this.ops, scripts.SET_MEDIA, { id: assertVmId(vmId), device: deviceId, path: imagePath }, 60_000);
+	}
+
+	async getPassthrough(_nodeId: string, vmId: string): Promise<PassthroughInfo> {
+		const [raw] = await this.run<RawDdaInfo>(this.query, scripts.DDA_LIST, { id: assertVmId(vmId) }, 90_000);
+		return toPassthroughInfo(raw ?? { IsServer: false, HasCmdlets: false, Devices: null });
+	}
+
+	async planPassthrough(_nodeId: string, vmId: string, deviceId: string, action: 'attach' | 'detach'): Promise<PassthroughPlan> {
+		const path = parseDeviceId(deviceId);
+		const name = await this.vmName(vmId);
+		return action === 'attach' ? planAttach(name, path) : planDetach(name, path);
+	}
+
+	async changePassthrough(nodeId: string, vmId: string, deviceId: string, action: 'attach' | 'detach', options: { confirmed: boolean }): Promise<void> {
+		const plan = await this.planPassthrough(nodeId, vmId, deviceId, action);
+		if (plan.needsConfirmation && !options.confirmed) throw new ProviderError('This change needs the explicit confirmation of the user.', 'permission');
+		const info = await this.getPassthrough(nodeId, vmId);
+		if (!info.pci.supported) throw new ProviderError(info.pci.reason ?? 'Device assignment is not available on this host', 'unsupported');
+		await this.run(this.ops, action === 'attach' ? scripts.DDA_ATTACH : scripts.DDA_DETACH, { id: assertVmId(vmId), path: parseDeviceId(deviceId) }, 180_000);
+	}
+
+	private async vmName(vmId: string): Promise<string> {
+		const [raw] = await this.run<{ Name: string }>(this.query, scripts.VM_NAME, { id: assertVmId(vmId) });
+		return raw?.Name ?? vmId;
 	}
 
 	async getRdpTarget(_nodeId: string, vmId: string): Promise<RdpTarget> {

@@ -79,6 +79,12 @@ describe('buildArgs', () => {
 		expect(sata.join(' ')).toContain('-serial none');
 	});
 
+	it('passes VFIO devices through at start', () => {
+		const args = buildArgs({ ...def, pciDevices: ['0000:01:00.0', '0000:01:00.1'] }, runtime, { accelerators: ['tcg'], firmwareCode: '/fw/code.fd' });
+		expect(args.filter((a) => a.startsWith('vfio-pci'))).toEqual(['vfio-pci,host=0000:01:00.0', 'vfio-pci,host=0000:01:00.1']);
+		expect(() => buildArgs({ ...def, pciDevices: ['0000:01:00.0,x=1'] }, runtime, { accelerators: ['tcg'], firmwareCode: '/fw/code.fd' })).toThrow('Invalid PCI address');
+	});
+
 	it('adds the stored port forwards to the NIC', () => {
 		const withForwards = buildArgs({ ...def, nic: 'e1000', forwards: [{ protocol: 'tcp', hostPort: 2222, guestPort: 22 }] }, runtime, { accelerators: ['tcg'], firmwareCode: '/fw/code.fd' });
 		expect(withForwards[withForwards.indexOf('-nic') + 1]).toMatch(/^user,model=e1000.*,hostfwd=tcp:127\.0\.0\.1:2222-:22$/);

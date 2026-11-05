@@ -68,6 +68,29 @@ export class VmDashboardPanel implements vscode.Disposable {
 				const connection = await manager.connect(ref.clusterId);
 				return connection.getVmDetails?.(ref.nodeId, ref.vmId);
 			},
+			getPassthrough: async () => {
+				const connection = await manager.connect(ref.clusterId);
+				return connection.getPassthrough?.(ref.nodeId, ref.vmId);
+			},
+			changePassthrough: async ({ deviceId, action }) => {
+				const connection = await manager.connect(ref.clusterId);
+				if (!connection.planPassthrough || !connection.changePassthrough) throw new Error('This hypervisor cannot pass devices through');
+				const plan = await connection.planPassthrough(ref.nodeId, ref.vmId, deviceId, action);
+				if (plan.needsConfirmation) {
+					const detail = [
+						plan.experimental ? 'EXPERIMENTAL: not validated on every host. A wrong choice can freeze the host or blank its display.' : undefined,
+						plan.warnings.length ? `Warnings:\n${plan.warnings.map((w) => `• ${w}`).join('\n')}` : undefined,
+						`This will:\n${plan.steps.map((s) => (s.startsWith(' ') ? s : `• ${s}`)).join('\n')}`
+					]
+						.filter(Boolean)
+						.join('\n\n');
+					const choice = await vscode.window.showWarningMessage(plan.title, { modal: true, detail }, action === 'attach' ? 'Attach' : 'Detach');
+					if (!choice) return { changed: false };
+				}
+				await connection.changePassthrough(ref.nodeId, ref.vmId, deviceId, action, { confirmed: true });
+				await manager.refresh(ref.clusterId);
+				return { changed: true };
+			},
 			addForward: async ({ forward }) => {
 				const connection = await manager.connect(ref.clusterId);
 				if (!connection.addPortForward) throw new Error('This hypervisor cannot forward ports');

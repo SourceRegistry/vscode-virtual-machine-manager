@@ -267,3 +267,48 @@ if ($p.path) {
 	Set-VMDvdDrive -VMDvdDrive $dvd -Path $null
 }
 `;
+
+/** Capability detection and the PCI devices that could be assigned. */
+export const DDA_LIST = String.raw`
+$vm = Get-VM -Id $p.id
+$isServer = ((Get-CimInstance -ClassName Win32_OperatingSystem).ProductType -ne 1)
+$hasCmdlets = [bool](Get-Command Add-VMAssignableDevice -ErrorAction SilentlyContinue)
+$devices = @()
+if ($isServer -and $hasCmdlets) {
+	$assigned = @(Get-VMAssignableDevice -VM $vm | ForEach-Object { $_.LocationPath })
+	$dismounted = @(Get-VMHostAssignableDevice | ForEach-Object { $_.LocationPath })
+	$devices = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -like 'PCI\*' } | ForEach-Object {
+		$path = (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_LocationPaths' -ErrorAction SilentlyContinue).Data | Where-Object { $_ -like 'PCIROOT*' } | Select-Object -First 1
+		if ($path) {
+			[pscustomobject]@{
+				LocationPath = [string]$path
+				Name = [string]$_.FriendlyName
+				Class = [string]$_.Class
+				InstanceId = [string]$_.InstanceId
+				Assigned = [bool]($assigned -contains $path)
+				Dismounted = [bool]($dismounted -contains $path)
+			}
+		}
+	})
+}
+[pscustomobject]@{ IsServer = $isServer; HasCmdlets = $hasCmdlets; Devices = $devices }
+`;
+
+export const DDA_ATTACH = String.raw`
+$vm = Get-VM -Id $p.id
+if ($vm.State -ne 'Off') { throw "Turn $($vm.Name) off first: devices are assigned to a stopped VM." }
+Set-VM -VM $vm -AutomaticStopAction TurnOff -GuestControlledCacheTypes $true -LowMemoryMappedIoSpace 3Gb -HighMemoryMappedIoSpace 33280Mb
+Dismount-VMHostAssignableDevice -Force -LocationPath $p.path
+Add-VMAssignableDevice -LocationPath $p.path -VM $vm
+`;
+
+export const DDA_DETACH = String.raw`
+$vm = Get-VM -Id $p.id
+if ($vm.State -ne 'Off') { throw "Turn $($vm.Name) off first." }
+Remove-VMAssignableDevice -LocationPath $p.path -VM $vm
+Mount-VMHostAssignableDevice -LocationPath $p.path
+`;
+
+export const VM_NAME = String.raw`
+[pscustomobject]@{ Name = (Get-VM -Id $p.id).Name }
+`;

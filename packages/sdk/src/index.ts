@@ -113,6 +113,8 @@ export interface Capabilities {
 	stats?: boolean;
 	/** Implements `addPortForward` / `removePortForward`. */
 	forwards?: boolean;
+	/** Implements `getPassthrough` / `planPassthrough` / `changePassthrough`. */
+	passthrough?: boolean;
 	/** Implements `scanExternalVms` / `adoptExternalVm`. */
 	adopt?: boolean;
 	/** Implements `scanImportFolder` / `importFromFolder`. */
@@ -230,6 +232,45 @@ export interface PortForward {
 	hostAddress?: string;
 	hostPort: number;
 	guestPort: number;
+}
+
+/** A host device that can be handed to a guest. */
+export interface PassthroughDevice {
+	/** Stable handle for `planPassthrough` / `changePassthrough`, e.g. `usb:046d:c52b` or `pci:0000:01:00.0`. */
+	id: string;
+	kind: 'usb' | 'pci';
+	label: string;
+	/** USB `vendor:product`, PCI address. */
+	address: string;
+	detail?: string;
+	/** Currently given to this VM. */
+	attached: boolean;
+	/** The provider will not hand it over; says why. */
+	unavailable?: string;
+}
+
+export interface PassthroughSupport {
+	supported: boolean;
+	/** Why not, or what is needed. */
+	reason?: string;
+	experimental?: boolean;
+}
+
+export interface PassthroughInfo {
+	usb: PassthroughSupport;
+	pci: PassthroughSupport;
+	devices: PassthroughDevice[];
+}
+
+/** What attaching or detaching a device will do to the host, for an explicit confirmation. */
+export interface PassthroughPlan {
+	title: string;
+	/** Changes on the host, in order; privileged commands are listed verbatim. */
+	steps: string[];
+	warnings: string[];
+	/** The user must confirm before `changePassthrough` runs (host changes, shared groups). */
+	needsConfirmation: boolean;
+	experimental?: boolean;
 }
 
 export interface VmDetails {
@@ -382,6 +423,11 @@ export interface ClusterConnection extends Disposable {
 	ejectMedia?(nodeId: string, vmId: string, deviceId: string): Promise<void>;
 	/** Inserts an image into a CD/DVD drive, replacing the current one. */
 	insertMedia?(nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void>;
+	/** Host devices that can be given to the VM, and what is supported on this host. */
+	getPassthrough?(nodeId: string, vmId: string): Promise<PassthroughInfo>;
+	planPassthrough?(nodeId: string, vmId: string, deviceId: string, action: 'attach' | 'detach'): Promise<PassthroughPlan>;
+	/** `confirmed` must be true when the plan said `needsConfirmation`; the provider rejects otherwise. */
+	changePassthrough?(nodeId: string, vmId: string, deviceId: string, action: 'attach' | 'detach', options: { confirmed: boolean }): Promise<void>;
 	/** Forwards a host port to a guest port. Works on running VMs and is remembered for the next start. */
 	addPortForward?(nodeId: string, vmId: string, forward: PortForward): Promise<void>;
 	removePortForward?(nodeId: string, vmId: string, forward: PortForward): Promise<void>;
