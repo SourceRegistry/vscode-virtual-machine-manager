@@ -214,3 +214,26 @@ export function cpuUsageBetween(previous: { at: number; cpuSeconds: number } | u
 	const used = (current.cpuSeconds - previous.cpuSeconds) / wall / Math.max(1, cpus);
 	return Math.min(1, Math.max(0, used));
 }
+
+export interface CpuSample {
+	at: number;
+	cpuSeconds: number;
+	/** The usage last derived from this baseline. */
+	usage?: number;
+}
+
+/**
+ * Next baseline and usage for a polled process. Calls closer than `minIntervalMs` to the baseline
+ * (two dashboards polling the same VM) reuse the last answer instead of re-measuring over a tiny
+ * window, which would make the numbers jumpy.
+ */
+export function nextCpuSample(
+	previous: CpuSample | undefined,
+	current: { at: number; cpuSeconds: number },
+	cpus: number,
+	minIntervalMs = 1000
+): { sample: CpuSample; usage: number | undefined } {
+	if (previous && current.at - previous.at < minIntervalMs) return { sample: previous, usage: previous.usage };
+	const usage = cpuUsageBetween(previous, current, cpus);
+	return { sample: { ...current, usage }, usage };
+}

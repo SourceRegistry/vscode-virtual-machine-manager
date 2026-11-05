@@ -12,6 +12,8 @@ $vmHost = Get-VMHost
 	MemoryMB = [int64]($os.TotalVisibleMemorySize / 1KB)
 	FreeMB = [int64]($os.FreePhysicalMemory / 1KB)
 	Os = [string]$os.Caption
+	OsVersion = [string]$os.Version
+	CpuLoad = [double](Get-CimInstance -ClassName Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
 	VhdPath = [string]$vmHost.VirtualHardDiskPath
 }
 `;

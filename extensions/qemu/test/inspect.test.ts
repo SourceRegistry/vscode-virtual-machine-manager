@@ -3,6 +3,7 @@ import {
 	cpuUsageBetween,
 	guestIpAddresses,
 	hasMedia,
+	nextCpuSample,
 	nicDevice,
 	parseBlockDevices,
 	parseBlockStats,
@@ -168,5 +169,20 @@ describe('host process samples', () => {
 		expect(cpuUsageBetween(a, { at: 2000, cpuSeconds: 11 }, 2)).toBeCloseTo(0.25);
 		expect(cpuUsageBetween(a, { at: 1000, cpuSeconds: 20 }, 2)).toBe(1);
 		expect(cpuUsageBetween(a, { at: 0, cpuSeconds: 10 }, 2)).toBeUndefined();
+	});
+});
+
+describe('nextCpuSample', () => {
+	it('keeps the baseline and last answer for calls inside the minimum interval', () => {
+		const first = nextCpuSample(undefined, { at: 0, cpuSeconds: 0 }, 2);
+		expect(first.usage).toBeUndefined();
+		const second = nextCpuSample(first.sample, { at: 2000, cpuSeconds: 1 }, 2);
+		expect(second.usage).toBeCloseTo(0.25);
+		// A second poller 300 ms later must not re-measure over that tiny window.
+		const third = nextCpuSample(second.sample, { at: 2300, cpuSeconds: 1.2 }, 2);
+		expect(third.usage).toBeCloseTo(0.25);
+		expect(third.sample).toBe(second.sample);
+		const fourth = nextCpuSample(third.sample, { at: 4000, cpuSeconds: 2 }, 2);
+		expect(fourth.usage).toBeCloseTo(0.25);
 	});
 });

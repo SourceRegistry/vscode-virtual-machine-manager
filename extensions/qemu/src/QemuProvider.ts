@@ -31,14 +31,16 @@ import {
 	type VmState,
 	type VmStats
 } from '@vmm/sdk';
-import { buildArgs, defaultAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
+import { buildArgs, defaultAccelerators, usableAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
 import { detectQemu, type QemuInstallation } from './detect';
 import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
+import { availableMemoryMB, CpuLoadSampler } from './hostInfo';
 import { sampleProcess } from './hostProcess';
 import {
-	cpuUsageBetween,
 	hasMedia,
+	nextCpuSample,
+	type CpuSample,
 	nicDevice,
 	parseBlockDevices,
 	parseBlockStats,
@@ -183,7 +185,8 @@ export class QemuConnection implements ClusterConnection {
 		details: true,
 		stats: true
 	};
-	private readonly cpuSamples = new Map<string, { at: number; cpuSeconds: number }>();
+	private readonly hostCpu = new CpuLoadSampler();
+	private readonly cpuSamples = new Map<string, CpuSample>();
 	private readonly changes = new SimpleEmitter<ChangeEvent>();
 	readonly onDidChange = this.changes.event;
 	private readonly qmp = new Map<string, Promise<QmpClient>>();
@@ -299,15 +302,24 @@ export class QemuConnection implements ClusterConnection {
 
 	async listNodes(): Promise<NodeInfo[]> {
 		const total = Math.round(os.totalmem() / 1024 / 1024);
+		const available = await availableMemoryMB();
+		const accelerators = usableAccelerators(defaultAccelerators(process.platform, this.accelerator), this.qemu.accelerators);
+		const active = accelerators[0]?.split(',')[0] ?? 'tcg';
 		return [
 			{
 				id: NODE_ID,
 				name: os.hostname(),
 				status: 'online',
 				cpus: os.cpus().length,
+				cpuUsage: this.hostCpu.sample(),
 				memoryMB: total,
-				memoryUsedMB: total - Math.round(os.freemem() / 1024 / 1024),
-				description: `QEMU ${this.qemu.version}`
+				memoryUsedMB: Math.max(0, total - available),
+				description: `QEMU ${this.qemu.version}`,
+				facts: [
+					{ label: 'QEMU', value: this.qemu.version },
+					{ label: 'Acceleration', value: active === 'tcg' ? 'Software emulation (TCG)' : active.toUpperCase() },
+					{ label: 'Platform', value: `${os.platform()} ${os.arch()}` }
+				]
 			}
 		];
 	}
@@ -589,9 +601,9 @@ export class QemuConnection implements ClusterConnection {
 		]);
 		let cpuUsage: number | undefined;
 		if (process_) {
-			const current = { at, cpuSeconds: process_.cpuSeconds };
-			cpuUsage = cpuUsageBetween(this.cpuSamples.get(vmId), current, def.cpus);
-			this.cpuSamples.set(vmId, current);
+			const next = nextCpuSample(this.cpuSamples.get(vmId), { at, cpuSeconds: process_.cpuSeconds }, def.cpus);
+			cpuUsage = next.usage;
+			this.cpuSamples.set(vmId, next.sample);
 		}
 		return { timestamp: at, cpuUsage, memoryUsedMB: process_?.rssMB, memoryMB: def.memoryMB, disks };
 	}
@@ -724,7 +736,7 @@ export class QemuConnection implements ClusterConnection {
 			startedAt: Date.now()
 		};
 		const args = buildArgs(def, runtime, {
-			accelerators: defaultAccelerators(process.platform, this.accelerator),
+			accelerators: usableAccelerators(defaultAccelerators(process.platform, this.accelerator), this.qemu.accelerators),
 			firmwareCode: this.qemu.firmwareCode,
 			firmwareVars: def.firmware === 'uefi' ? await this.ensureVars(def) : undefined
 		});

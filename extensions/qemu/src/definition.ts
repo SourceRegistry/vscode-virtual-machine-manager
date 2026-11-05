@@ -75,6 +75,17 @@ export function escapeOptionValue(value: string): string {
 	return value.replace(/,/g, ',,');
 }
 
+/**
+ * Drops accelerators the QEMU binary does not offer (`available`, from `-accel help`), so an x86_64
+ * guest on Apple Silicon starts with plain TCG instead of failing on `hvf` first and logging a fallback.
+ * TCG is always kept; an empty/unknown `available` list filters nothing.
+ */
+export function usableAccelerators(wanted: string[], available: string[]): string[] {
+	if (!available.length) return wanted;
+	const kept = wanted.filter((spec) => available.includes(spec.split(',')[0]!));
+	return kept.includes('tcg') ? kept : [...kept, 'tcg'];
+}
+
 export function defaultAccelerators(platform: NodeJS.Platform, preferred = 'auto'): string[] {
 	if (preferred && preferred !== 'auto') return preferred === 'tcg' ? ['tcg'] : [accelSpec(preferred), 'tcg'];
 	switch (platform) {

@@ -20,7 +20,7 @@ Status: `todo` · `in progress` · `testing` · `merged`
 | 1 | `fix/qemu-shutdown` | patch | testing |
 | 2 | `feat/vm-details-sdk` | minor | testing (stacked on phase 1) |
 | 3 | `feat/vm-dashboard` | minor | testing (stacked on phase 2) |
-| 4 | `feat/host-dashboard` | minor | todo |
+| 4 | `feat/host-dashboard` | minor | testing (stacked on phase 3) |
 | 5 | `feat/qemu-network` | minor | todo |
 | 6 | `feat/qemu-import` | minor | todo |
 | 7 | `feat/passthrough` | minor | todo |
@@ -95,12 +95,20 @@ Stacked on `feat/vm-details-sdk` (phases 1 and 2 not merged yet).
 
 ## Phase 4: `feat/host-dashboard`
 
-- [ ] Overview becomes a dashboard
-- [ ] Hypervisor / node cards: CPU/RAM gauges, accelerator (KVM/HVF/WHPX), version
-- [ ] VM state breakdown
-- [ ] Sortable, filterable all-VMs table with sparklines, IPs, quick actions
-- [ ] Bulk start/stop
-- [ ] Allocated vs available resources
+Stacked on `feat/vm-dashboard` (phases 1-3 not merged yet).
+
+- [x] Overview becomes a dashboard
+- [x] Summary: VMs by state (stacked bar, chips that filter the table), allocated vs available vCPU/memory across all online nodes, overcommit flagged with text and the warning color
+- [x] Node cards: CPU load, memory in use, vCPUs and memory allocated to running VMs, labelled facts (QEMU version and acceleration, platform; Hyper-V host OS and VM storage)
+- [x] One table of all VMs across all clusters: filter by name/host/IP, sort by state/name/host/vCPU/memory/CPU/uptime (natural order, empty values sink), CPU sparkline with the live value, details link, row actions, native context menu on every row
+- [x] Bulk start / shut down / power off for the selection: counts only the VMs the action applies to, one confirmation for power off, runs in the background, one summary if some fail
+- [x] Honest numbers on macOS: `os.freemem()` reported 187 MB free of 16 GB; available memory now counts free + inactive + speculative + purgeable pages (`/proc/meminfo` MemAvailable on Linux)
+- [x] QEMU: the acceleration actually available (`-accel help`); on Apple Silicon the x86_64 binary offers TCG only, so the node says "Software emulation (TCG)" and VMs no longer start by failing on `hvf` (see phase 10)
+- [x] CPU sampling shared by the overview and the details page no longer makes each other jumpy (minimum 1 s window)
+- [x] Tests: overview logic (filter, sort, counts, allocation, eligibility), host parsers, RPC contract; rendered and exercised in Chrome (filter chip, select all, sort, bulk bar)
+- [ ] Manual check in VS Code with a real QEMU VM
+- [ ] Hyper-V node CPU load / facts and per-VM CPU for sparklines are untested (no Windows host); the overview polls one `getVmStats` per running VM every 3 s, which costs one PowerShell call each on Hyper-V
+- [ ] Accelerator choice only filters for QEMU's own list; a per-VM setting to force an accelerator is not done
 
 ## Phase 5: `feat/qemu-network`
 

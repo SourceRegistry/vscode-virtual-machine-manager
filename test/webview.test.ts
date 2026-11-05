@@ -103,9 +103,10 @@ describe.skipIf(!existsSync(bundle))('webview bundle', () => {
 
 	it('exposes native context-menu data on VM rows, nodes and clusters', async () => {
 		await boot('overview');
-		const marker = document.querySelector('[data-row-context]') as HTMLElement;
-		marker.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
-		const row = marker.closest('tr') as HTMLElement;
+		// VM rows carry the context themselves (VS Code reads it from the right-clicked element's ancestors).
+		const rows = [...document.querySelectorAll('tbody tr[data-vscode-context]')] as HTMLElement[];
+		const row = rows.find((r) => JSON.parse(r.getAttribute('data-vscode-context')!).vmId === 'v1') as HTMLElement;
+		expect(row).toBeDefined();
 		const context = JSON.parse(row.getAttribute('data-vscode-context') ?? '{}');
 		expect(context).toMatchObject({
 			vmmItem: 'vm;state=running;start;shutdown;reboot;stop;graphical;serial;external;edit;delete;',

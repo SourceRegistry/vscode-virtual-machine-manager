@@ -53,6 +53,9 @@ interface RawHost {
 	Cpus: number;
 	MemoryMB: number;
 	FreeMB: number;
+	OsVersion?: string;
+	/** Average load of all processors, percent. */
+	CpuLoad?: number | null;
 	Os: string;
 	VhdPath: string;
 }
@@ -261,7 +264,14 @@ export class HyperVConnection implements ClusterConnection {
 				cpus: host?.Cpus,
 				memoryMB: host?.MemoryMB,
 				memoryUsedMB: host ? host.MemoryMB - host.FreeMB : undefined,
-				description: host?.Os
+				description: host?.Os,
+				cpuUsage: typeof host?.CpuLoad === 'number' ? Math.min(1, Math.max(0, host.CpuLoad / 100)) : undefined,
+				facts: host
+					? [
+							{ label: 'Hyper-V host', value: [host.Os, host.OsVersion].filter(Boolean).join(' ') },
+							{ label: 'VM storage', value: host.VhdPath ?? '–' }
+						]
+					: undefined
 			}
 		];
 	}

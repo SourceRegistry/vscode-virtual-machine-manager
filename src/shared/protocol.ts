@@ -104,6 +104,13 @@ export type OverviewCommand =
 export interface RpcMethods {
 	// overview
 	snapshot: { params: void; result: ClusterSnapshot[] };
+	/**
+	 * Starts `action` on every listed VM it applies to, in the background (a shutdown can take
+	 * minutes). Failures are reported on the host side in one message.
+	 */
+	bulkPower: { params: { action: PowerAction; refs: VmRef[] }; result: { started: number; skipped: number } };
+	/** One CPU/memory/disk sample per listed running VM; empty while the overview is hidden. */
+	vmStats: { params: { refs: VmRef[] }; result: Array<{ ref: VmRef; stats: VmStats }> };
 	runCommand: {
 		params: { command: OverviewCommand; ref?: VmRef; clusterId?: string; nodeId?: string };
 		result: void;

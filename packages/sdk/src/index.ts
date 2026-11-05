@@ -123,6 +123,8 @@ export interface NodeInfo {
 	memoryMB?: number;
 	memoryUsedMB?: number;
 	description?: string;
+	/** Labelled facts shown on the node card, e.g. `{ label: 'Version', value: 'QEMU 11.1.2' }`. */
+	facts?: Array<{ label: string; value: string }>;
 }
 
 export interface VmInfo {

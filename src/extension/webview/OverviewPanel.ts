@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
+import { eligibleFor } from '../../shared/overview';
 import type { OverviewCommand } from '../../shared/protocol';
+import { errorMessage, log } from '../util/log';
 import type { ConnectionManager } from '../clusters/ConnectionManager';
 import { panelIcon, renderHtml, WebviewChannel, webviewOptions } from './WebviewHost';
 
@@ -67,6 +69,45 @@ export class OverviewPanel implements vscode.Disposable {
 			snapshot: async () => {
 				await Promise.all(manager.clusters().map((c) => manager.ensureLoaded(c.cluster.id)));
 				return manager.snapshot();
+			},
+			bulkPower: async ({ action, refs }) => {
+				const targets = refs
+					.map((ref) => manager.findVm(ref))
+					.filter((l): l is NonNullable<typeof l> => !!l && eligibleFor(action, l.vm, l.cluster.connection?.capabilities.power));
+				const skipped = refs.length - targets.length;
+				if (!targets.length) return { started: 0, skipped };
+				if (action === 'stop' && vscode.workspace.getConfiguration('vmm').get<boolean>('confirmPowerOff', true)) {
+					const choice = await vscode.window.showWarningMessage(
+						`Power off ${targets.length} virtual machine${targets.length === 1 ? '' : 's'}?`,
+						{ modal: true, detail: `${targets.map((l) => l.vm.name).join(', ')}\n\nThis is like pulling the power plug. Unsaved data in the guests may be lost. Use Shut Down for a clean shutdown.` },
+						'Power Off'
+					);
+					if (choice !== 'Power Off') return { started: 0, skipped: refs.length };
+				}
+				// Not awaited: a graceful shutdown can take minutes; the tree and this page show the progress.
+				const verb = { start: 'start', shutdown: 'shut down', reboot: 'reboot', stop: 'power off', reset: 'reset' }[action];
+				void Promise.allSettled(targets.map((l) => manager.power(l.ref, action))).then((results) => {
+					const failures = results.flatMap((r, i) => (r.status === 'rejected' ? [`${targets[i]!.vm.name}: ${errorMessage(r.reason)}`] : []));
+					if (!failures.length) return;
+					log.warn(`Could not ${verb} ${failures.length} of ${targets.length}: ${failures.join('; ')}`);
+					void vscode.window.showWarningMessage(`Could not ${verb} ${failures.length} of ${targets.length} virtual machines`, { detail: failures.join('\n'), modal: true });
+				});
+				return { started: targets.length, skipped };
+			},
+			vmStats: async ({ refs }) => {
+				if (!panel.visible) return [];
+				const samples = await Promise.all(
+					refs.slice(0, 64).map(async (ref) => {
+						const connection = manager.cluster(ref.clusterId)?.connection;
+						if (!connection?.getVmStats) return undefined;
+						try {
+							return { ref, stats: await connection.getVmStats(ref.nodeId, ref.vmId) };
+						} catch {
+							return undefined;
+						}
+					})
+				);
+				return samples.filter((s): s is NonNullable<typeof s> => !!s);
 			},
 			runCommand: async ({ command, ref, clusterId, nodeId }) => {
 				if (!ALLOWED_COMMANDS.has(command)) throw new Error(`Command not allowed: ${command}`);

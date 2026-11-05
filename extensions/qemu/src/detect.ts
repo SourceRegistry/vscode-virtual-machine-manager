@@ -13,6 +13,8 @@ export interface QemuInstallation {
 	version: string;
 	firmwareCode?: string;
 	firmwareVarsTemplate?: string;
+	/** Accelerators this binary can use (`qemu-system-x86_64 -accel help`), e.g. `['tcg', 'hvf']`. */
+	accelerators: string[];
 }
 
 function candidates(configured: string | undefined): string[] {
@@ -53,6 +55,14 @@ function findFirmware(directory: string): { code?: string; vars?: string } {
 }
 
 /** Locates qemu-system-x86_64 + qemu-img and reports the version. Throws when not found. */
+/** Output of `-accel help`: a header line, then one accelerator per line. */
+export function parseAccelHelp(output: string): string[] {
+	return output
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter((line) => /^[a-z][a-z0-9-]*$/.test(line));
+}
+
 export async function detectQemu(configured?: string): Promise<QemuInstallation> {
 	for (const directory of candidates(configured)) {
 		const system = path.join(directory, `qemu-system-x86_64${EXE}`);
@@ -61,7 +71,11 @@ export async function detectQemu(configured?: string): Promise<QemuInstallation>
 		const { stdout } = await execFileAsync(system, ['--version'], { windowsHide: true, timeout: 15_000 });
 		const version = /version\s+([\d.]+)/i.exec(stdout)?.[1] ?? stdout.split('\n')[0]?.trim() ?? 'unknown';
 		const firmware = findFirmware(directory);
-		return { directory, system, img, version, firmwareCode: firmware.code, firmwareVarsTemplate: firmware.vars };
+		// Unknown (older QEMU without `-accel help`, or an error): empty list = do not filter.
+		const accelerators = await execFileAsync(system, ['-accel', 'help'], { windowsHide: true, timeout: 15_000 })
+			.then(({ stdout: out }) => parseAccelHelp(out))
+			.catch(() => []);
+		return { directory, system, img, version, firmwareCode: firmware.code, firmwareVarsTemplate: firmware.vars, accelerators };
 	}
 	throw new Error(
 		configured
