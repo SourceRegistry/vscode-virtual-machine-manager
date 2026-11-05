@@ -180,7 +180,14 @@
 
 <Page title={vm?.name ?? boot.vmName ?? 'Virtual machine'} description="Hardware and live usage" sticky_header={false}>
 	{#snippet suffix()}
-		{#if vm}<Status value={vm.state} states={vmStates} />{/if}
+		{#if vm}
+			<Flexbox gap="0.6rem" align="center">
+				{#if originLabel(vm)}
+					<span class="badge" title={vm.controllable === false ? 'Started outside VM Manager without a control socket: it can only be observed and powered off.' : vm.origin === 'adopted' ? 'Started outside VM Manager; attached through its control socket.' : 'Created from existing disks or definitions.'}>{originLabel(vm)}</span>
+				{/if}
+				<Status value={vm.state} states={vmStates} />
+			</Flexbox>
+		{/if}
 	{/snippet}
 
 	{#if loading}
@@ -201,9 +208,10 @@
 				{#if vm.state !== 'stopped'}
 					<Button transparent onclick={() => run('vmm.stop')}><Icon icon="x-octagon" margin="right" />Power off</Button>
 				{/if}
-				<Button transparent onclick={() => run('vmm.connectGraphical')}><Icon icon="display" margin="right" />Console</Button>
+				{#if !vm.consoles || vm.consoles.length}
+					<Button transparent onclick={() => run('vmm.connectGraphical')}><Icon icon="display" margin="right" />Console</Button>
+				{/if}
 				<Button transparent onclick={() => run('vmm.editVm')}><Icon icon="gear" margin="right" />Settings</Button>
-				{#if originLabel(vm)}<span class="badge" title={vm.controllable === false ? 'Started outside VM Manager without a control socket: it can only be observed and powered off.' : 'Not created by VM Manager'}>{originLabel(vm)}</span>{/if}
 				{#if actionError}<span class="error">{actionError}</span>{/if}
 				{#if vm.operation}<span class="operation">{OPERATION_LABEL[vm.operation as keyof typeof OPERATION_LABEL] ?? ''}</span>{/if}
 			</Flexbox>
@@ -500,9 +508,10 @@
 		text-align: right;
 	}
 	.badge {
-		padding: 0.05rem 0.45rem;
+		padding: 0.1rem 0.55rem;
 		border-radius: 999px;
 		font-size: 0.8em;
+		line-height: 1.4;
 		color: var(--vscode-badge-foreground, inherit);
 		background: var(--vscode-badge-background, #8883);
 		white-space: nowrap;
