@@ -12,7 +12,7 @@ import type { ConsoleManager } from '../webview/ConsoleManager';
 import type { RdpCredentialStore } from '../rdp/credentials';
 import { OverviewPanel } from '../webview/OverviewPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
-import { errorMessage, showError } from '../util/log';
+import { errorMessage, log, showError } from '../util/log';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
 
 export const WALKTHROUGH_ID = 'sourceregistry.vm-manager#gettingStarted';
@@ -176,9 +176,17 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			// The guest ignored a graceful request: don't leave the user stuck, offer the hard way out.
 			// Duck-typed: the provider extension bundles its own copy of the SDK's ProviderError.
 			if ((action === 'shutdown' || action === 'reboot') && (error as { code?: unknown } | undefined)?.code === 'timeout') {
-				void vscode.window.showWarningMessage(errorMessage(error), 'Power Off').then((choice) => {
-					if (choice === 'Power Off') void power(location.ref, 'stop', true);
-				});
+				log.warn(`${name}: ${errorMessage(error)}`);
+				// Modal: a toast fades into the notification centre and the VM silently goes back to "Running".
+				void vscode.window
+					.showWarningMessage(
+						`"${name}" did not ${action === 'reboot' ? 'reboot' : 'shut down'}`,
+						{ modal: true, detail: `${errorMessage(error)}\n\nPower Off is like pulling the power plug: unsaved data in the guest may be lost.` },
+						'Power Off'
+					)
+					.then((choice) => {
+						if (choice === 'Power Off') void power(location.ref, 'stop', true);
+					});
 				return;
 			}
 			return showError(`Could not ${verbs[action]} ${name}`, error);
