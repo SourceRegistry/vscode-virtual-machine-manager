@@ -222,6 +222,7 @@
 	{#snippet suffix()}
 		{#if vm}
 			<Flexbox gap="0.6rem" align="center">
+				{#if vm.displayId}<span class="vmid" title="ID">#{vm.displayId}</span>{/if}
 				{#if originLabel(vm)}
 					<span class="badge" title={vm.controllable === false ? 'Started outside VM Manager without a control socket: it can only be observed and powered off.' : vm.origin === 'adopted' ? 'Started outside VM Manager; attached through its control socket.' : 'Created from existing disks or definitions.'}>{originLabel(vm)}</span>
 				{/if}
@@ -622,6 +623,11 @@
 		line-height: 1.4;
 		color: var(--vscode-badge-foreground, inherit);
 		background: var(--vscode-badge-background, #8883);
+		white-space: nowrap;
+	}
+	.vmid {
+		color: var(--vscode-descriptionForeground);
+		font-family: var(--vscode-editor-font-family, monospace);
 		white-space: nowrap;
 	}
 	.muted,
