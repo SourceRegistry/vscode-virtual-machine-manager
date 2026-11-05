@@ -225,10 +225,25 @@ describe('cancel sign-in', () => {
 	it('is offered on a cluster that is still connecting, and only then', () => {
 		const connecting = clusterContextValue('connecting');
 		expect(commandsFor('view/item/context', connecting, { inline: true })).toContain('vmm.cancelConnect');
-		expect(commandsFor('view/item/context', connecting)).toContain('vmm.cancelConnect');
+		for (const menu of ['view/item/context', 'webview/context']) {
+			expect(commandsFor(menu, connecting)).toContain('vmm.cancelConnect');
+			for (const status of ['connected', 'disconnected', 'error'] as const) {
+				expect(commandsFor(menu, clusterContextValue(status))).not.toContain('vmm.cancelConnect');
+			}
+		}
 		for (const status of ['connected', 'disconnected', 'error'] as const) {
 			expect(commandsFor('view/item/context', clusterContextValue(status), { inline: true })).not.toContain('vmm.cancelConnect');
-			expect(commandsFor('view/item/context', clusterContextValue(status))).not.toContain('vmm.cancelConnect');
 		}
+	});
+});
+
+describe('overview menu', () => {
+	// Same check as the VS Code integration test, so a missing entry fails fast and locally.
+	it('mirrors the tree menu: same commands, same state rules, same order', () => {
+		const tree = menus['view/item/context']
+			.filter((m) => !m.group.startsWith('inline'))
+			.map((m) => [m.command, m.when.replace('view == vmm.clusters && viewItem', '')]);
+		const overview = menus['webview/context'].map((m) => [m.command, m.when.replace('webviewId == vmm.overview && vmmItem', '')]);
+		expect(overview).toEqual(tree);
 	});
 });
