@@ -82,12 +82,12 @@ export class ProxmoxProvider implements HypervisorProvider {
 	readonly connectionSchema: FieldSchema[] = [
 		{ key: 'endpoint', label: 'Proxmox URL', type: 'text', required: true, placeholder: 'https://pve.example.com:8006' },
 		{ key: 'authMethod', label: 'Sign in with', type: 'select', default: 'token', required: true, options: [{ value: 'token', label: 'API token' }, { value: 'password', label: 'User name and password (session)' }, { value: 'openid', label: 'OpenID Connect (browser)' }], description: 'Sessions last two hours, are renewed automatically and are discarded when VS Code closes.' },
-		{ key: 'tokenId', label: 'API token ID', type: 'text', placeholder: 'user@pve!vscode', group: 'API token' },
-		{ key: 'tokenSecret', label: 'API token secret', type: 'password', secret: true, group: 'API token' },
-		{ key: 'username', label: 'User name', type: 'text', placeholder: 'root or alice@ldap', description: 'Add @realm, or set the realm below.', group: 'Session' },
-		{ key: 'realm', label: 'Realm', type: 'text', placeholder: 'pam', description: 'Default pam. For OpenID: the name of the OpenID realm.', group: 'Session' },
-		{ key: 'password', label: 'Password', type: 'password', secret: true, description: 'Optional. Leave empty to be asked at every sign-in; a two-factor code is always asked.', group: 'Session' },
-		{ key: 'oidcPort', label: 'OpenID callback port', type: 'number', default: 8189, min: 1024, max: 65535, description: 'The identity provider must allow http://localhost:<port>/ as redirect.', group: 'Session' },
+		{ key: 'tokenId', showWhen: { key: 'authMethod', default: 'token', equals: 'token' }, label: 'API token ID', type: 'text', placeholder: 'user@pve!vscode', group: 'API token' },
+		{ key: 'tokenSecret', showWhen: { key: 'authMethod', default: 'token', equals: 'token' }, label: 'API token secret', type: 'password', secret: true, group: 'API token' },
+		{ key: 'username', showWhen: { key: 'authMethod', default: 'token', equals: 'password' }, label: 'User name', type: 'text', placeholder: 'root or alice@ldap', description: 'Add @realm, or set the realm below.', group: 'Session' },
+		{ key: 'realm', showWhen: { key: 'authMethod', default: 'token', equals: ['password', 'openid'] }, label: 'Realm', type: 'text', placeholder: 'pam', description: 'Default pam. For OpenID: the name of the OpenID realm.', group: 'Session' },
+		{ key: 'password', showWhen: { key: 'authMethod', default: 'token', equals: 'password' }, label: 'Password', type: 'password', secret: true, description: 'Optional. Leave empty to be asked at every sign-in; a two-factor code is always asked.', group: 'Session' },
+		{ key: 'oidcPort', showWhen: { key: 'authMethod', default: 'token', equals: 'openid' }, label: 'OpenID callback port', type: 'number', default: 8189, min: 1024, max: 65535, description: 'The identity provider must allow http://localhost:<port>/ as redirect.', group: 'Session' },
 		{ key: 'verifyTls', label: 'Verify TLS certificate', type: 'checkbox', default: true, description: 'Disable only for a trusted server with a self-signed certificate.' }
 	];
 	constructor(private readonly host: ProxmoxHost) {}

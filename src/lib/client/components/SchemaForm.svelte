@@ -2,7 +2,7 @@
 	import Input from '#lib/client-lib/components/form/Input.svelte';
 	import Button from '#lib/client-lib/components/actions/Button.svelte';
 	import Icon from '#lib/client-lib/components/icons/Icon.svelte';
-	import type { FieldSchema, FieldValues } from '@vmm/sdk';
+	import { isFieldVisible, type FieldSchema, type FieldValues } from '@vmm/sdk';
 	import { toasts } from '#lib/client-lib/components/toast/index.js';
 	import { request } from '../rpc/bridge';
 
@@ -50,7 +50,7 @@
 	}
 </script>
 
-{#each fields as field (field.key)}
+{#each fields.filter((f) => isFieldVisible(f, values)) as field (field.key)}
 	{#if field.type === 'select'}
 		<Input
 			type="select"

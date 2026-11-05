@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coerceValues, fieldDefaults, formatMemory, formatUptime, validateValues, type FieldSchema } from '@vmm/sdk';
+import { coerceValues, fieldDefaults, formatMemory, formatUptime, isFieldVisible, validateValues, type FieldSchema } from '@vmm/sdk';
 import { secretStorageKey, splitSecrets } from '../src/extension/clusters/secrets';
 
 const schema: FieldSchema[] = [
@@ -56,5 +56,24 @@ describe('secret handling', () => {
 
 	it('namespaces secret keys per cluster', () => {
 		expect(secretStorageKey('c1', 'token')).toBe('vmm/cluster/c1/token');
+	});
+});
+
+describe('conditional fields', () => {
+	const method = { key: 'authMethod', label: 'Method', type: 'select' as const };
+	const token = { key: 'token', label: 'Token', type: 'text' as const, required: true, showWhen: { key: 'authMethod', equals: 'token', default: 'token' } };
+	const login = { key: 'user', label: 'User', type: 'text' as const, required: true, showWhen: { key: 'authMethod', equals: ['password', 'openid'] } };
+
+	it('shows a field only for the matching value, with a default for older configs', () => {
+		expect(isFieldVisible(token, {})).toBe(true);
+		expect(isFieldVisible(token, { authMethod: 'password' })).toBe(false);
+		expect(isFieldVisible(login, {})).toBe(false);
+		expect(isFieldVisible(login, { authMethod: 'openid' })).toBe(true);
+		expect(isFieldVisible(method, {})).toBe(true);
+	});
+
+	it('does not validate hidden required fields', () => {
+		expect(validateValues([method, token, login], { authMethod: 'password', user: 'root' })).toBeUndefined();
+		expect(validateValues([method, token, login], { authMethod: 'password' })?.key).toBe('user');
 	});
 });

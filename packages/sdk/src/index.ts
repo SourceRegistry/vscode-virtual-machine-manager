@@ -83,6 +83,16 @@ export interface FieldSchema {
 	mediaDevice?: string;
 	/** Hide in the quick (native) create flow; still shown in the full settings editor. */
 	advanced?: boolean;
+	/** Only ask for this field while another field has one of the given values (e.g. a sign-in method). */
+	showWhen?: { key: string; equals: FieldValue | FieldValue[]; /** Assumed when the other field has no value yet (older saved configs). */ default?: FieldValue };
+}
+
+/** Whether a field applies given the current values. Hidden fields are neither asked nor validated. */
+export function isFieldVisible(field: FieldSchema, values: FieldValues): boolean {
+	if (!field.showWhen) return true;
+	const current = values[field.showWhen.key] ?? field.showWhen.default;
+	const wanted = field.showWhen.equals;
+	return Array.isArray(wanted) ? wanted.includes(current) : wanted === current;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -538,6 +548,7 @@ export function validateValue(field: FieldSchema, value: FieldValue): string | u
 
 export function validateValues(schema: FieldSchema[], values: FieldValues): { key: string; message: string } | undefined {
 	for (const field of schema) {
+		if (!isFieldVisible(field, values)) continue;
 		const message = validateValue(field, values[field.key]);
 		if (message) return { key: field.key, message };
 	}

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { validateValue, type FieldSchema, type FieldValue, type FieldValues } from '@vmm/sdk';
+import { isFieldVisible, validateValue, type FieldSchema, type FieldValue, type FieldValues } from '@vmm/sdk';
 
 /** Returned when the user pressed the back button on the first collected step. */
 export const BACK = Symbol('back');
@@ -113,17 +113,19 @@ export async function collectFields(
 	initial: FieldValues,
 	options: CollectOptions
 ): Promise<FieldValues | Back | undefined> {
-	const steps = fields.filter((f) => !f.readonly && (options.includeAdvanced || !f.advanced));
+	const asked = fields.filter((f) => !f.readonly && (options.includeAdvanced || !f.advanced));
 	const values: FieldValues = { ...initial };
 	const offset = options.stepOffset ?? 0;
-	const total = offset + steps.length + (options.trailingSteps ?? 0);
+	// Which fields apply can change as the user answers (a sign-in method shows its own fields).
+	const applicable = () => asked.filter((f) => isFieldVisible(f, values));
 	let index = 0;
-	while (index < steps.length) {
+	while (index < applicable().length) {
+		const steps = applicable();
 		const field = steps[index];
 		const position: StepPosition = {
 			title: options.title,
 			step: offset + index + 1,
-			totalSteps: total,
+			totalSteps: offset + steps.length + (options.trailingSteps ?? 0),
 			canGoBack: index > 0 || !!options.canGoBackFromFirst
 		};
 		const result = await fieldStep(field, values[field.key], position, options.storedSecrets?.includes(field.key) ?? false);
