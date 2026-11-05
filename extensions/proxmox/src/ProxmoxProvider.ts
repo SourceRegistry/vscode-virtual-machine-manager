@@ -141,6 +141,20 @@ export class ProxmoxProvider implements HypervisorProvider {
 	async testConnection(cluster: ClusterConfig, secrets: SecretBag): Promise<void> { (await this.connect(cluster, secrets)).dispose(); }
 }
 
+/**
+ * The page the Proxmox web UI opens in its console pop-up. It needs the browser to be signed in to
+ * Proxmox (it shows the login first otherwise); a `#v1` fragment only selects the guest, it never
+ * opens a console.
+ */
+export function consoleUrl(baseUrl: string, node: string, id: string, container: boolean, display: boolean): string {
+	const query: Record<string, string> = container
+		? { console: 'lxc', xtermjs: '1', vmid: id, node, cmd: '' }
+		: display
+			? { console: 'kvm', novnc: '1', vmid: id, node, resize: 'off', cmd: '' }
+			: { console: 'kvm', xtermjs: '1', vmid: id, node, cmd: '' };
+	return `${baseUrl}/?${new URLSearchParams(query).toString()}`;
+}
+
 export class ProxmoxConnection implements ClusterConnection {
 	readonly capabilities = { create: true, edit: true, delete: true, power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[], consoles: ['vnc', 'serial'] as ConsoleKind[], preview: false, external: true, stats: true };
 	private readonly abort = new AbortController();
@@ -296,9 +310,12 @@ export class ProxmoxConnection implements ClusterConnection {
 			throw error;
 		}
 	}
+	/** Opens Proxmox's stand-alone console page (noVNC, or xterm.js without a display) in the browser. */
 	async openExternal(node: string, id: string): Promise<void> {
 		this.vm(node, id);
-		await this.openUrl(`${this.baseUrl}/#v1:0:=${this.isContainer(node, id) ? 'lxc' : 'qemu'}%2F${encodeURIComponent(id)}:4:::::8:=consolejs:`);
+		const container = this.isContainer(node, id);
+		const display = container ? false : await this.vm(node, id).config.get().then((config) => hasDisplay(config as object), () => true);
+		await this.openUrl(consoleUrl(this.baseUrl, node, id, container, display));
 	}
 	dispose(): void { this.abort.abort(); for (const console of this.consoles) console.dispose(); this.consoles.clear(); this.client.events.stopListening(); this.cleanup(); }
 }

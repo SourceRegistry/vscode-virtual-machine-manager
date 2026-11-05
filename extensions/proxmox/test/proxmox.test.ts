@@ -113,13 +113,16 @@ describe('Proxmox provider', () => {
 		await connection.getVmStats('pve', '100');
 		expect(client.api.cluster.resources.index).toHaveBeenCalledOnce();
 	});
-	it('opens the web console viewer for a VM and for a container', async () => {
-		const { connection, open, lxc } = fixture();
+	it('opens the stand-alone console page for a VM, a display-less VM and a container', async () => {
+		const { connection, open, lxc, config } = fixture();
 		lxc.list.mockResolvedValue([{ vmid: 105, name: 'ct', status: 'running' }]);
 		await connection.listVms('pve');
 		await connection.openExternal('pve', '101');
+		config.get.mockResolvedValueOnce({ vga: 'serial0', serial0: 'socket' });
+		await connection.openExternal('pve', '102');
 		await connection.openExternal('pve', '105');
-		expect(open).toHaveBeenNthCalledWith(1, 'https://pve.test:8006/#v1:0:=qemu%2F101:4:::::8:=consolejs:');
-		expect(open).toHaveBeenNthCalledWith(2, 'https://pve.test:8006/#v1:0:=lxc%2F105:4:::::8:=consolejs:');
+		expect(open).toHaveBeenNthCalledWith(1, 'https://pve.test:8006/?console=kvm&novnc=1&vmid=101&node=pve&resize=off&cmd=');
+		expect(open).toHaveBeenNthCalledWith(2, 'https://pve.test:8006/?console=kvm&xtermjs=1&vmid=102&node=pve&cmd=');
+		expect(open).toHaveBeenNthCalledWith(3, 'https://pve.test:8006/?console=lxc&xtermjs=1&vmid=105&node=pve&cmd=');
 	});
 });
