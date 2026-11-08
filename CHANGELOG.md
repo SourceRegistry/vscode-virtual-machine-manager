@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.5.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.4.0...v0.5.0) (2026-11-08)
+
+
+### Features
+
+* offer to open the display or serial console after attaching to a VM ([5927861](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/59278613dcd2fdcae1eb626c12ce7130a1ea52ed))
+
 # [0.4.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.3.0...v0.4.0) (2026-11-05)
 
 
