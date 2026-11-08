@@ -28,10 +28,21 @@ export interface ExternalVm {
 	cdrom?: string;
 	/** Absent when QEMU was started without a usable monitor: the VM can then only be observed and killed. */
 	qmp?: QmpEndpoint;
-	/** TCP port of the VNC server on localhost, when there is one. */
+	/** TCP port of the VNC server, when there is one. */
 	vncPort?: number;
+	/** Host the VNC server listens on; absent = localhost. */
+	vncHost?: string;
+	/** Unix socket of the VNC server (`-vnc unix:/path`). */
+	vncSocket?: string;
+	/** The first serial port, when it is a socket QEMU listens on (`pty`, `stdio`, files … cannot be opened). */
+	serial?: SerialEndpoint;
 	machine?: string;
 	command: string;
+}
+
+/** A serial line QEMU serves on a socket. `telnet` = the stream carries telnet negotiation. */
+export interface SerialEndpoint extends QmpEndpoint {
+	telnet?: boolean;
 }
 
 /** `ps -axo pid=,command=` output → entries. */
@@ -120,6 +131,12 @@ export function parseMonitorAddress(value: string): QmpEndpoint | undefined {
 	return undefined;
 }
 
+/** `server`, `server=on`, `server=yes` … (QEMU's boolean option forms). */
+function isOn(options: Map<string, string>, key: string): boolean {
+	const value = options.get(key);
+	return value !== undefined && ['', 'on', 'yes', 'true', 'y'].includes(value.toLowerCase());
+}
+
 function chardevEndpoint(options: Map<string, string>): QmpEndpoint | undefined {
 	// `fd=` sockets (libvirt) are inherited descriptors nobody else can open.
 	if (options.has('fd')) return undefined;
@@ -129,6 +146,50 @@ function chardevEndpoint(options: Map<string, string>): QmpEndpoint | undefined 
 	if (Number.isInteger(port) && port > 0) return { host: options.get('host') || '127.0.0.1', port };
 	return undefined;
 }
+
+/** A connectable VNC server: TCP (`127.0.0.1:1`, `:0`) or a unix socket. `none`, `to=` ranges aside. */
+export function parseVncEndpoint(value: string): { host?: string; port?: number; socket?: string } | undefined {
+	const { head } = parseOptionValue(value);
+	const unix = /^unix:(.+)$/.exec(head);
+	if (unix) return { socket: unix[1] };
+	const port = parseVnc(value);
+	if (port === undefined) return undefined;
+	const host = /^\[?([^\]]*)\]?:\d+$/.exec(head)?.[1];
+	return { port, host: host && !isAnyAddress(host) ? host : undefined };
+}
+
+/** `0.0.0.0` / `::` listen everywhere: localhost reaches them. */
+function isAnyAddress(host: string): boolean {
+	return host === '0.0.0.0' || host === '::' || host === '';
+}
+
+/**
+ * `-serial` values QEMU listens on: `tcp:host:port,server`, `telnet:host:port,server`, `unix:/path,server`,
+ * optionally behind `mon:` (serial muxed with the monitor). Client-mode sockets (no `server`) connect out
+ * and cannot be opened from here.
+ */
+export function parseSerialAddress(value: string): SerialEndpoint | undefined {
+	const { head, options } = parseOptionValue(value.replace(/^mon:/, ''));
+	if (!isOn(options, 'server')) return undefined;
+	const unix = /^unix:(.+)$/.exec(head);
+	if (unix) return { socket: unix[1] };
+	const tcp = /^(tcp|telnet):\[?([^\]]*?)\]?:(\d+)$/.exec(head);
+	if (!tcp) return undefined;
+	const host = tcp[2]!;
+	return { host: isAnyAddress(host) ? '127.0.0.1' : host, port: Number(tcp[3]), ...(tcp[1] === 'telnet' ? { telnet: true } : {}) };
+}
+
+/** A listening `-chardev socket`, as a serial endpoint. */
+function chardevSerial(options: Map<string, string>): SerialEndpoint | undefined {
+	if (!isOn(options, 'server')) return undefined;
+	const endpoint = chardevEndpoint(options);
+	if (!endpoint) return undefined;
+	if (endpoint.host && isAnyAddress(endpoint.host)) endpoint.host = '127.0.0.1';
+	return isOn(options, 'telnet') ? { ...endpoint, telnet: true } : endpoint;
+}
+
+/** Devices whose chardev is a guest console: legacy UARTs, the PCI UART and virtio consoles (hvc0). */
+const SERIAL_DEVICES = new Set(['isa-serial', 'pci-serial', 'virtconsole', 'pl011']);
 
 /** `-vnc 127.0.0.1:1` / `:0` → TCP port; `unix:` and `none` have none. */
 export function parseVnc(value: string): number | undefined {
@@ -152,7 +213,10 @@ export function parseQemuCommand(entry: ProcessEntry): ExternalVm | undefined {
 	if (!argv[0] || !isQemuSystemBinary(argv[0])) return undefined;
 	const vm: ExternalVm = { pid: entry.pid, binary: argv[0], name: `qemu-${entry.pid}`, cpus: 1, memoryMB: 128, disks: [], command: entry.command };
 	const chardevs = new Map<string, QmpEndpoint | undefined>();
+	const serialChardevs = new Map<string, SerialEndpoint | undefined>();
 	let monitorChardev: string | undefined;
+	/** The first serial line, by chardev id when given that way; resolved after all chardevs are read. */
+	let serial: { endpoint?: SerialEndpoint; chardev?: string } | undefined;
 	for (let i = 1; i < argv.length; i++) {
 		const arg = argv[i]!.replace(/^--/, '-');
 		const value = argv[i + 1];
@@ -196,8 +260,25 @@ export function parseQemuCommand(entry: ProcessEntry): ExternalVm | undefined {
 				const { head, options } = parseOptionValue(value);
 				if (head === 'socket' || options.get('backend') === 'socket') {
 					const id = options.get('id');
-					if (id) chardevs.set(id, chardevEndpoint(options));
+					if (id) {
+						chardevs.set(id, chardevEndpoint(options));
+						serialChardevs.set(id, chardevSerial(options));
+					}
 				}
+				break;
+			}
+			case '-serial': {
+				if (serial) break;
+				const chardev = /^chardev:(.+)$/.exec(value)?.[1];
+				// `none` / `null` hold the slot without a line; anything else is the guest's first UART.
+				if (chardev) serial = { chardev };
+				else if (value !== 'none' && value !== 'null') serial = { endpoint: parseSerialAddress(value) };
+				break;
+			}
+			case '-device': {
+				const { head, options } = parseOptionValue(value);
+				const chardev = options.get('chardev');
+				if (!serial && chardev && SERIAL_DEVICES.has(head)) serial = { chardev };
 				break;
 			}
 			case '-mon': {
@@ -206,15 +287,30 @@ export function parseQemuCommand(entry: ProcessEntry): ExternalVm | undefined {
 				break;
 			}
 			case '-vnc':
-				vm.vncPort = parseVnc(value);
+				setVnc(vm, value);
 				break;
+			case '-display': {
+				// `-display vnc=:1` is another spelling of `-vnc :1`.
+				const vnc = parseOptionValue(value).options.get('vnc');
+				if (vnc) setVnc(vm, vnc);
+				break;
+			}
 			default:
 				continue;
 		}
 		i++;
 	}
 	if (!vm.qmp && monitorChardev) vm.qmp = chardevs.get(monitorChardev);
+	const line = serial?.chardev ? serialChardevs.get(serial.chardev) : serial?.endpoint;
+	if (line) vm.serial = line;
 	return vm;
+}
+
+function setVnc(vm: ExternalVm, value: string): void {
+	const endpoint = parseVncEndpoint(value);
+	vm.vncPort = endpoint?.port;
+	vm.vncHost = endpoint?.host;
+	vm.vncSocket = endpoint?.socket;
 }
 
 /** All QEMU VMs in a process list, minus the ones in `exclude` (the pids this extension manages). */

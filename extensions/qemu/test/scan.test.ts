@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findExternalVms, isQemuSystemBinary, parseMemory, parseMonitorAddress, parseOptionValue, parsePsList, parseQemuCommand, parseVnc } from '../src/scan';
+import { findExternalVms, isQemuSystemBinary, parseMemory, parseMonitorAddress, parseOptionValue, parsePsList, parseQemuCommand, parseSerialAddress, parseVnc, parseVncEndpoint } from '../src/scan';
 
 describe('parsePsList', () => {
 	it('reads pid and command', () => {
@@ -88,6 +88,45 @@ describe('parseQemuCommand', () => {
 
 	it('handles quoted paths with spaces', () => {
 		expect(parseQemuCommand({ pid: 16, command: 'qemu-system-x86_64 -hda "/My VMs/a b.img"' })?.disks).toEqual(['/My VMs/a b.img']);
+	});
+});
+
+describe('display and serial of a running QEMU', () => {
+	const parse = (args: string) => parseQemuCommand({ pid: 20, command: `qemu-system-x86_64 ${args}` })!;
+
+	it('reads VNC over TCP, a remote host and a unix socket', () => {
+		expect(parseVncEndpoint('0.0.0.0:2')).toEqual({ port: 5902, host: undefined });
+		expect(parseVncEndpoint('192.168.1.5:1,password=off')).toEqual({ port: 5901, host: '192.168.1.5' });
+		expect(parseVncEndpoint('unix:/tmp/v.sock')).toEqual({ socket: '/tmp/v.sock' });
+		expect(parseVncEndpoint('none')).toBeUndefined();
+		expect(parse('-display vnc=:4')).toMatchObject({ vncPort: 5904 });
+		expect(parse('-vnc unix:/run/vm.vnc')).toMatchObject({ vncSocket: '/run/vm.vnc' });
+	});
+
+	it('reads listening -serial sockets only', () => {
+		expect(parseSerialAddress('tcp:127.0.0.1:4555,server=on,wait=off')).toEqual({ host: '127.0.0.1', port: 4555 });
+		expect(parseSerialAddress('telnet::4556,server,nowait')).toEqual({ host: '127.0.0.1', port: 4556, telnet: true });
+		expect(parseSerialAddress('mon:telnet:0.0.0.0:4557,server=on,wait=off')).toEqual({ host: '127.0.0.1', port: 4557, telnet: true });
+		expect(parseSerialAddress('unix:/tmp/s.sock,server=on')).toEqual({ socket: '/tmp/s.sock' });
+		expect(parseSerialAddress('tcp:10.0.0.1:4555')).toBeUndefined();
+		expect(parseSerialAddress('stdio')).toBeUndefined();
+		expect(parseSerialAddress('pty')).toBeUndefined();
+	});
+
+	it('follows -serial chardev: and serial devices to their chardev', () => {
+		expect(parse('-chardev socket,id=s0,host=127.0.0.1,port=4600,server=on,wait=off,telnet=on -serial chardev:s0').serial).toEqual({
+			host: '127.0.0.1',
+			port: 4600,
+			telnet: true
+		});
+		expect(parse('-chardev socket,id=c,path=/tmp/c.sock,server=on,wait=off -device isa-serial,chardev=c').serial).toEqual({ socket: '/tmp/c.sock' });
+		expect(parse('-chardev socket,id=c,host=127.0.0.1,port=4601 -serial chardev:c').serial).toBeUndefined();
+	});
+
+	it('only the first serial port counts', () => {
+		expect(parse('-serial mon:stdio -serial tcp::4602,server=on').serial).toBeUndefined();
+		expect(parse('-serial none -serial tcp::4602,server=on').serial).toEqual({ host: '127.0.0.1', port: 4602 });
+		expect(parse('-m 512').serial).toBeUndefined();
 	});
 });
 

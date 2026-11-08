@@ -79,6 +79,7 @@ import {
 import { addCommand, hmpError, normalizeForward, removeCommand, sameHostSocket, validateForward } from './forwards';
 import { isPortConflict, SerialQueue } from './ports';
 import { gracefulShutdown } from './shutdown';
+import { telnetStream } from './telnet';
 
 const execFileAsync = promisify(execFile);
 const NODE_ID = 'local';
@@ -397,7 +398,7 @@ export class QemuConnection implements ClusterConnection {
 				const runtime = await this.runtime(def.id);
 				const state = await this.state(def, runtime);
 				const consoles: ConsoleKind[] = [];
-				if (!runtime || runtime.vncPort) consoles.push('vnc');
+				if (!runtime || runtime.vncPort || runtime.vncSocket) consoles.push('vnc');
 				if (def.serial) consoles.push('serial');
 				let mediaInserted = !!def.cdrom;
 				if (runtime && state !== 'stopped' && hasControlChannel(runtime)) {
@@ -996,16 +997,29 @@ export class QemuConnection implements ClusterConnection {
 		const def = await this.definition(vmId);
 		const runtime = await this.runtime(vmId);
 		if (!runtime) throw new ProviderError(`${def.name} is not running`, 'unavailable');
-		const port = kind === 'vnc' ? runtime.vncPort : runtime.serialPort;
-		if (!port && kind === 'vnc') throw new ProviderError('This VM has no VNC server on localhost (it may use a native window or a socket).', 'unavailable');
-		if (!port) throw new ProviderError('The serial console is disabled for this VM. Enable it in the settings and restart the VM.', 'unavailable');
+		const vnc = kind === 'vnc';
+		const port = vnc ? runtime.vncPort : runtime.serialPort;
+		const socketPath = vnc ? runtime.vncSocket : runtime.serialSocket;
+		if (!port && !socketPath) {
+			if (vnc) throw new ProviderError('This VM has no VNC server VM Manager can reach (it may use a native window).', 'unavailable');
+			throw new ProviderError(
+				def.origin === 'adopted'
+					? `${def.name} has no serial port on a socket (e.g. -serial telnet:127.0.0.1:4555,server=on,wait=off), so its serial console cannot be opened.`
+					: 'The serial console is disabled for this VM. Enable it in the settings and restart the VM.',
+				'unavailable'
+			);
+		}
+		const host = (vnc ? runtime.vncHost : runtime.serialHost) ?? '127.0.0.1';
 		const socket = await new Promise<net.Socket>((resolve, reject) => {
-			const s = net.connect({ port, host: '127.0.0.1' });
+			const s = socketPath ? net.connect({ path: socketPath }) : net.connect({ port: port!, host });
 			s.once('connect', () => resolve(s));
 			s.once('error', reject);
+		}).catch((error: Error) => {
+			throw new ProviderError(`Could not open the ${vnc ? 'display' : 'serial console'} of ${def.name} at ${socketPath ?? `${host}:${port}`}: ${error.message}`, 'unavailable');
 		});
-		socket.setNoDelay(true);
-		return { stream: socket, dispose: () => socket.destroy() };
+		if (!socketPath) socket.setNoDelay(true);
+		const stream = !vnc && runtime.serialTelnet ? telnetStream(socket) : socket;
+		return { stream, dispose: () => stream.destroy() };
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -1197,7 +1211,16 @@ export class QemuConnection implements ClusterConnection {
 		return (await this.scanRunning()).map((vm) => ({
 			id: String(vm.pid),
 			name: vm.name,
-			detail: `pid ${vm.pid} · ${vm.cpus} CPU · ${vm.memoryMB >= 1024 ? `${Math.round((vm.memoryMB / 1024) * 10) / 10} GB` : `${vm.memoryMB} MB`}${vm.disks.length ? ` · ${path.basename(vm.disks[0]!)}` : ''}`,
+			detail: [
+				`pid ${vm.pid}`,
+				`${vm.cpus} CPU`,
+				vm.memoryMB >= 1024 ? `${Math.round((vm.memoryMB / 1024) * 10) / 10} GB` : `${vm.memoryMB} MB`,
+				vm.disks.length ? path.basename(vm.disks[0]!) : undefined,
+				vm.vncPort || vm.vncSocket ? 'display' : undefined,
+				vm.serial ? 'serial' : undefined
+			]
+				.filter(Boolean)
+				.join(' · '),
 			controllable: !!vm.qmp,
 			hint: vm.qmp ? undefined : 'No control socket (-qmp): it can only be observed and powered off. Restart it from VM Manager for full control.'
 		}));
@@ -1223,7 +1246,7 @@ export class QemuConnection implements ClusterConnection {
 				cdrom: found.cdrom,
 				nic: 'none',
 				vga: 'std',
-				serial: false,
+				serial: !!found.serial,
 				notes: `Attached to an existing QEMU process (pid ${found.pid}).`,
 				origin: 'adopted',
 				createdAt: Date.now()
@@ -1234,6 +1257,12 @@ export class QemuConnection implements ClusterConnection {
 				qmpHost: found.qmp?.host,
 				qmpSocket: found.qmp?.socket,
 				vncPort: found.vncPort ?? 0,
+				vncHost: found.vncHost,
+				vncSocket: found.vncSocket,
+				serialPort: found.serial?.port,
+				serialHost: found.serial?.host,
+				serialSocket: found.serial?.socket,
+				serialTelnet: found.serial?.telnet,
 				startedAt: (await processStartedAt(found.pid)) ?? Date.now(),
 				external: true
 			};
@@ -1255,7 +1284,10 @@ export class QemuConnection implements ClusterConnection {
 			}
 			this.log.info(`Attached to pid ${found.pid} as ${def.name}${warning ? `: ${warning}` : ''}`);
 			this.changes.fire({ nodeId: NODE_ID, vmId: id });
-			return { vm: { id, name: def.name, state: 'running', cpus: def.cpus, memoryMB: def.memoryMB, origin: 'adopted', controllable: !warning }, warning };
+			const consoles: ConsoleKind[] = [];
+			if (runtime.vncPort || runtime.vncSocket) consoles.push('vnc');
+			if (def.serial) consoles.push('serial');
+			return { vm: { id, name: def.name, state: 'running', cpus: def.cpus, memoryMB: def.memoryMB, origin: 'adopted', controllable: !warning, consoles }, warning };
 		} catch (error) {
 			await fs.promises.rm(dir, { recursive: true, force: true });
 			throw error;
