@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { fieldDefaults, validateValues, type ClusterConnection, type DiskDevice, type FieldSchema, type PowerAction } from '@vmm/sdk';
+import { fieldDefaults, validateValues, type ClusterConnection, type DiskDevice, type FieldSchema, type PowerAction, type VmInfo } from '@vmm/sdk';
 import type { VmRef } from '../../shared/protocol';
 import type { ClusterStore } from '../clusters/ClusterStore';
 import type { ConnectionManager, VmLocation } from '../clusters/ConnectionManager';
@@ -446,6 +446,9 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}
 	}
 
+	const OPEN_DISPLAY = 'Open Display';
+	const OPEN_SERIAL = 'Open Serial Console';
+
 	async function attachRunningVm(arg: Arg): Promise<void> {
 		const nodeRef = await resolveNode(arg, 'adopt');
 		if (!nodeRef) return;
@@ -471,17 +474,22 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			);
 			if (!picked?.length) return;
 			const warnings: string[] = [];
-			let last: string | undefined;
+			let last: VmInfo | undefined;
 			for (const item of picked) {
 				const result = await connection.adoptExternalVm(nodeRef.nodeId, item.id);
-				last = result.vm.id;
+				last = result.vm;
 				if (result.warning) warnings.push(result.warning);
 			}
 			await manager.refresh(nodeRef.clusterId);
-			if (last) await tree.reveal({ kind: 'vm', ...nodeRef, vmId: last }).then(undefined, () => undefined);
-			const summary = `Attached to ${picked.length} virtual machine${picked.length === 1 ? '' : 's'}.`;
-			if (warnings.length) void vscode.window.showWarningMessage(`${summary} ${warnings.join(' ')}`);
-			else void vscode.window.showInformationMessage(summary);
+			if (last) await tree.reveal({ kind: 'vm', ...nodeRef, vmId: last.id }).then(undefined, () => undefined);
+			const summary = picked.length === 1 && last ? `Attached to ${last.name}.` : `Attached to ${picked.length} virtual machines.`;
+			// One VM: offer its display / serial console right away, when the process exposes them.
+			const offered = picked.length === 1 && last ? (last.consoles ?? []) : [];
+			const actions = [...(offered.includes('vnc') ? [OPEN_DISPLAY] : []), ...(offered.includes('serial') ? [OPEN_SERIAL] : [])];
+			const choice = warnings.length
+				? await vscode.window.showWarningMessage(`${summary} ${warnings.join(' ')}`, ...actions)
+				: await vscode.window.showInformationMessage(summary, ...actions);
+			if (last && choice) await consoles.open({ ...nodeRef, vmId: last.id }, choice === OPEN_DISPLAY ? 'vnc' : 'serial');
 		} catch (error) {
 			await showError('Could not attach to the running virtual machine', error);
 		}

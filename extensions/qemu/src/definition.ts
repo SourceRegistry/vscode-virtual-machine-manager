@@ -49,7 +49,14 @@ export interface VmRuntime {
 	/** Started outside the extension (adopted): ports and sockets are the original process's. */
 	external?: boolean;
 	vncPort: number;
+	/** Adopted VM: VNC host when not localhost, or its unix socket. */
+	vncHost?: string;
+	vncSocket?: string;
 	serialPort?: number;
+	/** Adopted VM: serial host when not localhost, its unix socket, and whether it speaks telnet. */
+	serialHost?: string;
+	serialSocket?: string;
+	serialTelnet?: boolean;
 	/** Localhost port of the guest agent channel (absent for VMs started before it existed). */
 	agentPort?: number;
 	startedAt: number;
