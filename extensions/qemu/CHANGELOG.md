@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.5.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.4.0...vm-manager-qemu-v0.5.0) (2026-11-08)
+
+
+### Features
+
+* **qemu:** open the display and serial console of attached VMs ([62f441f](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/62f441f1940a47a6a844a8d1a5e79e7fc245e26b))
+
 # [0.4.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.3.0...vm-manager-qemu-v0.4.0) (2026-11-05)
 
 
