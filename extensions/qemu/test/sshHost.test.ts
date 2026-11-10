@@ -215,6 +215,24 @@ describe('SshHost through a stand-in ssh', () => {
 		await expect(host.connect(port)).rejects.toThrow(/nothing is listening|forbids/);
 	});
 
+	it.skipIf(process.platform === 'win32')('opens a unix socket on the host, and says when it is not there', async () => {
+		const socketPath = path.join(dir, 's.sock');
+		const unix = net.createServer((socket) => socket.end('hello\n'));
+		await new Promise<void>((r) => unix.listen(socketPath, r));
+		const stream = await host.connectSocket(socketPath);
+		expect(await new Promise<string>((resolve) => stream.once('data', (d: Buffer) => resolve(d.toString())))).toBe('hello\n');
+		stream.destroy();
+		unix.close();
+		await expect(host.connectSocket(path.join(dir, 'missing.sock'))).rejects.toThrow();
+	});
+
+	it.skipIf(process.platform === 'win32')('knows when a process started', async () => {
+		const at = await host.processStartedAt(process.pid);
+		expect(at).toBeLessThanOrEqual(Date.now());
+		expect(at).toBeGreaterThan(Date.now() - 24 * 3600 * 1000 * 30);
+		expect(await host.processStartedAt(2 ** 22 - 7)).toBeUndefined();
+	});
+
 	it('finds a free port on the host, within a range and outside the ones to avoid', async () => {
 		const port = await host.freePort(undefined, undefined, new Set());
 		expect(port).toBeGreaterThanOrEqual(20000);

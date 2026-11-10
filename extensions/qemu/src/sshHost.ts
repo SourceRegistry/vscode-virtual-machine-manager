@@ -11,8 +11,9 @@ import * as path from 'node:path';
 import { Duplex } from 'node:stream';
 import type { DirEntry, ExecOptions, Host, HostInfo } from './host';
 import { sleepMs } from './host';
+import { parseEtime } from './hostProcess';
 import type { ProcessSample } from './inspect';
-import { parseProcStat } from './inspect';
+import { parseProcStat, parsePsSample } from './inspect';
 import { parsePsList, type ProcessEntry } from './scan';
 
 export interface SshTarget {
@@ -190,8 +191,10 @@ export class SshStream extends Duplex {
 
 	failure(): string {
 		const text = this.stderr.trim();
-		return /connect.*failed|Connection refused|administratively prohibited/i.test(text)
-			? 'nothing is listening on that port, or the host forbids port forwarding (AllowTcpForwarding)'
+		return /socat or nc is needed/i.test(text)
+			? 'socat or nc is needed on the host to reach a unix socket'
+			: /connect.*failed|Connection refused|administratively prohibited/i.test(text)
+				? 'nothing is listening on that port, or the host forbids port forwarding (AllowTcpForwarding)'
 			: explainSshError(text, this.target);
 	}
 
@@ -371,8 +374,25 @@ export class SshHost implements Host {
 		await this.run(`kill -${name === 'SIGKILL' ? 'KILL' : 'TERM'} ${Math.trunc(pid)}`, { timeout: 30_000 });
 	}
 
-	async connect(port: number, address = '127.0.0.1'): Promise<Duplex> {
-		const child = spawn(this.command, [...this.base, '-W', `${address}:${port}`, this.target.host], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env });
+	connect(port: number, address = '127.0.0.1'): Promise<Duplex> {
+		return this.tunnel([...this.base, '-W', `${address}:${port}`, this.target.host]);
+	}
+
+	/** A unix socket has no `-W`: `socat` (or `nc -U`) on the host joins it to the ssh session. */
+	connectSocket(socketPath: string): Promise<Duplex> {
+		const q = shq(socketPath);
+		const command = `if command -v socat >/dev/null 2>&1; then exec socat - UNIX-CONNECT:${q}; elif command -v nc >/dev/null 2>&1; then exec nc -U ${q}; else echo 'connect failed: socat or nc is needed on the host to reach a unix socket' >&2; exit 1; fi`;
+		return this.tunnel([...this.base, this.target.host, command]);
+	}
+
+	async processStartedAt(pid: number): Promise<number | undefined> {
+		const result = await this.run(`ps -o etime= -p ${Math.trunc(pid)}`, { timeout: 30_000 });
+		const seconds = result.code === 0 ? parseEtime(result.stdout) : undefined;
+		return seconds === undefined ? undefined : Date.now() - seconds * 1000;
+	}
+
+	private async tunnel(args: string[]): Promise<Duplex> {
+		const child = spawn(this.command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env });
 		const stream = new SshStream(child, this.target);
 		// `-W` has no "connected" signal: it either dies within moments or stays. Wait for the first
 		// byte (VNC and QMP greet), a failure, or a short quiet period (a serial port says nothing).
@@ -429,9 +449,14 @@ export class SshHost implements Host {
 
 	async sampleProcess(pid: number): Promise<ProcessSample | undefined> {
 		const result = await this.run(`cat /proc/${Math.trunc(pid)}/stat && echo ${MARKER} && cat /proc/${Math.trunc(pid)}/status`, { timeout: 30_000 });
-		if (result.code !== 0) return undefined;
-		const [stat, status] = result.stdout.split(`${MARKER}\n`);
-		return stat && status ? parseProcStat(stat, status) : undefined;
+		if (result.code === 0) {
+			const [stat, status] = result.stdout.split(`${MARKER}\n`);
+			const sample = stat && status ? parseProcStat(stat, status) : undefined;
+			if (sample) return sample;
+		}
+		// No /proc (a stand-in host in tests): `ps` knows CPU time and memory too.
+		const ps = await this.run(`ps -o time=,rss= -p ${Math.trunc(pid)}`, { timeout: 30_000 });
+		return ps.code === 0 ? parsePsSample(ps.stdout) : undefined;
 	}
 
 	async listProcesses(): Promise<ProcessEntry[]> {

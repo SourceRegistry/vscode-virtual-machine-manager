@@ -3,6 +3,7 @@
  * Every command and tunnel goes through `fakeSsh.mjs`, which stands in for the ssh client and runs them on this
  * machine, so this proves the remote code path (shell commands, file access, `-W` tunnels), not sshd itself.
  */
+import { execFileSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -39,7 +40,7 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider on an SSH host', () =>
 	it('keeps its definition on the host, and offers only what works there', async () => {
 		expect(fs.existsSync(path.join(dir, 'remote vms', vmId, 'vm.json'))).toBe(true);
 		expect(fs.existsSync(path.join(dir, 'remote vms', vmId, 'disk0.qcow2'))).toBe(true);
-		expect(connection.capabilities).toMatchObject({ create: true, snapshots: true, clone: true, consoles: ['vnc', 'serial'], adopt: false, passthrough: false, importFolder: false });
+		expect(connection.capabilities).toMatchObject({ create: true, snapshots: true, clone: true, consoles: ['vnc', 'serial'], adopt: true, passthrough: false, importFolder: false });
 		const nodes = await connection.listNodes();
 		expect(nodes[0]).toMatchObject({ status: 'online' });
 		expect(nodes[0]!.facts?.some((f) => f.label === 'Platform' && f.value.includes('lab'))).toBe(true);
@@ -100,4 +101,62 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider on an SSH host', () =>
 		await connection.deleteVm('local', clone.id, { deleteDisks: true });
 		expect(fs.existsSync(path.join(dir, 'remote vms', clone.id))).toBe(false);
 	}, 90_000);
+
+	describe.skipIf(process.platform === 'win32')('QEMU started outside the extension, on the host', () => {
+		const children: Array<ReturnType<typeof spawn>> = [];
+		afterAll(() => children.forEach((c) => c.kill('SIGKILL')));
+
+		const outside = async (name: string, qmp: string, extra: string[] = []) => {
+			const disk = path.join(dir, `${name}.qcow2`);
+			execFileSync('qemu-img', ['create', '-f', 'qcow2', disk, '64M']);
+			const child = spawn('qemu-system-x86_64', ['-name', name, '-machine', 'q35', '-accel', 'tcg', '-m', '128', '-smp', '1', '-drive', `file=${disk},if=none,id=d0,format=qcow2`, '-device', 'ide-hd,drive=d0,bus=ide.0', '-qmp', qmp, ...extra], { stdio: 'ignore' });
+			children.push(child);
+			return child;
+		};
+
+		it('attaches over a unix socket, observes it and powers it off', async () => {
+			const socket = path.join(dir, 'outside.sock');
+			const child = await outside('remote-outside', `unix:${socket},server=on,wait=off`, ['-display', 'none']);
+			for (let i = 0; i < 50 && !fs.existsSync(socket); i++) await new Promise((r) => setTimeout(r, 100));
+
+			const found = (await connection.scanExternalVms!('local')).find((v) => v.name === 'remote-outside');
+			expect(found).toMatchObject({ id: String(child.pid), controllable: true });
+			const { vm, warning } = await connection.adoptExternalVm!('local', found!.id);
+			expect(warning).toBeUndefined();
+			expect(vm).toMatchObject({ name: 'remote-outside', origin: 'adopted', state: 'running', controllable: true });
+			expect((await connection.scanExternalVms!('local')).some((v) => v.name === 'remote-outside')).toBe(false);
+
+			// The definition is on the host, next to the ones this extension made.
+			expect(fs.existsSync(path.join(dir, 'remote vms', vm.id, 'runtime.json'))).toBe(true);
+			expect((await connection.getVmDetails!('local', vm.id)).disks.find((d) => d.kind === 'disk')?.format).toBe('qcow2');
+			expect((await connection.getVmStats!('local', vm.id)).memoryUsedMB).toBeGreaterThan(0);
+
+			await connection.power('local', vm.id, 'stop');
+			for (let i = 0; i < 30 && child.exitCode === null && child.signalCode === null; i++) await new Promise((r) => setTimeout(r, 100));
+			expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+			expect((await connection.listVms('local')).some((v) => v.id === vm.id)).toBe(false);
+		}, 90_000);
+
+		it('attaches over TCP and opens the display it has', async () => {
+			const qmpPort = await (await import('../src/QemuProvider')).freePort();
+			const child = await outside('remote-tcp', `tcp:127.0.0.1:${qmpPort},server=on,wait=off`, ['-display', 'none', '-vnc', '127.0.0.1:41']);
+			await new Promise((r) => setTimeout(r, 1500));
+			const found = (await connection.scanExternalVms!('local')).find((v) => v.name === 'remote-tcp');
+			expect(found).toMatchObject({ controllable: true });
+			const { vm } = await connection.adoptExternalVm!('local', found!.id);
+			expect((await connection.listVms('local')).find((v) => v.id === vm.id)).toMatchObject({ state: 'running', consoles: ['vnc'] });
+			const vnc = await connection.openConsole!('local', vm.id, 'vnc');
+			const banner = await new Promise<string>((resolve, reject) => {
+				vnc.stream.once('data', (d: Buffer) => resolve(d.toString('latin1')));
+				vnc.stream.once('error', reject);
+				setTimeout(() => reject(new Error('no VNC banner')), 5000);
+			});
+			expect(banner).toMatch(/^RFB /);
+			vnc.dispose();
+			// Detach without touching the process.
+			await connection.deleteVm('local', vm.id, { deleteDisks: false });
+			expect(child.exitCode).toBeNull();
+			expect(fs.existsSync(path.join(dir, 'remote vms', vm.id))).toBe(false);
+		}, 90_000);
+	});
 });

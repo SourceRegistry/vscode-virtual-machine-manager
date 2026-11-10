@@ -28,7 +28,7 @@ Create and run QEMU virtual machines from VS Code on Windows, Linux and macOS.
 * **Host device passthrough** (experimental): hot-plug a USB device; on Linux, bind a PCI device to
   `vfio-pci` for a VM. Host-changing steps are listed and confirmed first. Not available on macOS
   and Windows.
-* **QEMU on another Linux computer over SSH.** Add a cluster, set **Connection** to **Remote (SSH)** and fill in **SSH host** (a name, an address or an alias of your `~/.ssh/config`) and everything above, except attach/import and passthrough, works on that computer: VMs, disks, snapshots and clones live there, and the display, serial console, control channel and guest agent are carried through the SSH connection. See [QEMU over SSH](#qemu-over-ssh).
+* **QEMU on another Linux computer over SSH.** Add a cluster, set **Connection** to **Remote (SSH)** and fill in **SSH host** (a name, an address or an alias of your `~/.ssh/config`) and everything above, including attaching to running VMs, except import from a folder and passthrough, works on that computer: VMs, disks, snapshots and clones live there, and the display, serial console, control channel and guest agent are carried through the SSH connection. See [QEMU over SSH](#qemu-over-ssh).
 * Machines keep running in the background when VS Code closes and are re-attached on start.
 * VNC, QMP and serial endpoints listen on `127.0.0.1` only (of the host, for an SSH host).
 
@@ -50,7 +50,8 @@ display, serial console and QMP are reached with `ssh -W` to the loopback ports 
 * VM definitions and disks live on the host, in **VM storage directory** (default `~/vmm-qemu/vms`). Image paths, such as an ISO, are paths on the host: type them, there is no file dialog.
 * A background connection cannot ask you anything, so an unknown host key fails with a message: connect once in a terminal (`ssh <host>`) to accept it. A key with a passphrase must be in ssh-agent.
 * VMs keep running on the host when VS Code closes, as they do locally.
-* Not available on an SSH host: attaching to processes started elsewhere, importing from a folder, USB/PCI passthrough. `vmm.qemu.path` only applies to this computer; set **QEMU directory** on the cluster instead.
+* **Attach** works there too: it lists the `qemu-system-*` processes running on the host. Their control and display sockets are reached through the connection; a unix socket needs `socat` or `nc` (OpenBSD netcat) on the host, and a socket owned by another user needs permission to open it.
+* Not available on an SSH host: importing from a folder, USB/PCI passthrough. `vmm.qemu.path` only applies to this computer; set **QEMU directory** on the cluster instead.
 * SSH on Windows works through Windows' OpenSSH client but without connection sharing, so it is slower.
 
 ## Known limits

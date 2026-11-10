@@ -105,7 +105,7 @@ QEMU only, through the QEMU provider:
 | Details page with live charts | ✓ | ✓ | ✓ |
 | Change or eject ISO | ✓ | ✓ | |
 | Port forwards | | ✓ | |
-| Attach and import | | ✓ | |
+| Attach and import | | ✓ (attach also on an SSH host) | |
 | Host device passthrough | PCI (DDA), experimental | USB; PCI (VFIO, Linux), experimental | |
 | Snapshots | | disks only (qcow2) | |
 | Clone | | ✓ | |

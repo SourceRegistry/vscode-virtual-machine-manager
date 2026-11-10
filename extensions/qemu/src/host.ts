@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import type { Duplex } from 'node:stream';
 import { promisify } from 'node:util';
 import { availableMemoryMB, CpuLoadSampler } from './hostInfo';
-import { listProcesses, sampleProcess } from './hostProcess';
+import { listProcesses, processStartedAt, sampleProcess } from './hostProcess';
 import type { ProcessSample } from './inspect';
 import type { ProcessEntry } from './scan';
 
@@ -67,6 +67,10 @@ export interface Host {
 	signal(pid: number, name: 'SIGTERM' | 'SIGKILL'): Promise<void>;
 	/** A stream to a TCP port on the host's loopback. */
 	connect(port: number, address?: string): Promise<Duplex>;
+	/** A stream to a unix socket on the host (a QEMU started by someone else may only have those). */
+	connectSocket(socketPath: string): Promise<Duplex>;
+	/** When the process started (epoch ms), or undefined when unknown. */
+	processStartedAt(pid: number): Promise<number | undefined>;
 	/** A TCP port nobody listens on, within [min, max] when given. */
 	freePort(min?: number, max?: number, avoid?: ReadonlySet<number>): Promise<number>;
 	info(): Promise<HostInfo>;
@@ -208,6 +212,18 @@ export class LocalHost implements Host {
 			});
 			socket.once('error', reject);
 		});
+	}
+
+	connectSocket(socketPath: string): Promise<Duplex> {
+		return new Promise((resolve, reject) => {
+			const socket = net.connect({ path: socketPath });
+			socket.once('connect', () => resolve(socket));
+			socket.once('error', reject);
+		});
+	}
+
+	processStartedAt(pid: number): Promise<number | undefined> {
+		return processStartedAt(pid);
 	}
 
 	freePort(min?: number, max?: number, avoid?: ReadonlySet<number>): Promise<number> {

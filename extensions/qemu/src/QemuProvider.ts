@@ -50,7 +50,7 @@ import { freeLocalPort, LocalHost, type Host } from './host';
 import { SshHost, validateSshTarget } from './sshHost';
 import { cloneDefinition } from './clone';
 import { commonSnapshots, qmpSnapshots, snapshotNameProblem, type QemuSnapshotInfo, type QmpSnapshotBlock } from './snapshots';
-import { processStartedAt, walkFiles } from './hostProcess';
+import { walkFiles } from './hostProcess';
 import { iommuEnabled, listPciHost, listUsbHost, pciDriver, runPrivileged } from './hostDevices';
 import {
 	assessVfio,
@@ -364,8 +364,8 @@ export class QemuConnection implements ClusterConnection {
 		private readonly host: Host = new LocalHost(),
 		private readonly cpuCount = os.cpus().length
 	) {
-		// Attaching, importing from a folder and PCI/USB passthrough work on this computer's own processes and devices.
-		this.capabilities = host.remote ? { ...this.baseCapabilities, adopt: false, passthrough: false, importFolder: false, remotePaths: true } : this.baseCapabilities;
+		// Importing from a folder and PCI/USB passthrough read this computer's own files and devices.
+		this.capabilities = host.remote ? { ...this.baseCapabilities, passthrough: false, importFolder: false, remotePaths: true } : this.baseCapabilities;
 	}
 
 	/** Whether guests of this architecture run natively on the host (the VM host, not this computer). */
@@ -448,10 +448,11 @@ export class QemuConnection implements ClusterConnection {
 		const existing = this.qmp.get(id);
 		if (existing) return existing;
 		const port = runtime.qmpPort;
+		const timeout = this.host.remote ? 10_000 : 3000;
 		const target = runtime.qmpSocket
-			? QmpClient.connectSocket(runtime.qmpSocket)
+			? this.host.connectSocket(runtime.qmpSocket).then((stream) => QmpClient.attach(stream, timeout))
 			: port
-				? this.host.connect(port, runtime.qmpHost).then((stream) => QmpClient.attach(stream, this.host.remote ? 10_000 : 3000))
+				? this.host.connect(port, runtime.qmpHost).then((stream) => QmpClient.attach(stream, timeout))
 				: undefined;
 		if (!target) {
 			return Promise.reject(new ProviderError('This VM was started outside VM Manager without a control socket, so it can only be observed and powered off. Restart it from here to manage it fully.', 'unsupported'));
@@ -660,7 +661,7 @@ export class QemuConnection implements ClusterConnection {
 			this.log.info(`Created ${name} in ${dir}`);
 			return { id, name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB };
 		} catch (error) {
-			await fs.promises.rm(dir, { recursive: true, force: true });
+			await this.host.rm(dir, { recursive: true });
 			throw error;
 		}
 	}
@@ -914,7 +915,7 @@ export class QemuConnection implements ClusterConnection {
 			this.changes.fire({ nodeId: NODE_ID, vmId: id });
 			return { id, name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB };
 		} catch (error) {
-			await fs.promises.rm(dir, { recursive: true, force: true });
+			await this.host.rm(dir, { recursive: true });
 			throw error;
 		}
 	}
@@ -1313,14 +1314,7 @@ export class QemuConnection implements ClusterConnection {
 			);
 		}
 		const host = (vnc ? runtime.vncHost : runtime.serialHost) ?? '127.0.0.1';
-		const socket = await (socketPath
-			? new Promise<Duplex>((resolve, reject) => {
-					const s = net.connect({ path: socketPath });
-					s.once('connect', () => resolve(s));
-					s.once('error', reject);
-				})
-			: this.host.connect(port!, host)
-		).catch((error: Error) => {
+		const socket = await (socketPath ? this.host.connectSocket(socketPath) : this.host.connect(port!, host)).catch((error: Error) => {
 			throw new ProviderError(`Could not open the ${vnc ? 'display' : 'serial console'} of ${def.name} at ${socketPath ?? `${host}:${port}`}: ${error.message}`, 'unavailable');
 		});
 		const stream = !vnc && runtime.serialTelnet ? telnetStream(socket) : socket;
@@ -1536,7 +1530,7 @@ export class QemuConnection implements ClusterConnection {
 		if (!found) throw new ProviderError('That QEMU process is gone, or is already managed. Scan again.', 'notFound');
 		const id = randomUUID();
 		const dir = this.dir(id);
-		await fs.promises.mkdir(dir, { recursive: true });
+		await this.host.mkdir(dir);
 		try {
 			const def: VmDefinition = {
 				id,
@@ -1568,11 +1562,11 @@ export class QemuConnection implements ClusterConnection {
 				serialHost: found.serial?.host,
 				serialSocket: found.serial?.socket,
 				serialTelnet: found.serial?.telnet,
-				startedAt: (await processStartedAt(found.pid)) ?? Date.now(),
+				startedAt: (await this.host.processStartedAt(found.pid)) ?? Date.now(),
 				external: true
 			};
 			// Runtime first: a definition without one is an adopted VM that is gone, and gets cleaned up.
-			await fs.promises.writeFile(path.join(dir, 'runtime.json'), JSON.stringify(runtime, null, 2));
+			await this.host.writeFile(this.host.path.join(dir, 'runtime.json'), JSON.stringify(runtime, null, 2));
 			await this.saveDefinition(def);
 			let warning: string | undefined;
 			if (!found.qmp) {
@@ -1584,7 +1578,7 @@ export class QemuConnection implements ClusterConnection {
 					// QMP serves one client at a time: libvirt, UTM or another tool may hold it.
 					this.closeQmp(id);
 					warning = `Could not talk to the control socket of ${def.name} (${(error as Error).message}). Another program may be using it; it is listed as observe-only until it is free.`;
-					await fs.promises.writeFile(path.join(dir, 'runtime.json'), JSON.stringify({ ...runtime, qmpPort: 0, qmpSocket: undefined }, null, 2));
+					await this.host.writeFile(this.host.path.join(dir, 'runtime.json'), JSON.stringify({ ...runtime, qmpPort: 0, qmpSocket: undefined }, null, 2));
 				}
 			}
 			this.log.info(`Attached to pid ${found.pid} as ${def.name}${warning ? `: ${warning}` : ''}`);
@@ -1594,7 +1588,7 @@ export class QemuConnection implements ClusterConnection {
 			if (def.serial) consoles.push('serial');
 			return { vm: { id, name: def.name, state: 'running', cpus: def.cpus, memoryMB: def.memoryMB, origin: 'adopted', controllable: !warning, consoles }, warning };
 		} catch (error) {
-			await fs.promises.rm(dir, { recursive: true, force: true });
+			await this.host.rm(dir, { recursive: true });
 			throw error;
 		}
 	}
