@@ -1,6 +1,6 @@
 // Renders the Marketplace icons (256×256 PNG; the Marketplace does not accept SVG icons) from
 // media/marketplace/icon.svg (512×512). Provider icons are the same artwork with a badge holding the
-// platform's logo (media/marketplace/hyperv.svg, qemu.svg, proxmox.svg), so the extensions read as one
+// platform's logo (media/marketplace/hyperv.svg, qemu.svg, proxmox.svg, libvirt.svg), so the extensions read as one
 // family. Run after changing the artwork: `node scripts/render-icons.mjs`.
 import { Resvg } from '@resvg/resvg-js';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -22,7 +22,10 @@ const BADGE = { cx: 418, cy: 418, r: 80, ring: 12, ringColor: '#101B2E' };
 function badge(file, scale) {
 	const source = artwork(file);
 	const open = /<svg\b[^>]*>/.exec(source)?.[0];
-	const inner = /<svg\b[^>]*>([\s\S]*)<\/svg>/.exec(source)?.[1];
+	// Editor metadata (Inkscape) needs namespaces declared on the outer element, which nesting drops: it is not artwork.
+	const inner = /<svg\b[^>]*>([\s\S]*)<\/svg>/.exec(source)?.[1]
+		?.replace(/<sodipodi:namedview\b[\s\S]*?<\/sodipodi:namedview>|<sodipodi:namedview\b[^>]*\/>|<metadata\b[\s\S]*?<\/metadata>/g, '')
+		.replace(/\s(?:inkscape|sodipodi):[\w-]+="[^"]*"/g, '');
 	if (!open || inner === undefined) throw new Error(`No SVG content in media/marketplace/${file}`);
 	const viewBox =
 		/viewBox="([^"]+)"/.exec(open)?.[1] ??
@@ -41,7 +44,9 @@ const icons = [
 	{ out: 'extensions/hyperv/media/icon.png', svg: withBadge('hyperv.svg', 1.4) },
 	// The QEMU tail reaches the corner of its box: 1.3 keeps the diagonal inside the badge.
 	{ out: 'extensions/qemu/media/icon.png', svg: withBadge('qemu.svg', 1.3) },
-	{ out: 'extensions/proxmox/media/icon.png', svg: withBadge('proxmox.svg', 1.4) }
+	{ out: 'extensions/proxmox/media/icon.png', svg: withBadge('proxmox.svg', 1.4) },
+	// The official libvirt square logo (https://libvirt.org/logos/): its tin is rotated, so it needs the same room as the QEMU tail.
+	{ out: 'extensions/libvirt/media/icon.png', svg: withBadge('libvirt.svg', 1.75) }
 ];
 
 for (const { out, svg } of icons) {
