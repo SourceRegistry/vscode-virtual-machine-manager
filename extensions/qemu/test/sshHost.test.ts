@@ -142,7 +142,11 @@ describe('SshHost through a stand-in ssh', () => {
 		// Spawn Node explicitly so Windows does not try to execute the .mjs file as a native program.
 		host = new SshHost({ host: 'lab' }, { command: process.execPath, commandArgs: [FAKE_SSH], anyPlatform: true });
 		await host.ping();
-		server = net.createServer((socket) => socket.end('RFB 003.008\n'));
+		server = net.createServer((socket) => {
+			// The client hangs up abruptly; Windows reports that as ECONNRESET on this side.
+			socket.on('error', () => undefined);
+			socket.end('RFB 003.008\n');
+		});
 		await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
 		serverPort = (server.address() as net.AddressInfo).port;
 	});
@@ -218,7 +222,10 @@ describe('SshHost through a stand-in ssh', () => {
 
 	it.skipIf(process.platform === 'win32')('opens a unix socket on the host, and says when it is not there', async () => {
 		const socketPath = path.join(dir, 's.sock');
-		const unix = net.createServer((socket) => socket.end('hello\n'));
+		const unix = net.createServer((socket) => {
+			socket.on('error', () => undefined);
+			socket.end('hello\n');
+		});
 		await new Promise<void>((r) => unix.listen(socketPath, r));
 		const stream = await host.connectSocket(socketPath);
 		expect(await new Promise<string>((resolve) => stream.once('data', (d: Buffer) => resolve(d.toString())))).toBe('hello\n');
