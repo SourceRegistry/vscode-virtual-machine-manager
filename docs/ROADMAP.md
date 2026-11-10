@@ -188,8 +188,20 @@ Details page, card **Host devices** (loaded on demand: listing USB can be slow).
 
 ## Phase 9: `feat/qemu-remote-ssh`
 
-- [ ] QEMU cluster over SSH: spawn and control `qemu-system` on a remote host
-- [ ] QMP and VNC tunneled over SSH via system `ssh` (agent and keys), no new dependency
+Status: **built** on `feat/remote-ssh-connect`; verified against real QEMU through a stand-in for `ssh` (same commands, same tunnels), not yet against a real remote machine.
+
+- [x] QEMU cluster over SSH: the provider talks to a `Host` (`host.ts`: `LocalHost`, `sshHost.ts`: `SshHost`); the local behaviour is unchanged. Spawns, controls and stops `qemu-system` on the remote host; definitions, disks, runtime files live there
+- [x] System `ssh`, no new dependency: agent, keys, `~/.ssh/config` aliases and `ProxyJump`, `known_hosts` all apply; `BatchMode` (never prompts, readable errors for host keys / permissions / DNS); connection sharing (`ControlMaster`) where the client supports it
+- [x] QMP, VNC, serial and the guest agent tunnelled with `ssh -W` to the host's loopback ports (nothing listens on this computer); a failed tunnel says why (nothing listening, forwarding forbidden)
+- [x] Cluster form: **Connection** choice (Local or Remote (SSH)); for SSH: host / user / port / key; the QEMU directory and VM storage directory are paths on the host; no file dialog for host paths (`FieldSchema.remotePath`, `Capabilities.remotePaths`; Insert Media asks for a path)
+- [x] SSH host picker (as in Remote - SSH): hosts from `~/.ssh/config` and its `Include`s (honours `remote.SSH.configFile`), search, `user@host` typed directly, **Add New SSH Host…** (previewed and confirmed before it is appended; backup kept) and **Configure SSH Hosts…** (opens the file; the list reloads on save)
+- [x] Host facts for the node card (CPU, memory, platform) from /proc; Linux hosts only (the connection test says so otherwise)
+- [x] Attach to running QEMU on the host: scan of the host's processes, QMP / display / serial over TCP (`-W`) or unix sockets (`socat` / `nc -U` through ssh), start time and stats from the host
+- [x] Capabilities cut to what works there: no folder import or passthrough
+- [x] Tests: quoting and injection guards, argument building, error explanations, parsers, the host operations through a stand-in ssh (files, detached processes, tunnels, ports), and a real QEMU on the "remote" host: create, start, details, stats, VNC banner and serial through tunnels, media, port forward, snapshot, revert, clone, delete
+- [ ] Manual check against a real remote Linux machine (real sshd, real network latency, host key prompt, jump host)
+- [x] The form only asks what the ssh config does not answer (user, port, key); sign-in is agent / key file / password, a key skips the password question and the other way round; a password sits in the keychain and reaches ssh through an `SSH_ASKPASS` helper that answers password prompts only. Verified: question logic, the helper's behaviour; **not** against a real sshd with password login
+- [ ] Not done: key passphrase prompts; import from a folder on a remote host; passthrough on a remote host; macOS and Windows remote hosts; a remote file browser for ISO paths; a cheaper way to poll many VMs (each poll is a few ssh commands, fine with connection sharing, slower without)
 
 ## Phase 10: `feat/qemu-arm64`
 
@@ -255,20 +267,29 @@ Status: **in progress** on `feat/snapshots`. QEMU snapshots work end to end on t
 
 ### Phase 13: `feat/remote-ssh-connect`  (Local: yes)
 
-The VS Code-specific edge: work inside the VM from the editor.
-- [ ] `VM: Open in Remote-SSH`: host and port from a port forward (QEMU user networking) or guest IP; user from a per-VM setting
-- [ ] Offer to add an `~/.ssh/config` entry (shown before writing, never silent)
-- [ ] Offer to add a public key to the guest (needs guest agent or cloud-init, see phase 14)
-- [ ] `VM: Add SSH Port Forward` shortcut (uses the phase 5 forwards)
-- [ ] Tests: ssh config rendering, host selection. Manual: arm64 Linux guest on the Mac, `ssh` over `hostfwd`
+Status: **built** on `feat/remote-ssh-connect` (stacked on `feat/snapshots`); automated checks done, not yet clicked through by hand.
+
+- [x] `VM: Connect with Remote-SSH…` (`src/extension/ssh/connect.ts`): target from the VM's details (`chooseSshTarget`: a TCP forward to guest port 22 first, else a reachable IPv4 address; `NicDevice.reachable: false` keeps QEMU's NAT address out), Remote - SSH installed check (offers to install), SSH banner probe before connecting (QEMU's forward accepts connections even with no sshd behind it), then Remote - SSH's `opensshremotes.openEmptyWindow` with `{ host }` (shape read from the installed 0.128 extension: an **internal, undocumented** command, so it may change; failures show the error)
+- [x] ssh config entry, shown in full before writing, never silent: marked block (`# BEGIN VM Manager: <key>`), `HostKeyAlias` so a reused forwarded port never triggers "host identification changed", values validated against config injection, other lines untouched, one-time `config.vmm.bak`, honours `remote.SSH.configFile`. Verified with the real client: `ssh -G` resolves the block, and a login through the alias works
+- [x] Choose machines: `VM: Add Machines to SSH Config…` (multi-select, shows routes and what is already there, one confirmation) and `VM: Remove Machines from SSH Config…` (multi-select of the blocks VM Manager wrote). Add then remove restores the file exactly
+- [x] `VM: Forward SSH Port…`: free host port from 2222, forward to guest port 22
+- [x] Settings `vmm.ssh.user` (per-machine answer remembered) and `vmm.ssh.addConfigEntry`
+- [x] Tests: target choice, aliases, block rendering / injection guards / listing / removal round-trips, `ssh -G`, banner probe against local servers, menus; **real guest** (Debian 12 arm64, HVF): no route before a forward, route from real details after, a real sshd banner, a login with plain `ssh` through the written alias, host key stored under the alias
+- [ ] Manual check in VS Code with Remote - SSH installed: connect to a running VM, add and remove machines, the prompts
+- [ ] Not done: injecting a public key into a guest (needs guest-agent file writes, phase 16, or cloud-init, phase 14); an ssh key choice (`IdentityFile`) per machine; Hyper-V and Proxmox untested (they use the address route, which has no hardware here)
+- [ ] The ssh config entry goes stale when the forward port changes later; Connect rewrites it, a batch entry is not refreshed on its own
 
 ### Phase 14: `feat/provisioning`  (Local: yes)
 
-- [ ] ISO / cloud image downloader: curated list (Ubuntu, Debian, Fedora, Alpine, arm64 and x86_64), checksum verified, progress, cached in a configured folder
-- [ ] cloud-init seed ISO builder (user-data, meta-data: user, ssh key, hostname); create form option "cloud-init"
-- [ ] Templates: save a VM as template, create from it (builds on phase 12 clone)
-- [ ] Create form: "from cloud image" path that skips the installer
-- [ ] Tests: seed ISO contents, checksum failure, resume. Manual: boot a cloud image on the Mac
+Status: **cloud images and templates done**; installer ISO downloads open.
+
+- [x] Cloud image downloader (`images.ts`): curated catalog (Debian 13 / 12, Ubuntu 24.04 / 22.04 LTS; x86-64 and ARM64; every URL and checksum list checked against the live mirrors), checksum verified (SHA-256 / SHA-512 from the published list), resumable (`Range`), cached with a verified marker (reused while the published checksum is unchanged, also offline), progress; on an SSH host the transfer runs on the host with `curl`
+- [x] cloud-init seed disk (`iso9660.ts`, `cloudInit.ts`): our own ISO 9660 + Joliet writer (no external tool; read back by an independent reader, by libarchive and mounted by macOS as `cidata`), `user-data` / `meta-data` with the user, passwordless sudo, SSH keys, host name, guest agent; passwords as SHA-512 crypt (checked against the published test vectors), never as text
+- [x] Create form: **Set up from** an installer ISO or a cloud image; image choice, user, key (default from `~/.ssh`), password, advanced: guest agent, host name, custom `user-data`; everything is validated before anything is downloaded; progress notification with the download percentage (`createVm` now takes a progress callback)
+- [x] Tests: seed disk bytes, checksum failure, resume, cached / offline, remote host transfer through a stand-in ssh, form visibility; **real guest** (Debian 12 arm64, HVF): created from the image file, cloud-init read our seed disk, user + key + host name + sudo + grown disk + guest agent verified, signed in over SSH
+- [x] Templates: Convert to Template (stopped VM; cannot be started), New Machine from Template (a clone without the flag), Convert to Virtual Machine; clones of cloud-init machines get a fresh seed disk (new instance id and host name). Known limit: clones keep the guest's machine-id. Linked clones still open
+- [ ] Not done: installer ISO downloads (Alpine, Debian netinst, Fedora…), Fedora and other cloud images, a `network-config`, key injection into an existing machine (phase 16)
+- [ ] Manual check in the create form with a real download (the form itself is covered by schema tests only)
 
 ### Phase 15: `feat/disk-management`  (Local: yes)
 

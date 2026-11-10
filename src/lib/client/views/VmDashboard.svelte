@@ -23,7 +23,6 @@
 		trimWindow,
 		type MetricPoint
 	} from '../../../shared/metrics';
-	import { OPERATION_LABEL } from '../../../shared/operations';
 	import LineChart from '../components/LineChart.svelte';
 	import { onMessage, request } from '../rpc/bridge';
 	import { vmStates } from '../vmState';
@@ -264,7 +263,7 @@
 			<Flexbox gap="0.6rem" align="center">
 				{#if vm.displayId}<span class="vmid" title="ID">#{vm.displayId}</span>{/if}
 				{#if originLabel(vm)}
-					<span class="badge" title={vm.controllable === false ? 'Started outside VM Manager without a control socket: it can only be observed and powered off.' : vm.origin === 'adopted' ? 'Started outside VM Manager; attached through its control socket.' : 'Created from existing disks or definitions.'}>{originLabel(vm)}</span>
+					<span class="badge" title={vm.template ? 'A template: it cannot be started, only copied into new machines.' : vm.controllable === false ? 'Started outside VM Manager without a control socket: it can only be observed and powered off.' : vm.origin === 'adopted' ? 'Started outside VM Manager; attached through its control socket.' : 'Created from existing disks or definitions.'}>{originLabel(vm)}</span>
 				{/if}
 				<Status value={vm.state} states={vmStates} />
 			</Flexbox>
@@ -297,7 +296,6 @@
 				{/if}
 				<Button transparent onclick={() => run('vmm.editVm')}><Icon icon="gear" margin="right" />Settings</Button>
 				{#if actionError}<span class="error">{actionError}</span>{/if}
-				{#if vm.operation}<span class="operation">{OPERATION_LABEL[vm.operation as keyof typeof OPERATION_LABEL] ?? ''}</span>{/if}
 			</Flexbox>
 		</Section>
 
@@ -707,8 +705,7 @@
 		font-family: var(--vscode-editor-font-family, monospace);
 		white-space: nowrap;
 	}
-	.muted,
-	.operation {
+	.muted {
 		color: var(--vscode-descriptionForeground);
 	}
 	.error {

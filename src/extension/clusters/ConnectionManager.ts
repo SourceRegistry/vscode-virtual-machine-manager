@@ -136,6 +136,7 @@ export class ConnectionManager implements vscode.Disposable {
 			name: rt.cluster.name,
 			providerId: rt.cluster.providerId,
 			providerName: this.registry.displayName(rt.cluster.providerId),
+			remote: this.registry.get(rt.cluster.providerId)?.remoteLabel?.(rt.cluster),
 			status: rt.status,
 			error: rt.error,
 			capabilities: rt.connection?.capabilities,

@@ -194,10 +194,52 @@
         "icon": "$(files)"
       },
       {
+        "command": "vmm.connectSsh",
+        "title": "Connect with Remote-SSH…",
+        "category": "VM",
+        "icon": "$(remote)"
+      },
+      {
+        "command": "vmm.addSshForward",
+        "title": "Forward SSH Port…",
+        "category": "VM",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "vmm.addSshConfigEntries",
+        "title": "Add Machines to SSH Config…",
+        "category": "VM",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vmm.removeSshConfigEntries",
+        "title": "Remove Machines from SSH Config…",
+        "category": "VM",
+        "icon": "$(remove)"
+      },
+      {
         "command": "vmm.cloneVm",
         "title": "Clone…",
         "category": "VM",
         "icon": "$(copy)"
+      },
+      {
+        "command": "vmm.convertToTemplate",
+        "title": "Convert to Template…",
+        "category": "VM",
+        "icon": "$(library)"
+      },
+      {
+        "command": "vmm.convertToVm",
+        "title": "Convert to Virtual Machine",
+        "category": "VM",
+        "icon": "$(vm)"
+      },
+      {
+        "command": "vmm.createFromTemplate",
+        "title": "New Machine from Template…",
+        "category": "VM",
+        "icon": "$(add)"
       },
       {
         "command": "vmm.takeSnapshot",
@@ -222,6 +264,12 @@
         "title": "Delete",
         "category": "VM",
         "icon": "$(trash)"
+      },
+      {
+        "command": "vmm.detachVm",
+        "title": "Detach",
+        "category": "VM",
+        "icon": "$(debug-disconnect)"
       },
       {
         "command": "vmm.start",
@@ -384,7 +432,34 @@
           "when": "vmm.hasVms"
         },
         {
+          "command": "vmm.connectSsh",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.addSshForward",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.addSshConfigEntries",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.removeSshConfigEntries"
+        },
+        {
           "command": "vmm.cloneVm",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.convertToTemplate",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.convertToVm",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.createFromTemplate",
           "when": "vmm.hasVms"
         },
         {
@@ -401,6 +476,10 @@
         },
         {
           "command": "vmm.deleteVm",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.detachVm",
           "when": "vmm.hasVms"
         },
         {
@@ -637,6 +716,11 @@
           "group": "2_connect@3"
         },
         {
+          "command": "vmm.connectSsh",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bdetails;/",
+          "group": "2_connect@4"
+        },
+        {
           "command": "vmm.ejectMedia",
           "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bejectable;/",
           "group": "2_media@1"
@@ -677,8 +761,28 @@
           "group": "3_manage@2"
         },
         {
+          "command": "vmm.createFromTemplate",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bistemplate;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.convertToTemplate",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\btotemplate;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.convertToVm",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bistemplate;/",
+          "group": "3_manage@2"
+        },
+        {
           "command": "vmm.deleteVm",
           "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdelete;/",
+          "group": "3_manage@3"
+        },
+        {
+          "command": "vmm.detachVm",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdetach;/",
           "group": "3_manage@3"
         },
         {
@@ -816,6 +920,11 @@
           "group": "2_connect@3"
         },
         {
+          "command": "vmm.connectSsh",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\bdetails;/",
+          "group": "2_connect@4"
+        },
+        {
           "command": "vmm.ejectMedia",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bejectable;/",
           "group": "2_media@1"
@@ -856,8 +965,28 @@
           "group": "3_manage@2"
         },
         {
+          "command": "vmm.createFromTemplate",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bistemplate;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.convertToTemplate",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\btotemplate;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.convertToVm",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bistemplate;/",
+          "group": "3_manage@2"
+        },
+        {
           "command": "vmm.deleteVm",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bdelete;/",
+          "group": "3_manage@3"
+        },
+        {
+          "command": "vmm.detachVm",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bdetach;/",
           "group": "3_manage@3"
         },
         {
@@ -891,6 +1020,16 @@
           "type": "boolean",
           "default": true,
           "description": "Ask for confirmation before a hard power off (Stop)."
+        },
+        "vmm.ssh.user": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The account to sign in as inside a guest when connecting with **VM: Connect with Remote-SSH…**. Empty: your user name on this computer. The answer is remembered per machine."
+        },
+        "vmm.ssh.addConfigEntry": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer to add an entry for the machine to your ssh config before connecting (it is always shown first and never written silently). Turn off to connect by address without touching the file."
         }
       }
     },

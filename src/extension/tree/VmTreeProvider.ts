@@ -128,6 +128,12 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		}
 	}
 
+	/** `ssh me@lab` for a cluster whose machines run on another computer. */
+	private remoteLabel(clusterId: string): string | undefined {
+		const rt = this.manager.cluster(clusterId);
+		return rt ? this.registry.get(rt.cluster.providerId)?.remoteLabel?.(rt.cluster) : undefined;
+	}
+
 	private clusterItem(clusterId: string): vscode.TreeItem {
 		const rt = this.manager.cluster(clusterId);
 		const item = new vscode.TreeItem(rt?.cluster.name ?? clusterId, vscode.TreeItemCollapsibleState.Expanded);
@@ -135,10 +141,12 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		if (!rt) return item;
 		const providerName = this.registry.displayName(rt.cluster.providerId);
 		const statusText = clusterStatusText(rt.status);
-		item.description = rt.status === 'connected' ? providerName : `${providerName} · ${statusText}`;
-		item.iconPath = clusterIcon(rt.status, this.registry.get(rt.cluster.providerId)?.icon);
+		const remote = this.remoteLabel(clusterId);
+		const where = remote ? `${providerName} · ${remote}` : providerName;
+		item.description = rt.status === 'connected' ? where : `${where} · ${statusText}`;
+		item.iconPath = clusterIcon(rt.status, remote ? REMOTE_ICON : this.registry.get(rt.cluster.providerId)?.icon);
 		item.contextValue = clusterContextValue(rt.status, rt.connection?.capabilities);
-		const tooltip = new vscode.MarkdownString(`**${escapeMd(rt.cluster.name)}**\n\n${providerName} — ${statusText}`);
+		const tooltip = new vscode.MarkdownString(`**${escapeMd(rt.cluster.name)}**\n\n${providerName} — ${statusText}${remote ? `\n\n$(remote) Runs on another computer: \`${remote}\`` : ''}`);
 		if (rt.error) tooltip.appendMarkdown(`\n\n$(error) ${escapeMd(rt.error)}`);
 		tooltip.supportThemeIcons = true;
 		item.tooltip = tooltip;
@@ -152,10 +160,8 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		item.id = `node:${clusterId}:${nodeId}`;
 		if (!node) return item;
 		item.description = nodeDescription(node);
-		item.iconPath =
-			node.status === 'online'
-				? new vscode.ThemeIcon('server')
-				: new vscode.ThemeIcon('server', new vscode.ThemeColor('disabledForeground'));
+		const nodeIcon = this.remoteLabel(clusterId) ? REMOTE_ICON : 'server';
+		item.iconPath = node.status === 'online' ? new vscode.ThemeIcon(nodeIcon) : new vscode.ThemeIcon(nodeIcon, new vscode.ThemeColor('disabledForeground'));
 		const caps = rt?.connection?.capabilities;
 		item.contextValue = nodeContextValue(node.status, caps);
 		const running = node.vms.filter((v) => v.state === 'running').length;
@@ -257,6 +263,9 @@ function clusterStatusText(status: ClusterStatus): string {
 			return 'Provider not installed';
 	}
 }
+
+/** The codicon for a cluster whose machines run on another computer. */
+const REMOTE_ICON = 'remote';
 
 function clusterIcon(status: ClusterStatus, providerIcon: string | undefined): vscode.ThemeIcon {
 	switch (status) {

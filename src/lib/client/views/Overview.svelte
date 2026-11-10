@@ -285,7 +285,7 @@
 		<!-- Hosts: one card per node with its live load and allocation. -->
 		{#each clusters as cluster (cluster.id)}
 			<div class="context" data-vscode-context={vscodeContext(clusterContextValue(cluster.status, cluster.capabilities), { clusterId: cluster.id })}>
-				<Section title={cluster.name} description={cluster.providerName}>
+				<Section title={cluster.name} description={cluster.remote ? `${cluster.providerName} · ${cluster.remote}` : cluster.providerName}>
 					{#snippet headerSuffix()}
 						<Flexbox align="center" gap="0.5rem">
 							<Status value={cluster.status} states={clusterStates} />
@@ -457,7 +457,7 @@
 											{:else}
 												<strong>{vm.name}</strong>
 											{/if}
-											{#if originLabel(vm)}<span class="badge" title="Not created by VM Manager">{originLabel(vm)}</span>{/if}
+											{#if originLabel(vm)}<span class="badge" title={vm.template ? 'A template: it cannot be started, only copied.' : 'Not created by VM Manager'}>{originLabel(vm)}</span>{/if}
 										</td>
 										<td class="muted">{row.cluster.name} › {row.node.name}</td>
 										<td>{vm.cpus ?? '–'}</td>
@@ -515,7 +515,9 @@
 														{#if caps?.edit}
 															<Button transparent onclick={() => run('vmm.editVm', target)}><Icon icon="gear" margin="right" />Settings</Button>
 														{/if}
-														{#if caps?.delete}
+														{#if vm.origin === 'adopted'}
+															<Button transparent variant="danger" onclick={() => run('vmm.detachVm', target)}><Icon icon="plug" margin="right" />Detach</Button>
+														{:else if caps?.delete}
 															<Button transparent variant="danger" onclick={() => run('vmm.deleteVm', target)}><Icon icon="trash" margin="right" />Delete</Button>
 														{/if}
 													{/snippet}

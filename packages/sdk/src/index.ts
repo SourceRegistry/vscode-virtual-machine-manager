@@ -55,7 +55,16 @@ export type FieldType =
 	| 'checkbox'
 	| 'file'
 	| 'directory'
-	| 'textarea';
+	| 'textarea'
+	/** A host to reach with ssh: picked from the user's ssh config, or typed as `user@host`. */
+	| 'sshHost';
+
+/** What a provider says while it creates a VM. */
+export interface CreateProgress {
+	message?: string;
+	/** 0..1 of the whole creation, when known. */
+	fraction?: number;
+}
 
 export type FieldValue = string | number | boolean | undefined;
 export type FieldValues = Record<string, FieldValue>;
@@ -84,6 +93,12 @@ export interface FieldSchema {
 	/** File dialog filters for `file` fields, e.g. `{ 'Disk images': ['iso', 'img'] }`. */
 	filters?: Record<string, string[]>;
 	readonly?: boolean;
+	/**
+	 * `file` / `directory` fields: the path is on another computer (an SSH host), so a file dialog here would
+	 * pick the wrong thing and is not offered. A string names another field: remote while that one has a value;
+	 * `{ key, equals }`: remote while that field has that value.
+	 */
+	remotePath?: boolean | string | { key: string; equals: FieldValue };
 	/** Section heading used by the webview settings editor. */
 	group?: string;
 	/**
@@ -95,6 +110,13 @@ export interface FieldSchema {
 	advanced?: boolean;
 	/** Only ask for this field while another field has one of the given values (e.g. a sign-in method). */
 	showWhen?: { key: string; equals: FieldValue | FieldValue[]; /** Assumed when the other field has no value yet (older saved configs). */ default?: FieldValue };
+}
+
+/** Whether a path field points at another computer, given the current values (no file dialog then). */
+export function isRemotePath(field: FieldSchema, values: FieldValues): boolean {
+	if (typeof field.remotePath === 'string') return !!values[field.remotePath];
+	if (field.remotePath && typeof field.remotePath === 'object') return values[field.remotePath.key] === field.remotePath.equals;
+	return !!field.remotePath;
 }
 
 /** Whether a field applies given the current values. Hidden fields are neither asked nor validated. */
@@ -140,10 +162,14 @@ export interface Capabilities {
 	clone?: boolean;
 	/** `cloneVm` needs the VM stopped: the core tells the user to shut it down first instead of trying. */
 	cloneNeedsStopped?: boolean;
+	/** Implements `setTemplate`: a stopped VM can become a template that machines are created from (with `cloneVm`). */
+	templates?: boolean;
 	/** Implements `getVmDetails` (hardware inventory). */
 	details?: boolean;
 	/** Implements `getVmStats` (live usage counters). */
 	stats?: boolean;
+	/** Image and disk paths are on the host (an SSH host), not on this computer: ask for them as text, no file dialog. */
+	remotePaths?: boolean;
 	/** Implements `addPortForward` / `removePortForward`. */
 	forwards?: boolean;
 	/** Implements `getPassthrough` / `planPassthrough` / `changePassthrough`. */
@@ -191,6 +217,8 @@ export interface VmInfo {
 	 * extension that it attached to, `imported` = built from existing disk images or definitions.
 	 */
 	origin?: 'adopted' | 'imported';
+	/** A template: it cannot be started, only cloned into new machines. */
+	template?: boolean;
 	/** `false` for an adopted VM without a control channel: it can only be observed and powered off. */
 	controllable?: boolean;
 }
@@ -265,6 +293,8 @@ export interface NicDevice {
 	network?: string;
 	ipAddresses?: string[];
 	connected?: boolean;
+	/** The host can connect to `ipAddresses` directly. `false` behind NAT (QEMU user networking), where only forwarded ports work. Absent: assume yes. */
+	reachable?: boolean;
 }
 
 /** Another device the guest sees: PCI/PCIe (including passthrough), USB, serial… */
@@ -472,7 +502,8 @@ export interface ClusterConnection extends Disposable {
 	listNodes(): Promise<NodeInfo[]>;
 	listVms(nodeId: string): Promise<VmInfo[]>;
 	getCreateSchema(nodeId: string): Promise<FieldSchema[]>;
-	createVm(nodeId: string, values: FieldValues): Promise<VmInfo>;
+	/** `progress` reports long steps (a download): a message and how far along, 0..1, when known. */
+	createVm(nodeId: string, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo>;
 	getVmConfig(nodeId: string, vmId: string): Promise<VmConfig>;
 	updateVm(nodeId: string, vmId: string, values: FieldValues): Promise<void>;
 	deleteVm(nodeId: string, vmId: string, options: DeleteOptions): Promise<void>;
@@ -496,6 +527,11 @@ export interface ClusterConnection extends Disposable {
 	 * host devices are not carried over. Can take minutes for a large disk.
 	 */
 	cloneVm?(nodeId: string, vmId: string, name: string): Promise<VmInfo>;
+	/**
+	 * Turns a stopped VM into a template (`true`) or back into a VM. A template cannot be started; `cloneVm`
+	 * of a template makes a normal machine (with a fresh identity where the provider can give one).
+	 */
+	setTemplate?(nodeId: string, vmId: string, template: boolean): Promise<void>;
 	/** Snapshots of a VM, oldest first. */
 	listSnapshots?(nodeId: string, vmId: string): Promise<Snapshot[]>;
 	/**
@@ -533,6 +569,12 @@ export interface HypervisorProvider {
 	readonly icon?: string;
 	readonly connectionSchema: FieldSchema[];
 	defaultClusterName?(): string;
+	/**
+	 * Where the machines of this cluster run when that is another computer reached over ssh or the like (`ssh me@lab`),
+	 * from the saved configuration alone, so it can be shown while the cluster is still connecting. `undefined` for
+	 * a provider that is always remote (a server API) or a cluster that is local.
+	 */
+	remoteLabel?(cluster: ClusterConfig): string | undefined;
 	testConnection?(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<void>;
 	connect(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<ClusterConnection>;
 }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
+import type { Duplex } from 'node:stream';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -14,6 +15,7 @@ import {
 	type ClusterConnection,
 	type ConsoleKind,
 	type ConsoleStream,
+	type CreateProgress,
 	type DeleteOptions,
 	type DiskStats,
 	type Disposable,
@@ -30,6 +32,7 @@ import {
 	type Logger,
 	type NodeInfo,
 	type PortForward,
+	type SecretBag,
 	type Snapshot,
 	type PowerAction,
 	type ProviderContext,
@@ -39,15 +42,20 @@ import {
 	type VmState,
 	type VmStats
 } from '@vmm/sdk';
-import { ARCHS, ARCH_LABEL, acceleratorsFor, archFromName, guestArch, isNative, normalizeHardware, type Arch } from './arch';
+import { ARCHS, ARCH_LABEL, acceleratorsFor, archFromName, guestArch, hostArch, isNative, normalizeHardware, type Arch } from './arch';
 import { buildArgs, usableAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
 import { detectQemu, type ArchInstallation, type QemuInstallation } from './detect';
 import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
+import { freeLocalPort, LocalHost, type Host } from './host';
+import { SshHost, validateSshTarget } from './sshHost';
+import { buildIso } from './iso9660';
+import { cloudInitProblem, hostnameFor, metaData, sha512Crypt, userData } from './cloudInit';
+import { ensureImage, findImage, imageFileName } from './images';
+import { cloudFields, parseKeys, SOURCE_ISO } from './provision';
 import { cloneDefinition } from './clone';
 import { commonSnapshots, qmpSnapshots, snapshotNameProblem, type QemuSnapshotInfo, type QmpSnapshotBlock } from './snapshots';
-import { availableMemoryMB, CpuLoadSampler } from './hostInfo';
-import { listProcesses, processStartedAt, sampleProcess, walkFiles } from './hostProcess';
+import { walkFiles } from './hostProcess';
 import { iommuEnabled, listPciHost, listUsbHost, pciDriver, runPrivileged } from './hostDevices';
 import {
 	assessVfio,
@@ -84,24 +92,100 @@ import { isPortConflict, SerialQueue } from './ports';
 import { gracefulShutdown } from './shutdown';
 import { telnetStream } from './telnet';
 
-const execFileAsync = promisify(execFile);
 const NODE_ID = 'local';
 const VM_NAME = /^[\w .()-]{1,64}$/;
 
+/** Shown only for a remote connection. `default` covers clusters saved before the choice existed. */
+const SSH_ONLY = { key: 'connection', equals: 'ssh', default: 'local' } as const;
+/** The questions the host picker leaves open; clusters saved before it existed ask them all. */
+const ASK_USER = { key: 'sshAskUser', equals: true, default: true } as const;
+const ASK_PORT = { key: 'sshAskPort', equals: true, default: true } as const;
+const ASK_AUTH = { key: 'sshAskAuth', equals: true, default: true } as const;
+
 const CONNECTION_SCHEMA: FieldSchema[] = [
+	{
+		key: 'connection',
+		label: 'Connection',
+		type: 'select',
+		default: 'local',
+		required: true,
+		options: [
+			{ value: 'local', label: 'Local', description: 'QEMU on this computer' },
+			{ value: 'ssh', label: 'Remote (SSH)', description: 'QEMU on another Linux computer, reached with ssh' }
+		]
+	},
+	{
+		key: 'sshHost',
+		label: 'SSH host',
+		type: 'sshHost',
+		required: true,
+		showWhen: SSH_ONLY,
+		group: 'Remote host',
+		description: 'A host name, an address or an alias of your ~/.ssh/config (jump hosts and keys from there apply).',
+		placeholder: 'lab.example.com'
+	},
+	// Set by the host picker: what the ssh config (or user@host) already answers is not asked again.
+	{ key: 'sshAskUser', label: 'Ask for the SSH user', type: 'checkbox', readonly: true, showWhen: SSH_ONLY },
+	{ key: 'sshAskPort', label: 'Ask for the SSH port', type: 'checkbox', readonly: true, showWhen: SSH_ONLY },
+	{ key: 'sshAskAuth', label: 'Ask how to sign in', type: 'checkbox', readonly: true, showWhen: SSH_ONLY },
+	{ key: 'sshUser', label: 'SSH user', type: 'text', showWhen: ASK_USER, group: 'Remote host', description: 'Empty: your user name on this computer.' },
+	{ key: 'sshPort', label: 'SSH port', type: 'number', min: 1, max: 65535, showWhen: ASK_PORT, group: 'Remote host', description: 'Empty: 22.' },
+	{
+		key: 'sshAuth',
+		label: 'Sign in with',
+		type: 'select',
+		default: 'agent',
+		required: true,
+		showWhen: ASK_AUTH,
+		group: 'Remote host',
+		options: [
+			{ value: 'agent', label: 'ssh-agent or default keys', description: 'What ssh finds itself' },
+			{ value: 'key', label: 'A key file', description: 'A private key on this computer' },
+			{ value: 'password', label: 'A password', description: 'Kept in the system keychain' }
+		]
+	},
+	{
+		key: 'sshIdentityFile',
+		label: 'SSH key',
+		type: 'text',
+		required: true,
+		showWhen: { key: 'sshAuth', equals: 'key' },
+		group: 'Remote host',
+		description: 'Path of a private key on this computer (a key with a passphrase must be in ssh-agent).',
+		placeholder: '~/.ssh/id_ed25519'
+	},
+	{
+		key: 'sshPassword',
+		label: 'SSH password',
+		type: 'password',
+		secret: true,
+		required: true,
+		showWhen: { key: 'sshAuth', equals: 'password' },
+		group: 'Remote host'
+	},
 	{
 		key: 'qemuPath',
 		label: 'QEMU directory',
 		type: 'directory',
-		description: 'Directory with qemu-system-x86_64 and qemu-img. Leave empty to detect automatically.',
+		remotePath: SSH_ONLY,
+		description: 'Directory with qemu-system-x86_64 and qemu-img (on the SSH host when one is set). Leave empty to detect automatically.',
 		placeholder: 'Detect automatically'
 	},
 	{
 		key: 'vmDirectory',
 		label: 'VM storage directory',
 		type: 'directory',
-		description: 'Where VM definitions and disks are stored. Leave empty for the extension storage.',
-		placeholder: 'Extension storage'
+		remotePath: SSH_ONLY,
+		description: 'Where VM definitions and disks are stored (on the SSH host when one is set). Leave empty for the extension storage, or ~/vmm-qemu on an SSH host.',
+		placeholder: 'Default'
+	},
+	{
+		key: 'imageDirectory',
+		label: 'Image directory',
+		type: 'directory',
+		remotePath: SSH_ONLY,
+		description: 'Where downloaded cloud images are kept (on the SSH host when one is set). Leave empty to keep them next to the VM storage directory.',
+		placeholder: 'Default'
 	},
 	{
 		key: 'shutdownTimeout',
@@ -156,6 +240,8 @@ const FIRMWARE_OPTIONS = [
 export interface QemuProviderOptions {
 	/** Default QEMU directory from the user settings. */
 	defaultQemuPath: () => string | undefined;
+	/** The ssh program (tests only). */
+	sshCommand?: string;
 }
 
 export class QemuProvider implements HypervisorProvider {
@@ -170,23 +256,82 @@ export class QemuProvider implements HypervisorProvider {
 		return 'Local (QEMU)';
 	}
 
-	async testConnection(cluster: ClusterConfig): Promise<void> {
-		await detectQemu(this.qemuPath(cluster));
+	remoteLabel(cluster: ClusterConfig): string | undefined {
+		if (!isRemote(cluster)) return undefined;
+		const name = String(cluster.config.sshHost ?? '').trim();
+		const user = String(cluster.config.sshUser ?? '').trim();
+		return `ssh ${user && !name.includes('@') ? `${user}@` : ''}${name || '…'}`;
 	}
 
-	async connect(cluster: ClusterConfig, _secrets: unknown, context: ProviderContext): Promise<ClusterConnection> {
-		const installation = await detectQemu(this.qemuPath(cluster));
-		context.log.info(`Using QEMU ${installation.version} from ${installation.directory}`);
-		const vmDirectory = (cluster.config.vmDirectory as string | undefined) || path.join(context.storagePath, 'vms');
-		await fs.promises.mkdir(vmDirectory, { recursive: true });
-		const timeout = Number(cluster.config.shutdownTimeout);
-		const shutdownTimeoutMs = (Number.isFinite(timeout) && timeout >= 5 ? Math.min(timeout, 600) : 30) * 1000;
-		return new QemuConnection(installation, vmDirectory, String(cluster.config.accelerator ?? 'auto'), context.log, shutdownTimeoutMs);
+	async testConnection(cluster: ClusterConfig, secrets: SecretBag = {}): Promise<void> {
+		const host = this.hostFor(cluster, secrets);
+		try {
+			await host.ping();
+			await detectQemu(this.qemuPath(cluster), host);
+		} finally {
+			host.dispose();
+		}
+	}
+
+	async connect(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<ClusterConnection> {
+		const host = this.hostFor(cluster, secrets);
+		try {
+			await host.ping();
+			const installation = await detectQemu(this.qemuPath(cluster), host);
+			context.log.info(`Using QEMU ${installation.version} from ${installation.directory}${host.remote ? ` on ${host.label}` : ''}`);
+			let vmDirectory = cluster.config.vmDirectory as string | undefined;
+			if (!vmDirectory) {
+				if (host.remote) {
+					const home = (await host.exec('sh', ['-c', 'echo "$HOME"'], { timeout: 30_000 })).stdout.trim();
+					vmDirectory = host.path.join(home || '~', 'vmm-qemu', 'vms');
+				} else {
+					vmDirectory = path.join(context.storagePath, 'vms');
+				}
+			}
+			await host.mkdir(vmDirectory);
+			const timeout = Number(cluster.config.shutdownTimeout);
+			const shutdownTimeoutMs = (Number.isFinite(timeout) && timeout >= 5 ? Math.min(timeout, 600) : 30) * 1000;
+			const info = await host.info();
+			const imageDirectory = (cluster.config.imageDirectory as string | undefined) || host.path.join(host.path.dirname(vmDirectory), 'images');
+			return new QemuConnection(installation, vmDirectory, String(cluster.config.accelerator ?? 'auto'), context.log, shutdownTimeoutMs, host, info.cpus, imageDirectory);
+		} catch (error) {
+			host.dispose();
+			throw error;
+		}
+	}
+
+	private hostFor(cluster: ClusterConfig, secrets: SecretBag): Host {
+		if (!isRemote(cluster)) return new LocalHost();
+		const name = String(cluster.config.sshHost ?? '').trim();
+		if (!name) throw new ProviderError('Enter the SSH host to connect to.', 'invalid');
+		const port = Number(cluster.config.sshPort);
+		// `user@host` as typed in the picker; an explicit SSH user wins.
+		const at = name.lastIndexOf('@');
+		const method = String(cluster.config.sshAuth ?? '');
+		const password = method === 'password' ? secrets.sshPassword : undefined;
+		if (method === 'password' && !password) throw new ProviderError('Enter the SSH password.', 'invalid');
+		const target = {
+			host: at > 0 ? name.slice(at + 1) : name,
+			user: String(cluster.config.sshUser ?? '').trim() || (at > 0 ? name.slice(0, at) : undefined),
+			port: Number.isFinite(port) && port > 0 ? port : undefined,
+			// The key only applies when that is how to sign in (older clusters have a key and no choice).
+			identityFile: method === 'key' || method === '' ? String(cluster.config.sshIdentityFile ?? '').trim() || undefined : undefined,
+			viaPassword: !!password
+		};
+		const problem = validateSshTarget(target);
+		if (problem) throw new ProviderError(problem, 'invalid');
+		return new SshHost(target, { password, ...(this.options.sshCommand ? { command: this.options.sshCommand, anyPlatform: true } : {}) });
 	}
 
 	private qemuPath(cluster: ClusterConfig): string | undefined {
-		return (cluster.config.qemuPath as string | undefined) || this.options.defaultQemuPath() || undefined;
+		// The VS Code setting names a directory on this computer: it does not apply to another one.
+		return (cluster.config.qemuPath as string | undefined) || (isRemote(cluster) ? undefined : this.options.defaultQemuPath()) || undefined;
 	}
+}
+
+/** Remote when chosen; a cluster saved with an SSH host but before the choice existed counts as remote too. */
+function isRemote(cluster: ClusterConfig): boolean {
+	return cluster.config.connection === 'ssh' || (cluster.config.connection === undefined && !!cluster.config.sshHost);
 }
 
 class SimpleEmitter<T> {
@@ -204,7 +349,8 @@ class SimpleEmitter<T> {
 }
 
 export class QemuConnection implements ClusterConnection {
-	readonly capabilities: Capabilities = {
+	readonly capabilities: Capabilities;
+	private readonly baseCapabilities: Capabilities = {
 		create: true,
 		edit: true,
 		delete: true,
@@ -217,6 +363,7 @@ export class QemuConnection implements ClusterConnection {
 		snapshotRevertNeedsStopped: true,
 		clone: true,
 		cloneNeedsStopped: true,
+		templates: true,
 		details: true,
 		forwards: true,
 		adopt: true,
@@ -224,7 +371,6 @@ export class QemuConnection implements ClusterConnection {
 		importFolder: true,
 		stats: true
 	};
-	private readonly hostCpu = new CpuLoadSampler();
 	private readonly startQueue = new SerialQueue();
 	private readonly cpuSamples = new Map<string, CpuSample>();
 	private readonly changes = new SimpleEmitter<ChangeEvent>();
@@ -236,8 +382,19 @@ export class QemuConnection implements ClusterConnection {
 		private readonly vmDirectory: string,
 		private readonly accelerator: string,
 		private readonly log: Logger,
-		private readonly shutdownTimeoutMs = 30_000
-	) {}
+		private readonly shutdownTimeoutMs = 30_000,
+		private readonly host: Host = new LocalHost(),
+		private readonly cpuCount = os.cpus().length,
+		private readonly imageDirectory = host.path.join(host.path.dirname(vmDirectory), 'images')
+	) {
+		// Importing from a folder and PCI/USB passthrough read this computer's own files and devices.
+		this.capabilities = host.remote ? { ...this.baseCapabilities, passthrough: false, importFolder: false, remotePaths: true } : this.baseCapabilities;
+	}
+
+	/** Whether guests of this architecture run natively on the host (the VM host, not this computer). */
+	private native(arch: Arch): boolean {
+		return isNative(arch, hostArch(this.host.arch));
+	}
 
 	/** The emulator, accelerators and firmware for a guest architecture. */
 	private install(arch: Arch): ArchInstallation {
@@ -254,7 +411,7 @@ export class QemuConnection implements ClusterConnection {
 
 	/** Accelerators for a guest: the hypervisor only for the host's own architecture, TCG otherwise. */
 	private acceleratorsOf(arch: Arch): string[] {
-		return usableAccelerators(acceleratorsFor(arch, process.platform, this.accelerator), this.install(arch).accelerators);
+		return usableAccelerators(acceleratorsFor(arch, this.host.platform, this.accelerator, hostArch(this.host.arch)), this.install(arch).accelerators);
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -263,16 +420,13 @@ export class QemuConnection implements ClusterConnection {
 
 	private dir(id: string): string {
 		if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ProviderError('Invalid virtual machine id', 'invalid');
-		return path.join(this.vmDirectory, id);
+		return this.host.path.join(this.vmDirectory, id);
 	}
 
 	private async definitions(): Promise<VmDefinition[]> {
-		const entries = await fs.promises.readdir(this.vmDirectory, { withFileTypes: true }).catch(() => []);
 		const result: VmDefinition[] = [];
-		for (const entry of entries) {
-			if (!entry.isDirectory()) continue;
+		for (const [, raw] of await this.host.readChildren(this.vmDirectory, 'vm.json')) {
 			try {
-				const raw = await fs.promises.readFile(path.join(this.vmDirectory, entry.name, 'vm.json'), 'utf8');
 				result.push(JSON.parse(raw) as VmDefinition);
 			} catch {
 				// not a VM directory
@@ -283,20 +437,20 @@ export class QemuConnection implements ClusterConnection {
 
 	private async definition(id: string): Promise<VmDefinition> {
 		try {
-			return JSON.parse(await fs.promises.readFile(path.join(this.dir(id), 'vm.json'), 'utf8')) as VmDefinition;
+			return JSON.parse(await this.host.readFile(this.host.path.join(this.dir(id), 'vm.json'))) as VmDefinition;
 		} catch {
 			throw new ProviderError('Virtual machine not found', 'notFound');
 		}
 	}
 
 	private async saveDefinition(def: VmDefinition): Promise<void> {
-		await fs.promises.writeFile(path.join(this.dir(def.id), 'vm.json'), JSON.stringify(def, null, 2));
+		await this.host.writeFile(this.host.path.join(this.dir(def.id), 'vm.json'), JSON.stringify(def, null, 2));
 	}
 
 	private async runtime(id: string): Promise<VmRuntime | undefined> {
 		try {
-			const runtime = JSON.parse(await fs.promises.readFile(path.join(this.dir(id), 'runtime.json'), 'utf8')) as VmRuntime;
-			if (isAlive(runtime.pid)) return runtime;
+			const runtime = JSON.parse(await this.host.readFile(this.host.path.join(this.dir(id), 'runtime.json'))) as VmRuntime;
+			if (await this.host.isAlive(runtime.pid)) return runtime;
 		} catch {
 			return undefined;
 		}
@@ -306,7 +460,7 @@ export class QemuConnection implements ClusterConnection {
 
 	private async clearRuntime(id: string): Promise<void> {
 		this.closeQmp(id);
-		await fs.promises.rm(path.join(this.dir(id), 'runtime.json'), { force: true });
+		await this.host.rm(this.host.path.join(this.dir(id), 'runtime.json'));
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -316,7 +470,13 @@ export class QemuConnection implements ClusterConnection {
 	private client(id: string, runtime: VmRuntime): Promise<QmpClient> {
 		const existing = this.qmp.get(id);
 		if (existing) return existing;
-		const target = runtime.qmpSocket ? QmpClient.connectSocket(runtime.qmpSocket) : runtime.qmpPort ? QmpClient.connect(runtime.qmpPort, runtime.qmpHost) : undefined;
+		const port = runtime.qmpPort;
+		const timeout = this.host.remote ? 10_000 : 3000;
+		const target = runtime.qmpSocket
+			? this.host.connectSocket(runtime.qmpSocket).then((stream) => QmpClient.attach(stream, timeout))
+			: port
+				? this.host.connect(port, runtime.qmpHost).then((stream) => QmpClient.attach(stream, timeout))
+				: undefined;
 		if (!target) {
 			return Promise.reject(new ProviderError('This VM was started outside VM Manager without a control socket, so it can only be observed and powered off. Restart it from here to manage it fully.', 'unsupported'));
 		}
@@ -364,26 +524,27 @@ export class QemuConnection implements ClusterConnection {
 	// -----------------------------------------------------------------------------------------
 
 	async listNodes(): Promise<NodeInfo[]> {
-		const total = Math.round(os.totalmem() / 1024 / 1024);
-		const available = await availableMemoryMB();
+		const info = await this.host.info();
+		const total = info.memoryMB;
+		const available = info.availableMemoryMB;
 		const installed = this.installedArchs();
-		const native = installed.find((a) => isNative(a)) ?? installed[0]!;
+		const native = installed.find((a) => this.native(a)) ?? installed[0]!;
 		const active = this.acceleratorsOf(native)[0]?.split(',')[0] ?? 'tcg';
 		return [
 			{
 				id: NODE_ID,
-				name: os.hostname(),
+				name: info.hostname,
 				status: 'online',
-				cpus: os.cpus().length,
-				cpuUsage: this.hostCpu.sample(),
+				cpus: info.cpus,
+				cpuUsage: info.cpuLoad,
 				memoryMB: total,
 				memoryUsedMB: Math.max(0, total - available),
 				description: `QEMU ${this.qemu.version}`,
 				facts: [
 					{ label: 'QEMU', value: this.qemu.version },
 					{ label: 'Acceleration', value: active === 'tcg' ? 'Software emulation (TCG)' : `${active.toUpperCase()}${installed.length > 1 ? ` (${native})` : ''}` },
-					{ label: 'Guest architectures', value: installed.map((a) => (isNative(a) ? `${a} (native)` : `${a} (emulated, slow)`)).join(', ') },
-					{ label: 'Platform', value: `${os.platform()} ${os.arch()}` }
+					{ label: 'Guest architectures', value: installed.map((a) => (this.native(a) ? `${a} (native)` : `${a} (emulated, slow)`)).join(', ') },
+					{ label: 'Platform', value: this.host.remote ? `${info.platform} · ${this.host.label}` : info.platform }
 				]
 			}
 		];
@@ -395,7 +556,7 @@ export class QemuConnection implements ClusterConnection {
 		for (const def of defs) {
 			// An adopted VM only exists while its process does; nothing here could restart it faithfully.
 			if (def.origin === 'adopted' && !(await this.runtime(def.id))) {
-				await fs.promises.rm(this.dir(def.id), { recursive: true, force: true });
+				await this.host.rm(this.dir(def.id), { recursive: true });
 				continue;
 			}
 			visible.push(def);
@@ -424,10 +585,11 @@ export class QemuConnection implements ClusterConnection {
 					uptimeSeconds: runtime ? Math.floor((Date.now() - runtime.startedAt) / 1000) : undefined,
 					description: def.notes,
 					macAddresses: def.mac ? [def.mac] : undefined,
-					os: `${guestArch(def) === 'x86_64' && isNative(guestArch(def)) ? '' : `${guestArch(def)}${isNative(guestArch(def)) ? '' : ' (emulated)'} · `}${def.firmware.toUpperCase()} · ${(guestArch(def) === 'aarch64' ? 'virtio' : def.diskBus).toUpperCase()}`,
+					os: `${guestArch(def) === 'x86_64' && this.native(guestArch(def)) ? '' : `${guestArch(def)}${this.native(guestArch(def)) ? '' : ' (emulated)'} · `}${def.firmware.toUpperCase()} · ${(guestArch(def) === 'aarch64' ? 'virtio' : def.diskBus).toUpperCase()}`,
 					consoles,
 					mediaInserted,
 					origin: def.origin,
+					template: def.template,
 					controllable: runtime ? hasControlChannel(runtime) : undefined
 				} satisfies VmInfo;
 			})
@@ -436,7 +598,8 @@ export class QemuConnection implements ClusterConnection {
 
 	async getCreateSchema(): Promise<FieldSchema[]> {
 		const installed = this.installedArchs();
-		const defaultArch = installed.find((a) => isNative(a)) ?? installed[0]!;
+		const cached = new Set((await this.host.readdir(this.imageDirectory).catch(() => [])).filter((e) => e.name.endsWith('.verified')).map((e) => e.name.slice(0, -'.verified'.length)));
+		const defaultArch = installed.find((a) => this.native(a)) ?? installed[0]!;
 		const archField: FieldSchema[] =
 			installed.length > 1
 				? [
@@ -445,19 +608,32 @@ export class QemuConnection implements ClusterConnection {
 							label: 'Architecture',
 							type: 'select',
 							required: true,
+							showWhen: SOURCE_ISO,
 							default: defaultArch,
-							options: installed.map((a) => ({ value: a, label: `${ARCH_LABEL[a]}${isNative(a) ? ' — native, full speed' : ' — emulated, much slower'}` })),
+							options: installed.map((a) => ({ value: a, label: `${ARCH_LABEL[a]}${this.native(a) ? ' — native, full speed' : ' — emulated, much slower'}` })),
 							description: 'A guest of the same architecture as this computer runs with hardware acceleration. Any other is emulated in software, typically 10 to 50 times slower.'
 						}
 					]
 				: [];
 		return [
 			{ key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'my-vm', description: 'Letters, digits, spaces and . _ ( ) -' },
+			{
+				key: 'source',
+				label: 'Set up from',
+				type: 'select',
+				required: true,
+				default: 'iso',
+				options: [
+					{ value: 'iso', label: 'An installer ISO', description: 'Install the operating system yourself' },
+					{ value: 'cloud', label: 'A cloud image (cloud-init)', description: 'Debian or Ubuntu, ready in a minute: no installer' }
+				]
+			},
 			...archField,
-			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: os.cpus().length, default: Math.min(2, os.cpus().length), required: true },
+			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: this.cpuCount, default: Math.min(2, this.cpuCount), required: true },
 			{ key: 'memoryMB', label: 'Memory', type: 'number', unit: 'MB', min: 128, default: 2048, required: true },
 			{ key: 'diskGB', label: 'Disk size', type: 'number', unit: 'GB', min: 1, max: 16384, default: 32, required: true },
-			{ key: 'cdrom', label: 'Installation media (ISO)', type: 'file', filters: { 'Disk images': ['iso', 'img'] } },
+			{ key: 'cdrom', label: 'Installation media (ISO)', type: 'file', remotePath: this.host.remote, showWhen: SOURCE_ISO, filters: { 'Disk images': ['iso', 'img'] } },
+			...cloudFields({ installed, remote: this.host.remote, cached }),
 			{
 				key: 'firmware',
 				label: 'Firmware',
@@ -475,14 +651,15 @@ export class QemuConnection implements ClusterConnection {
 		];
 	}
 
-	async createVm(_nodeId: string, values: FieldValues): Promise<VmInfo> {
+	async createVm(_nodeId: string, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo> {
 		const name = String(values.name ?? '').trim();
 		if (!VM_NAME.test(name)) throw new ProviderError('Use 1–64 letters, digits, spaces or . _ ( ) - for the name', 'invalid');
 		if ((await this.definitions()).some((d) => d.name.toLowerCase() === name.toLowerCase())) {
 			throw new ProviderError(`A virtual machine named "${name}" already exists`, 'invalid');
 		}
+		if (values.source === 'cloud') return this.createFromCloudImage(name, values, progress);
 		const installed = this.installedArchs();
-		const arch = (values.arch as Arch | undefined) ?? installed.find((a) => isNative(a)) ?? installed[0]!;
+		const arch = (values.arch as Arch | undefined) ?? installed.find((a) => this.native(a)) ?? installed[0]!;
 		const firmwareCode = this.install(arch).firmwareCode;
 		const hardware = normalizeHardware(arch, {
 			firmware: (values.firmware as Firmware) ?? 'bios',
@@ -495,11 +672,11 @@ export class QemuConnection implements ClusterConnection {
 		}
 		const id = randomUUID();
 		const dir = this.dir(id);
-		await fs.promises.mkdir(dir, { recursive: true });
+		await this.host.mkdir(dir);
 		try {
-			const disk = path.join(dir, 'disk0.qcow2');
+			const disk = this.host.path.join(dir, 'disk0.qcow2');
 			const sizeGB = Math.max(1, Math.round(Number(values.diskGB ?? 32)));
-			await execFileAsync(this.qemu.img, ['create', '-f', 'qcow2', disk, `${sizeGB}G`], { windowsHide: true, timeout: 60_000 });
+			await this.host.exec(this.qemu.img, ['create', '-f', 'qcow2', disk, `${sizeGB}G`], { timeout: 60_000 });
 			const def: VmDefinition = {
 				id,
 				name,
@@ -523,17 +700,135 @@ export class QemuConnection implements ClusterConnection {
 			this.log.info(`Created ${name} in ${dir}`);
 			return { id, name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB };
 		} catch (error) {
-			await fs.promises.rm(dir, { recursive: true, force: true });
+			await this.host.rm(dir, { recursive: true });
 			throw error;
 		}
 	}
 
+	/**
+	 * A machine from a cloud image: the image is downloaded (verified, cached) or taken from a file, copied to
+	 * the machine's own qcow2 disk, enlarged, and a cloud-init seed disk with the user, key and host name is
+	 * attached as its CD drive. Nothing is installed by hand: the first boot sets everything up.
+	 */
+	private async createFromCloudImage(name: string, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo> {
+		const choice = String(values.cloudImage ?? '');
+		const image = choice === 'custom' ? undefined : findImage(choice);
+		if (choice !== 'custom' && !image) throw new ProviderError('Choose a cloud image.', 'invalid');
+		const installed = this.installedArchs();
+		const arch: Arch = image?.arch ?? installed.find((a) => this.native(a)) ?? installed[0]!;
+		const firmwareCode = this.install(arch).firmwareCode;
+
+		// Everything that can be wrong is checked before anything is downloaded.
+		const user = String(values.ciUser ?? '').trim();
+		const hostname = String(values.ciHostname ?? '').trim() || hostnameFor(name);
+		const sshKeys = parseKeys(values.ciSshKey as string | undefined);
+		const password = String(values.ciPassword ?? '');
+		const custom = String(values.ciUserData ?? '');
+		const passwordHash = password ? sha512Crypt(password) : undefined;
+		if (!custom.trim()) {
+			const problem = cloudInitProblem({ hostname, user, sshKeys, passwordHash });
+			if (problem) throw new ProviderError(problem, 'invalid');
+		}
+		const customFile = String(values.cloudImageFile ?? '').trim();
+		if (!image) {
+			if (!customFile) throw new ProviderError('Enter the path of the disk image.', 'invalid');
+			if (!(await this.host.exists(customFile))) throw new ProviderError(`Image not found: ${customFile}`, 'invalid');
+		}
+		const hardware = normalizeHardware(arch, { firmware: firmwareCode ? 'uefi' : 'bios', diskBus: 'virtio', nic: 'virtio-net-pci', vga: 'std' });
+		if (hardware.firmware === 'uefi' && !firmwareCode) throw new ProviderError(`UEFI firmware for ${ARCH_LABEL[arch]} was not found next to QEMU.`, 'unavailable');
+
+		const phase = (from: number, to: number) => (p: { phase: string; done?: number; total?: number }) => {
+			const fraction = p.done !== undefined && p.total ? from + ((to - from) * p.done) / p.total : undefined;
+			const text = p.phase === 'download' ? `Downloading ${image!.label}${p.total && p.done !== undefined ? ` — ${Math.round((100 * p.done) / p.total)}%` : ''}` : p.phase === 'verify' ? 'Verifying the checksum' : p.phase === 'checksum' ? 'Checking for the latest image' : 'Using the downloaded image';
+			progress?.({ message: text, fraction });
+		};
+		const source = image ? await ensureImage(this.host, image, this.imageDirectory, { onProgress: phase(0.05, 0.85) }) : customFile;
+
+		const id = randomUUID();
+		const dir = this.dir(id);
+		await this.host.mkdir(dir);
+		try {
+			progress?.({ message: 'Preparing the disk', fraction: 0.88 });
+			const disk = this.host.path.join(dir, 'disk0.qcow2');
+			try {
+				await this.host.exec(this.qemu.img, ['convert', '-O', 'qcow2', source, disk], { timeout: 30 * 60_000 });
+			} catch (error) {
+				const detail = String((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
+				throw new ProviderError(`Could not read the image ${this.host.path.basename(source)}: ${detail}`, 'failed');
+			}
+			// Never shrink an image: the requested size only applies when it is larger.
+			const wanted = Math.max(1, Math.round(Number(values.diskGB ?? 32)));
+			const info = await this.imageInfo(disk);
+			if (!info?.['virtual-size'] || info['virtual-size'] < wanted * 1024 ** 3) {
+				await this.host.exec(this.qemu.img, ['resize', disk, `${wanted}G`], { timeout: 120_000 });
+			}
+
+			progress?.({ message: 'Writing the cloud-init disk', fraction: 0.94 });
+			const seed = this.host.path.join(dir, 'seed.iso');
+			await this.writeSeed(seed, id, { hostname, user, sshKeys, passwordHash, installAgent: values.ciAgent !== false, customUserData: custom });
+
+			const def: VmDefinition = {
+				id,
+				name,
+				arch,
+				cpus: Number(values.cpus ?? 2),
+				memoryMB: Number(values.memoryMB ?? 2048),
+				cpuModel: 'max',
+				firmware: hardware.firmware,
+				disks: [disk],
+				diskBus: hardware.diskBus,
+				cdrom: seed,
+				nic: hardware.nic,
+				mac: randomMac(),
+				vga: hardware.vga,
+				serial: values.serial !== false,
+				notes: `Set up by cloud-init from ${image ? image.label : this.host.path.basename(source)}. ${custom.trim() ? 'Custom user-data.' : `Sign in as ${user}.`}`,
+				cloudInit: { user: custom.trim() ? '' : user, hostname, image: image?.id, sshKeys, passwordHash, installAgent: values.ciAgent !== false, customUserData: custom },
+				createdAt: Date.now()
+			};
+			if (def.firmware === 'uefi') await this.ensureVars(def);
+			await this.saveDefinition(def);
+			progress?.({ message: 'Done', fraction: 1 });
+			this.log.info(`Created ${name} from ${image ? imageFileName(image) : source} in ${dir}`);
+			return { id, name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB };
+		} catch (error) {
+			await this.host.rm(dir, { recursive: true });
+			throw error;
+		}
+	}
+
+	/** A cloud-init `cidata` disk; `id` becomes the instance id, so each machine runs first-boot setup once, on its own. */
+	private async writeSeed(file: string, id: string, options: { hostname: string; user: string; sshKeys?: string[]; passwordHash?: string; installAgent?: boolean; customUserData?: string }): Promise<void> {
+		const full = { ...options, sshKeys: options.sshKeys ?? [], installAgent: options.installAgent !== false, customUserData: options.customUserData ?? '', instanceId: `vmm-${id}` };
+		await this.host.writeBytes(
+			file,
+			buildIso(
+				[
+					{ name: 'user-data', data: Buffer.from(userData(full), 'utf8') },
+					{ name: 'meta-data', data: Buffer.from(metaData(full), 'utf8') }
+				],
+				{ volumeId: 'cidata' }
+			)
+		);
+	}
+
+	async setTemplate(_nodeId: string, vmId: string, template: boolean): Promise<void> {
+		const def = await this.definition(vmId);
+		if (def.origin === 'adopted') throw new ProviderError('A VM that was attached from outside cannot become a template. Import it or recreate it here first.', 'unsupported');
+		if (await this.runtime(vmId)) throw new ProviderError(`Shut down "${def.name}" first`, 'invalid');
+		if (!!def.template === template) return;
+		if (template) def.template = true;
+		else delete def.template;
+		await this.saveDefinition(def);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
 	private async ensureVars(def: VmDefinition): Promise<string | undefined> {
-		const vars = path.join(this.dir(def.id), 'efivars.fd');
-		if (fs.existsSync(vars)) return vars;
+		const vars = this.host.path.join(this.dir(def.id), 'efivars.fd');
+		if (await this.host.exists(vars)) return vars;
 		const template = this.install(guestArch(def)).firmwareVarsTemplate;
 		if (!template) return undefined;
-		await fs.promises.copyFile(template, vars);
+		await this.host.copyFile(template, vars);
 		return vars;
 	}
 
@@ -546,15 +841,15 @@ export class QemuConnection implements ClusterConnection {
 		const fixed = (what: string) => (arm ? `${what} is fixed for ARM64 guests.` : restart);
 		const schema: FieldSchema[] = [
 			{ key: 'name', label: 'Name', type: 'text', required: true, group: 'General' },
-			{ key: 'arch', label: 'Architecture', type: 'text', readonly: true, group: 'General', description: isNative(arch) ? 'Runs with hardware acceleration.' : 'Emulated in software: much slower than a native guest.' },
+			{ key: 'arch', label: 'Architecture', type: 'text', readonly: true, group: 'General', description: this.native(arch) ? 'Runs with hardware acceleration.' : 'Emulated in software: much slower than a native guest.' },
 			{ key: 'notes', label: 'Notes', type: 'textarea', group: 'General' },
 			{ key: 'location', label: 'Location', type: 'text', readonly: true, group: 'General' },
-			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: os.cpus().length, required: true, group: 'Hardware', description: restart },
+			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: this.cpuCount, required: true, group: 'Hardware', description: restart },
 			{ key: 'memoryMB', label: 'Memory', type: 'number', unit: 'MB', min: 128, required: true, group: 'Hardware', description: restart },
 			{ key: 'cpuModel', label: 'CPU model', type: 'text', required: true, group: 'Hardware', description: 'QEMU -cpu value, e.g. max, host, qemu64' },
 			{ key: 'disks', label: 'Disks', type: 'text', readonly: true, group: 'Storage' },
 			{ key: 'diskBus', label: 'Disk controller', type: 'select', required: true, readonly: arm, options: DISK_BUS_OPTIONS, group: 'Storage', description: fixed('The controller') },
-			{ key: 'cdrom', label: 'CD/DVD (ISO)', type: 'file', filters: { 'Disk images': ['iso', 'img'] }, mediaDevice: 'cd0', group: 'Storage' },
+			{ key: 'cdrom', label: 'CD/DVD (ISO)', type: 'file', remotePath: this.host.remote, filters: { 'Disk images': ['iso', 'img'] }, mediaDevice: 'cd0', group: 'Storage' },
 			{ key: 'nic', label: 'Network adapter', type: 'select', required: true, options: NIC_OPTIONS, group: 'Network', description: restart },
 			{ key: 'vga', label: 'Display adapter', type: 'select', required: true, readonly: arm, options: VGA_OPTIONS, group: 'Display', description: fixed('The display adapter') },
 			{ key: 'serial', label: 'Serial console', type: 'checkbox', group: 'Display', description: restart },
@@ -576,7 +871,7 @@ export class QemuConnection implements ClusterConnection {
 				name: def.name,
 				notes: def.notes,
 				location: this.dir(def.id),
-				arch: `${ARCH_LABEL[arch]}${isNative(arch) ? '' : ' (emulated)'}`,
+				arch: `${ARCH_LABEL[arch]}${this.native(arch) ? '' : ' (emulated)'}`,
 				cpus: def.cpus,
 				memoryMB: def.memoryMB,
 				cpuModel: def.cpuModel,
@@ -683,7 +978,7 @@ export class QemuConnection implements ClusterConnection {
 
 	private async imageInfo(file: string): Promise<{ 'virtual-size'?: number; format?: string } | undefined> {
 		try {
-			const { stdout } = await execFileAsync(this.qemu.img, ['info', '--output=json', file], { windowsHide: true, timeout: 10_000 });
+			const { stdout } = await this.host.exec(this.qemu.img, ['info', '--output=json', file], { timeout: 10_000 });
 			return JSON.parse(stdout) as { 'virtual-size'?: number; format?: string };
 		} catch {
 			return undefined;
@@ -692,7 +987,7 @@ export class QemuConnection implements ClusterConnection {
 
 	private async guestInterfaces(port: number): Promise<GuestInterface[] | undefined> {
 		try {
-			const agent = await GuestAgentClient.connect(port, 1000);
+			const agent = await GuestAgentClient.over(await this.host.connect(port), 1000);
 			try {
 				return await agent.execute<GuestInterface[]>('guest-network-get-interfaces');
 			} finally {
@@ -712,7 +1007,7 @@ export class QemuConnection implements ClusterConnection {
 			return { timestamp: at, memoryMB: def.memoryMB };
 		}
 		const [process_, disks] = await Promise.all([
-			sampleProcess(runtime.pid),
+			this.host.sampleProcess(runtime.pid),
 			this.client(vmId, runtime)
 				.then((c) => c.execute<QmpBlockStats[]>('query-blockstats'))
 				.then((list) => parseBlockStats(list))
@@ -732,7 +1027,7 @@ export class QemuConnection implements ClusterConnection {
 	}
 
 	async insertMedia(_nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void> {
-		if (!fs.existsSync(imagePath)) throw new ProviderError(`Image not found: ${imagePath}`, 'invalid');
+		if (!(await this.host.exists(imagePath))) throw new ProviderError(`Image not found: ${imagePath}`, 'invalid');
 		await this.changeMedia(vmId, deviceId, imagePath);
 	}
 
@@ -749,18 +1044,18 @@ export class QemuConnection implements ClusterConnection {
 		// A running guest keeps writing: a copy taken now would be torn.
 		if (await this.runtime(vmId)) throw new ProviderError(`Shut down "${source.name}" before cloning it`, 'invalid');
 		for (const disk of source.disks) {
-			if (!fs.existsSync(disk)) throw new ProviderError(`The disk ${disk} of "${source.name}" was not found`, 'notFound');
+			if (!(await this.host.exists(disk))) throw new ProviderError(`The disk ${disk} of "${source.name}" was not found`, 'notFound');
 		}
 		const id = randomUUID();
 		const dir = this.dir(id);
-		await fs.promises.mkdir(dir, { recursive: true });
+		await this.host.mkdir(dir);
 		try {
 			// `convert` writes a compact qcow2 and leaves the source's internal snapshots behind.
 			const disks: string[] = [];
 			for (let index = 0; index < source.disks.length; index++) {
-				const target = path.join(dir, `disk${index}.qcow2`);
+				const target = this.host.path.join(dir, `disk${index}.qcow2`);
 				try {
-					await execFileAsync(this.qemu.img, ['convert', '-O', 'qcow2', source.disks[index]!, target], { windowsHide: true, timeout: 60 * 60_000 });
+					await this.host.exec(this.qemu.img, ['convert', '-O', 'qcow2', source.disks[index]!, target], { timeout: 60 * 60_000 });
 				} catch (error) {
 					const detail = String((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
 					throw new ProviderError(`Could not copy ${path.basename(source.disks[index]!)}: ${detail}`, 'failed');
@@ -768,16 +1063,26 @@ export class QemuConnection implements ClusterConnection {
 				disks.push(target);
 			}
 			// The UEFI variables (boot entries) travel with the machine.
-			const vars = path.join(this.dir(vmId), 'efivars.fd');
-			if (source.firmware === 'uefi' && fs.existsSync(vars)) await fs.promises.copyFile(vars, path.join(dir, 'efivars.fd'));
+			const vars = this.host.path.join(this.dir(vmId), 'efivars.fd');
+			if (source.firmware === 'uefi' && (await this.host.exists(vars))) await this.host.copyFile(vars, this.host.path.join(dir, 'efivars.fd'));
 			const def = cloneDefinition(source, { id, name, disks, mac: randomMac(), now: Date.now() });
+			// A machine from cloud-init gets its own seed: same instance id would make the guest skip first-boot
+			// setup (host name, SSH host keys), a fresh one runs it. The machine-id inside the disk is still shared.
+			const ci = source.cloudInit;
+			const ownSeed = source.cdrom && source.cdrom === this.host.path.join(this.dir(vmId), 'seed.iso');
+			if (ci && ownSeed && ci.installAgent !== undefined) {
+				const seed = this.host.path.join(dir, 'seed.iso');
+				await this.writeSeed(seed, id, { ...ci, hostname: hostnameFor(name) });
+				def.cdrom = seed;
+				def.cloudInit = { ...ci, hostname: hostnameFor(name) };
+			}
 			if (def.firmware === 'uefi') await this.ensureVars(def);
 			await this.saveDefinition(def);
 			this.log.info(`Cloned ${source.name} to ${name} in ${dir}`);
 			this.changes.fire({ nodeId: NODE_ID, vmId: id });
 			return { id, name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB };
 		} catch (error) {
-			await fs.promises.rm(dir, { recursive: true, force: true });
+			await this.host.rm(dir, { recursive: true });
 			throw error;
 		}
 	}
@@ -804,7 +1109,7 @@ export class QemuConnection implements ClusterConnection {
 	/** `-U` reads an image that a running VM holds open. */
 	private async snapshotInfo(file: string): Promise<{ format?: string; snapshots?: QemuSnapshotInfo[] } | undefined> {
 		try {
-			const { stdout } = await execFileAsync(this.qemu.img, ['info', '-U', '--output=json', file], { windowsHide: true, timeout: 15_000 });
+			const { stdout } = await this.host.exec(this.qemu.img, ['info', '-U', '--output=json', file], { timeout: 15_000 });
 			return JSON.parse(stdout) as { format?: string; snapshots?: QemuSnapshotInfo[] };
 		} catch {
 			return undefined;
@@ -813,7 +1118,7 @@ export class QemuConnection implements ClusterConnection {
 
 	private async snapshotImg(args: string[], what: string): Promise<void> {
 		try {
-			await execFileAsync(this.qemu.img, ['snapshot', ...args], { windowsHide: true, timeout: 120_000 });
+			await this.host.exec(this.qemu.img, ['snapshot', ...args], { timeout: 120_000 });
 		} catch (error) {
 			const detail = String((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
 			throw new ProviderError(`${what}: ${detail}`, 'failed');
@@ -968,16 +1273,16 @@ export class QemuConnection implements ClusterConnection {
 		if (def.origin === 'adopted') {
 			// Only forget it: the process and its disks are not ours to stop or remove.
 			this.closeQmp(vmId);
-			await fs.promises.rm(dir, { recursive: true, force: true });
+			await this.host.rm(dir, { recursive: true });
 			this.log.info(`Detached from ${def.name} (still running)`);
 			return;
 		}
 		if (await this.runtime(vmId)) await this.forceStop(vmId);
 		if (options.deleteDisks) {
-			await fs.promises.rm(dir, { recursive: true, force: true });
+			await this.host.rm(dir, { recursive: true });
 		} else {
 			for (const file of ['vm.json', 'runtime.json', 'efivars.fd', 'qemu.log']) {
-				await fs.promises.rm(path.join(dir, file), { force: true });
+				await this.host.rm(this.host.path.join(dir, file));
 			}
 		}
 		this.log.info(`Deleted ${def.name}${options.deleteDisks ? ' including disks' : ''}`);
@@ -1033,7 +1338,7 @@ export class QemuConnection implements ClusterConnection {
 	private async agentRequest(runtime: VmRuntime, mode: 'powerdown' | 'reboot'): Promise<boolean> {
 		if (!runtime.agentPort) return false;
 		try {
-			const agent = await GuestAgentClient.connect(runtime.agentPort, 2000);
+			const agent = await GuestAgentClient.over(await this.host.connect(runtime.agentPort), 2000);
 			try {
 				await agent.shutdown(mode);
 			} finally {
@@ -1049,10 +1354,10 @@ export class QemuConnection implements ClusterConnection {
 	private async waitStopped(pid: number, timeoutMs: number): Promise<boolean> {
 		const deadline = Date.now() + timeoutMs;
 		while (Date.now() < deadline) {
-			if (!isAlive(pid)) return true;
+			if (!(await this.host.isAlive(pid))) return true;
 			await sleep(200);
 		}
-		return !isAlive(pid);
+		return !(await this.host.isAlive(pid));
 	}
 
 	/** Starts are serialized: see `SerialQueue`. */
@@ -1071,13 +1376,14 @@ export class QemuConnection implements ClusterConnection {
 	}
 
 	private async startWithRetry(def: VmDefinition): Promise<void> {
+		if (def.template) throw new ProviderError(`${def.name} is a template. Create a machine from it, or convert it back to a VM first.`, 'invalid');
 		for (const disk of def.disks) {
-			if (!fs.existsSync(disk)) throw new ProviderError(`Disk not found: ${disk}`, 'invalid');
+			if (!(await this.host.exists(disk))) throw new ProviderError(`Disk not found: ${disk}`, 'invalid');
 		}
-		if (def.cdrom && !fs.existsSync(def.cdrom)) throw new ProviderError(`ISO not found: ${def.cdrom}`, 'invalid');
+		if (def.cdrom && !(await this.host.exists(def.cdrom))) throw new ProviderError(`ISO not found: ${def.cdrom}`, 'invalid');
 		for (const address of def.pciDevices ?? []) {
 			// QEMU only opens devices that vfio-pci owns; say so instead of showing its terse failure.
-			if (process.platform !== 'linux') throw new ProviderError(`${def.name} has PCI passthrough devices, which need a Linux host.`, 'unsupported');
+			if (this.host.platform !== 'linux') throw new ProviderError(`${def.name} has PCI passthrough devices, which need a Linux host.`, 'unsupported');
 			if (pciDriver(address) !== 'vfio-pci') {
 				throw new ProviderError(`PCI device ${address} is not bound to vfio-pci (it was rebound or the host restarted). Detach it in the VM details and attach it again.`, 'unavailable');
 			}
@@ -1089,10 +1395,10 @@ export class QemuConnection implements ClusterConnection {
 			const avoid = new Set([...(await this.portsInUse()), ...rejected]);
 			const runtime: VmRuntime = {
 				pid: 0,
-				qmpPort: await freePort(undefined, undefined, avoid),
-				vncPort: await freePort(5900, 5999, avoid),
-				serialPort: def.serial ? await freePort(undefined, undefined, avoid) : undefined,
-				agentPort: await freePort(undefined, undefined, avoid),
+				qmpPort: await this.host.freePort(undefined, undefined, avoid),
+				vncPort: await this.host.freePort(5900, 5999, avoid),
+				serialPort: def.serial ? await this.host.freePort(undefined, undefined, avoid) : undefined,
+				agentPort: await this.host.freePort(undefined, undefined, avoid),
 				startedAt: Date.now()
 			};
 			try {
@@ -1113,25 +1419,18 @@ export class QemuConnection implements ClusterConnection {
 			firmwareCode: this.install(guestArch(def)).firmwareCode,
 			firmwareVars: def.firmware === 'uefi' ? await this.ensureVars(def) : undefined
 		});
-		const logPath = path.join(dir, 'qemu.log');
-		const logFd = fs.openSync(logPath, 'w');
+		const logPath = this.host.path.join(dir, 'qemu.log');
 		const system = this.install(guestArch(def)).system;
 		this.log.info(`Starting ${def.name}: ${system} ${args.join(' ')}`);
-		const child = spawn(system, args, { detached: true, stdio: ['ignore', logFd, logFd], windowsHide: true, cwd: dir });
-		fs.closeSync(logFd);
-		if (!child.pid) throw new ProviderError('QEMU could not be started');
-		let exited = false;
-		child.once('exit', () => (exited = true));
-		child.unref();
-		runtime.pid = child.pid;
-		await fs.promises.writeFile(path.join(dir, 'runtime.json'), JSON.stringify(runtime, null, 2));
+		runtime.pid = await this.host.spawnDetached(system, args, { cwd: dir, logFile: logPath });
+		await this.host.writeFile(this.host.path.join(dir, 'runtime.json'), JSON.stringify(runtime, null, 2));
 
 		// Wait for QMP; report QEMU's own error output when it dies early.
-		const deadline = Date.now() + 15_000;
+		const deadline = Date.now() + (this.host.remote ? 30_000 : 15_000);
 		while (Date.now() < deadline) {
-			if (exited || !isAlive(runtime.pid)) {
+			if (!(await this.host.isAlive(runtime.pid))) {
 				await this.clearRuntime(def.id);
-				const output = (await fs.promises.readFile(logPath, 'utf8').catch(() => '')).trim();
+				const output = (await this.host.readFile(logPath).catch(() => '')).trim();
 				throw new ProviderError(`QEMU exited: ${output.split('\n').slice(-5).join(' ') || 'no output'}`, 'failed');
 			}
 			try {
@@ -1156,9 +1455,9 @@ export class QemuConnection implements ClusterConnection {
 		}
 		if (!(await this.waitStopped(runtime.pid, 5000))) {
 			// QMP did not honour `quit` (hung or unreachable): terminate, then kill.
-			signal(runtime.pid, 'SIGTERM');
+			await this.host.signal(runtime.pid, 'SIGTERM');
 			if (!(await this.waitStopped(runtime.pid, 3000))) {
-				signal(runtime.pid, 'SIGKILL');
+				await this.host.signal(runtime.pid, 'SIGKILL');
 				await this.waitStopped(runtime.pid, 2000);
 			}
 		}
@@ -1183,14 +1482,9 @@ export class QemuConnection implements ClusterConnection {
 			);
 		}
 		const host = (vnc ? runtime.vncHost : runtime.serialHost) ?? '127.0.0.1';
-		const socket = await new Promise<net.Socket>((resolve, reject) => {
-			const s = socketPath ? net.connect({ path: socketPath }) : net.connect({ port: port!, host });
-			s.once('connect', () => resolve(s));
-			s.once('error', reject);
-		}).catch((error: Error) => {
+		const socket = await (socketPath ? this.host.connectSocket(socketPath) : this.host.connect(port!, host)).catch((error: Error) => {
 			throw new ProviderError(`Could not open the ${vnc ? 'display' : 'serial console'} of ${def.name} at ${socketPath ?? `${host}:${port}`}: ${error.message}`, 'unavailable');
 		});
-		if (!socketPath) socket.setNoDelay(true);
 		const stream = !vnc && runtime.serialTelnet ? telnetStream(socket) : socket;
 		return { stream, dispose: () => stream.destroy() };
 	}
@@ -1377,7 +1671,7 @@ export class QemuConnection implements ClusterConnection {
 	}
 
 	private async scanRunning(): Promise<ExternalVm[]> {
-		return findExternalVms(await listProcesses(), await this.knownPids());
+		return findExternalVms(await this.host.listProcesses(), await this.knownPids());
 	}
 
 	async scanExternalVms(): Promise<ExternalVmInfo[]> {
@@ -1404,7 +1698,7 @@ export class QemuConnection implements ClusterConnection {
 		if (!found) throw new ProviderError('That QEMU process is gone, or is already managed. Scan again.', 'notFound');
 		const id = randomUUID();
 		const dir = this.dir(id);
-		await fs.promises.mkdir(dir, { recursive: true });
+		await this.host.mkdir(dir);
 		try {
 			const def: VmDefinition = {
 				id,
@@ -1436,11 +1730,11 @@ export class QemuConnection implements ClusterConnection {
 				serialHost: found.serial?.host,
 				serialSocket: found.serial?.socket,
 				serialTelnet: found.serial?.telnet,
-				startedAt: (await processStartedAt(found.pid)) ?? Date.now(),
+				startedAt: (await this.host.processStartedAt(found.pid)) ?? Date.now(),
 				external: true
 			};
 			// Runtime first: a definition without one is an adopted VM that is gone, and gets cleaned up.
-			await fs.promises.writeFile(path.join(dir, 'runtime.json'), JSON.stringify(runtime, null, 2));
+			await this.host.writeFile(this.host.path.join(dir, 'runtime.json'), JSON.stringify(runtime, null, 2));
 			await this.saveDefinition(def);
 			let warning: string | undefined;
 			if (!found.qmp) {
@@ -1452,7 +1746,7 @@ export class QemuConnection implements ClusterConnection {
 					// QMP serves one client at a time: libvirt, UTM or another tool may hold it.
 					this.closeQmp(id);
 					warning = `Could not talk to the control socket of ${def.name} (${(error as Error).message}). Another program may be using it; it is listed as observe-only until it is free.`;
-					await fs.promises.writeFile(path.join(dir, 'runtime.json'), JSON.stringify({ ...runtime, qmpPort: 0, qmpSocket: undefined }, null, 2));
+					await this.host.writeFile(this.host.path.join(dir, 'runtime.json'), JSON.stringify({ ...runtime, qmpPort: 0, qmpSocket: undefined }, null, 2));
 				}
 			}
 			this.log.info(`Attached to pid ${found.pid} as ${def.name}${warning ? `: ${warning}` : ''}`);
@@ -1462,7 +1756,7 @@ export class QemuConnection implements ClusterConnection {
 			if (def.serial) consoles.push('serial');
 			return { vm: { id, name: def.name, state: 'running', cpus: def.cpus, memoryMB: def.memoryMB, origin: 'adopted', controllable: !warning, consoles }, warning };
 		} catch (error) {
-			await fs.promises.rm(dir, { recursive: true, force: true });
+			await this.host.rm(dir, { recursive: true });
 			throw error;
 		}
 	}
@@ -1543,7 +1837,7 @@ export class QemuConnection implements ClusterConnection {
 						disks.push(disk);
 					}
 				}
-				const arch = candidate.arch === undefined ? (this.installedArchs().find((a) => isNative(a)) ?? 'x86_64') : archFromName(candidate.arch);
+				const arch = candidate.arch === undefined ? (this.installedArchs().find((a) => this.native(a)) ?? 'x86_64') : archFromName(candidate.arch);
 				if (!arch) throw new ProviderError(`${candidate.name}: the architecture "${candidate.arch}" is not supported (x86-64 and ARM64 only).`, 'unsupported');
 				const hardware = normalizeHardware(arch, { firmware: candidate.uefi ? 'uefi' : 'bios', diskBus: 'sata', nic: 'e1000', vga: 'std' });
 				const uefi = hardware.firmware === 'uefi' && !!this.install(arch).firmwareCode;
@@ -1582,6 +1876,7 @@ export class QemuConnection implements ClusterConnection {
 	dispose(): void {
 		for (const id of [...this.qmp.keys()]) this.closeQmp(id);
 		this.changes.dispose();
+		this.host.dispose();
 	}
 }
 
@@ -1590,62 +1885,13 @@ function hasControlChannel(runtime: VmRuntime): boolean {
 	return !!(runtime.qmpSocket || runtime.qmpPort);
 }
 
-function isAlive(pid: number): boolean {
-	if (!pid) return false;
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === 'EPERM';
-	}
-}
-
 function randomMac(): string {
 	const byte = () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0');
 	return `52:54:00:${byte()}:${byte()}:${byte()}`;
-}
-
-function signal(pid: number, name: NodeJS.Signals): void {
-	try {
-		process.kill(pid, name);
-	} catch {
-		// already gone
-	}
 }
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function tryListen(port: number): Promise<number | undefined> {
-	return new Promise((resolve) => {
-		const server = net.createServer();
-		server.unref();
-		server.once('error', () => resolve(undefined));
-		server.listen({ port, host: '127.0.0.1', exclusive: true }, () => {
-			const address = server.address();
-			const actual = typeof address === 'object' && address ? address.port : undefined;
-			server.close(() => resolve(actual));
-		});
-	});
-}
-
-/**
- * A free localhost port; within [min, max] when given (VNC needs 5900 + display). Ports in `avoid`
- * (held by running VMs, or just refused) are skipped. Note that this only *probes*: the port is not
- * held after it returns, see `SerialQueue`.
- */
-export async function freePort(min?: number, max?: number, avoid: ReadonlySet<number> = new Set()): Promise<number> {
-	if (min === undefined) {
-		for (let tries = 0; tries < 20; tries++) {
-			const port = await tryListen(0);
-			if (!port) throw new ProviderError('No free TCP port available');
-			if (!avoid.has(port)) return port;
-		}
-		throw new ProviderError('No free TCP port available');
-	}
-	for (let port = min; port <= (max ?? min); port++) {
-		if (!avoid.has(port) && (await tryListen(port))) return port;
-	}
-	throw new ProviderError(`No free TCP port between ${min} and ${max}`);
-}
+export const freePort = freeLocalPort;

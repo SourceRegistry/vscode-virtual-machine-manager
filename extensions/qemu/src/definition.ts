@@ -34,9 +34,25 @@ export interface VmDefinition {
 	serial: boolean;
 	extraArgs?: string;
 	notes?: string;
+	/** Set up by cloud-init from a seed disk (`cdrom`) when it was created: who to sign in as, for the user's reference. */
+	cloudInit?: CloudInitRecord;
+	/** A template: cannot be started, only cloned. */
+	template?: boolean;
 	/** Set when the VM was not created here: see `VmInfo.origin`. */
 	origin?: 'adopted' | 'imported';
 	createdAt: number;
+}
+
+/** What the seed disk was built from, kept so a clone of the machine can get its own seed. */
+export interface CloudInitRecord {
+	user: string;
+	hostname: string;
+	image?: string;
+	sshKeys?: string[];
+	/** SHA-512 hash, never the password. */
+	passwordHash?: string;
+	installAgent?: boolean;
+	customUserData?: string;
 }
 
 export interface VmRuntime {

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import * as net from 'node:net';
+import type { Duplex } from 'node:stream';
 
 export interface QmpEvent {
 	event: string;
@@ -33,7 +34,7 @@ export class QmpClient extends EventEmitter {
 	private greeting: ((value: void) => void) | undefined;
 	private closed = false;
 
-	private constructor(private readonly socket: net.Socket) {
+	private constructor(private readonly socket: Duplex) {
 		super();
 		socket.setEncoding('utf8');
 		socket.on('data', (chunk: string) => this.onData(chunk));
@@ -50,8 +51,13 @@ export class QmpClient extends EventEmitter {
 		return QmpClient.open(net.connect({ path: socketPath }), timeoutMs);
 	}
 
+	/** Talks QMP over a stream that is already connected (an ssh tunnel). */
+	static attach(stream: Duplex, timeoutMs = 3000): Promise<QmpClient> {
+		return QmpClient.open(stream, timeoutMs);
+	}
+
 	/** Performs the QMP handshake on a connecting socket. */
-	private static open(socket: net.Socket, timeoutMs: number): Promise<QmpClient> {
+	private static open(socket: Duplex, timeoutMs: number): Promise<QmpClient> {
 		return new Promise((resolve, reject) => {
 			const client = new QmpClient(socket);
 			const timer = setTimeout(() => {

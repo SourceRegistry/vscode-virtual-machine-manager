@@ -90,6 +90,14 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 		expect(commandsFor(menu, vmContextValue(poweringOff, caps))).not.toContain('vmm.stop');
 	});
 
+	it('offers Detach, never Delete, for an attached VM', () => {
+		const attached: VmInfo = { ...vm('running'), origin: 'adopted' };
+		const commands = commandsFor(menu, vmContextValue(attached, caps));
+		expect(commands).toContain('vmm.detachVm');
+		expect(commands).not.toContain('vmm.deleteVm');
+		expect(commandsFor(menu, vmContextValue(vm('running'), caps))).not.toContain('vmm.detachVm');
+	});
+
 	it('only offers actions the provider supports', () => {
 		const limited: Capabilities = { ...caps, power: ['start', 'stop'], consoles: [], preview: false, external: false, edit: false, delete: false };
 		expect(commandsFor(menu, vmContextValue(vm('running'), limited))).toEqual(['vmm.stop', 'vmm.copyId']);
@@ -158,6 +166,20 @@ describe.each(['view/item/context', 'webview/context'])('%s snapshot actions', (
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s ssh action', (menu) => {
+	const withDetails: Capabilities = { ...caps, details: true };
+
+	it('offers Remote-SSH on a running VM whose provider reports details, next to the other ways to connect', () => {
+		const commands = commandsFor(menu, vmContextValue(vm('running'), withDetails));
+		expect(commands).toContain('vmm.connectSsh');
+	});
+
+	it('does not offer it on a stopped VM or without details', () => {
+		expect(commandsFor(menu, vmContextValue(vm('stopped'), withDetails))).not.toContain('vmm.connectSsh');
+		expect(commandsFor(menu, vmContextValue(vm('running'), caps))).not.toContain('vmm.connectSsh');
+	});
+});
+
 describe.each(['view/item/context', 'webview/context'])('%s clone action', (menu) => {
 	it('offers Clone before Delete when the provider can clone, in any state', () => {
 		for (const state of ['running', 'stopped'] as const) {
@@ -169,6 +191,29 @@ describe.each(['view/item/context', 'webview/context'])('%s clone action', (menu
 
 	it('hides it for providers that cannot', () => {
 		expect(commandsFor(menu, vmContextValue(vm('stopped'), caps))).not.toContain('vmm.cloneVm');
+	});
+});
+
+describe.each(['view/item/context', 'webview/context'])('%s template actions', (menu) => {
+	const templating: Capabilities = { ...caps, clone: true, templates: true };
+
+	it('offers Convert to Template on a machine and nothing to create from', () => {
+		const commands = commandsFor(menu, vmContextValue(vm('stopped'), templating));
+		expect(commands).toContain('vmm.convertToTemplate');
+		expect(commands).not.toContain('vmm.createFromTemplate');
+		expect(commands).not.toContain('vmm.convertToVm');
+	});
+
+	it('on a template: create from it or convert back, and no power actions', () => {
+		const template = { ...vm('stopped'), template: true };
+		const commands = commandsFor(menu, vmContextValue(template, templating));
+		expect(commands).toEqual(expect.arrayContaining(['vmm.createFromTemplate', 'vmm.convertToVm']));
+		expect(commands).not.toContain('vmm.convertToTemplate');
+		expect(commands).not.toContain('vmm.start');
+	});
+
+	it('is hidden for providers without templates', () => {
+		expect(commandsFor(menu, vmContextValue(vm('stopped'), caps))).not.toContain('vmm.convertToTemplate');
 	});
 });
 

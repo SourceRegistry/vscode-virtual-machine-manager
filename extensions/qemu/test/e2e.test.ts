@@ -153,6 +153,19 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 		}
 	}, 120_000);
 
+	it('turns a stopped VM into a template that cannot start, and clones it into a machine', async () => {
+		const base = await connection.createVm('local', { name: 'e2e-tpl', arch: 'x86_64', cpus: 1, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'none', serial: false });
+		const flag = async (id: string) => (await connection.listVms('local')).find((v) => v.id === id)?.template;
+		await connection.setTemplate!('local', base.id, true);
+		expect(await flag(base.id)).toBe(true);
+		await expect(connection.power('local', base.id, 'start')).rejects.toMatchObject({ code: 'invalid' });
+		const made = await connection.cloneVm!('local', base.id, 'e2e-from-tpl');
+		expect(await flag(made.id)).toBeFalsy();
+		expect(await flag(base.id)).toBe(true);
+		await connection.setTemplate!('local', base.id, false);
+		expect(await flag(base.id)).toBeFalsy();
+	}, 60_000);
+
 	it('snapshots a stopped and a running VM, refuses to revert a running one, and reverts a stopped one', async () => {
 		const snapVm = await connection.createVm('local', { name: 'e2e-snap', arch: 'x86_64', cpus: 1, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'none', serial: false });
 		const names = async () => (await connection.listSnapshots!('local', snapVm.id)).map((s) => s.name);
