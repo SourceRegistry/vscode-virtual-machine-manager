@@ -117,6 +117,11 @@ describe('LibvirtProvider', () => {
 		expect(commands.indexOf('vol-create-as default lvprobe.qcow2 10G --format qcow2')).toBeLessThan(calls.findIndex((c) => c[0] === 'define'));
 		expect(progress.length).toBeGreaterThan(0);
 	});
+	it('asks for the virt machine when the default ARM machine is the toy integratorcp (Debian)', async () => {
+		const { connection, calls } = await connect({ domcapabilities: fixture('domcapabilities-debian-default.xml'), 'domcapabilities --machine virt': fixture('domcapabilities-debian-virt.xml'), 'pool-list --type dir --name': 'default\n', 'vol-path --pool default lvprobe.qcow2': '/pool/lvprobe.qcow2\n' });
+		await connection.createVm('host', { name: 'lvprobe', cpus: 2, memoryMB: 1024, diskGB: 5, network: 'user', pool: 'default' });
+		expect(calls.map((c) => c.join(' '))).toContain('domcapabilities --machine virt');
+	});
 	it('removes the new disk when the definition fails', async () => {
 		const caps = fixture('domcapabilities.xml');
 		const { connection, calls } = await connect({ domcapabilities: caps, 'pool-list --type dir --name': 'default\n', 'vol-path --pool default web.qcow2': '/pool/web.qcow2\n', define: new Error('error: boom') });
@@ -136,8 +141,10 @@ describe('LibvirtProvider', () => {
 		const local = await connect({ domcapabilities: caps, 'pool-list --type dir --name': '' });
 		expect((await local.connection.getCreateSchema()).find((f) => f.key === 'pool')!.options).toHaveLength(1);
 		expect(local.connection.capabilities.remotePaths).toBe(false);
-		const remote = await connect({ domcapabilities: caps, 'pool-list --type dir --name': '' }, { connection: 'ssh', sshHost: 'lab' });
+		const remote = await connect({ domcapabilities: caps, 'pool-list --type dir --name': '' }, { connection: 'ssh', sshHost: 'lab', scope: 'session' });
 		expect((await remote.connection.getCreateSchema()).find((f) => f.key === 'pool')!.options).toHaveLength(0);
+		const system = await connect({ domcapabilities: caps, 'pool-list --type dir --name': '' }, { connection: 'ssh', sshHost: 'lab' });
+		expect((await system.connection.getCreateSchema()).find((f) => f.key === 'pool')!.options).toMatchObject([{ label: 'New pool in /var/lib/libvirt/images' }]);
 		expect(remote.connection.capabilities.remotePaths).toBe(true);
 	});
 	it('says so when the display port refuses the connection', async () => {

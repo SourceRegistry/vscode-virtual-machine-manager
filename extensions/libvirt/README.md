@@ -42,4 +42,4 @@ For SSH, `ControlMaster auto` (with `ControlPersist`) in `~/.ssh/config` makes i
 
 ## Status
 
-Tested against a real libvirt 12.9 with QEMU 11.1 on Apple Silicon (HVF, `qemu:///session`): listing, start, stats, details, VNC banner, serial, media, snapshots with and without memory, shut down timeout, deletion. **Not yet run** against a Linux `qemu:///system`, over `qemu+ssh://`, or on a KVM host.
+Tested against a real libvirt 12.9 with QEMU 11.1 on Apple Silicon (HVF, `qemu:///session`): listing, start, stats, details, VNC banner, serial, media, snapshots with and without memory, shut down timeout, deletion. Also run over `qemu+ssh://` against a Debian 12 libvirt 9.0 host (arm64 guest, no KVM; `qemu:///system`): create with a pool made on the way, start, details, stats, the VNC display through the tunnel, delete with the disk (`VMM_E2E_LIBVIRT_URI`). **Not yet run** on a KVM or x86 host.

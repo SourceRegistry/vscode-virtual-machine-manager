@@ -141,7 +141,7 @@ Experimental means implemented and unit tested, but not yet verified on real har
 | Hyper-V | Unit tests only: there is no Windows host to run it on. Snapshots, clone and templates are new and have never run. |
 | QEMU | Real QEMU on macOS (Apple Silicon, HVF) and Linux in CI, including a real Debian guest; SSH through a stand-in `ssh`, not yet a real remote machine. |
 | Proxmox VE | Unit tests against a mocked API client; not yet a real Proxmox server. |
-| libvirt | Real libvirt 12.9 with QEMU 11.1 on macOS (`qemu:///session`, HVF). Not yet Linux `qemu:///system`, a KVM host, or `qemu+ssh://`. |
+| libvirt | Real libvirt 12.9 with QEMU 11.1 on macOS (`qemu:///session`, HVF). Also a Debian 12 libvirt over `qemu+ssh://` (`qemu:///system`, no KVM). Not yet an x86 or KVM host. |
 
 Remote Hyper-V and more libvirt features (clone, edit, storage pools) are on the [roadmap](docs/ROADMAP.md).
 

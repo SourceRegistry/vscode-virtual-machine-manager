@@ -260,7 +260,8 @@ export class LibvirtConnection implements ClusterConnection {
 			this.listNodes()
 		]);
 		const arm = host.arch === 'aarch64';
-		const canMakePool = this.local && !pools.length;
+		const poolPath = this.newPoolPath();
+		const canMakePool = !!poolPath && !pools.length;
 		const bus = (value: DiskBus, label: string, description: string) => ({ value, label, description });
 		return [
 			{ key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'my-vm', description: 'Letters, digits, "." "_" and "-"; it starts with a letter or digit.' },
@@ -270,7 +271,7 @@ export class LibvirtConnection implements ClusterConnection {
 			{ key: 'iso', label: 'Installation media (ISO)', type: 'file', remotePath: !this.local, filters: { 'Disk images': ['iso', 'img'] }, description: this.local ? undefined : 'The path on the libvirt host.' },
 			{
 				key: 'pool', label: 'Storage pool', type: 'select', required: !canMakePool, default: pools.includes('default') ? 'default' : (pools[0] ?? ''),
-				options: pools.length ? pools.map((p) => ({ value: p, label: p })) : canMakePool ? [{ value: '', label: 'New pool in ~/.local/share/libvirt/images', description: 'This connection has no directory pool yet.' }] : [],
+				options: pools.length ? pools.map((p) => ({ value: p, label: p })) : canMakePool ? [{ value: '', label: `New pool in ${poolPath}`, description: 'This connection has no directory pool yet.' }] : [],
 				description: pools.length || canMakePool ? 'Where the disk is created.' : 'This libvirt has no directory storage pool: create one on the host (virsh pool-define-as) first.'
 			},
 			{
@@ -291,7 +292,18 @@ export class LibvirtConnection implements ClusterConnection {
 
 	/** What the host's default emulator offers; the first thing a new domain is built from. */
 	private async hostCapabilities() {
-		return parseDomainCapabilities(await this.virsh.exec(['domcapabilities']));
+		const first = parseDomainCapabilities(await this.virsh.exec(['domcapabilities']));
+		// The default machine can be an odd one (Debian's libvirt picks `integratorcp` on ARM, one CPU, no PCI): ask for the usual one.
+		const wanted = first.arch === 'aarch64' ? 'virt' : first.arch === 'x86_64' ? 'q35' : undefined;
+		if (!wanted || first.machine.startsWith(wanted) || first.machine.startsWith(`pc-${wanted}`)) return first;
+		const asked = parseDomainCapabilities(await this.virsh.exec(['domcapabilities', '--machine', wanted]));
+		return asked.machine.includes(wanted) ? asked : first;
+	}
+
+	/** Where a first storage pool goes: libvirt's usual folder for the system, the user's own for a local session. */
+	private newPoolPath(): string | undefined {
+		if (/\/system(\?|$)/.test(this.uri)) return '/var/lib/libvirt/images';
+		return this.local ? join(homedir(), '.local', 'share', 'libvirt', 'images') : undefined;
 	}
 
 	/** The directory pool to create volumes in; on this computer one is made when there is none. */
@@ -302,11 +314,12 @@ export class LibvirtConnection implements ClusterConnection {
 			return requested;
 		}
 		if (pools.length) return pools.includes('default') ? 'default' : pools[0]!;
-		if (!this.local) throw new ProviderError('This libvirt has no directory storage pool. Create one on the host (virsh pool-define-as) first.', 'unavailable');
+		const path = this.newPoolPath();
+		if (!path) throw new ProviderError('This libvirt has no directory storage pool. Create one on the host (virsh pool-define-as) first.', 'unavailable');
 		const known = await this.names(['pool-list', '--all', '--name']);
 		const name = known.includes('default') ? 'vmm' : 'default';
 		if (!known.includes(name)) {
-			await this.virsh.exec(['pool-define-as', name, 'dir', '--target', join(homedir(), '.local', 'share', 'libvirt', 'images')]);
+			await this.virsh.exec(['pool-define-as', name, 'dir', '--target', path]);
 			await this.virsh.exec(['pool-build', name]);
 			await this.virsh.exec(['pool-autostart', name]);
 		}
