@@ -265,6 +265,8 @@ export interface NicDevice {
 	network?: string;
 	ipAddresses?: string[];
 	connected?: boolean;
+	/** The host can connect to `ipAddresses` directly. `false` behind NAT (QEMU user networking), where only forwarded ports work. Absent: assume yes. */
+	reachable?: boolean;
 }
 
 /** Another device the guest sees: PCI/PCIe (including passthrough), USB, serial… */

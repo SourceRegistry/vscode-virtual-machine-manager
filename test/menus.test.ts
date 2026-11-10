@@ -158,6 +158,20 @@ describe.each(['view/item/context', 'webview/context'])('%s snapshot actions', (
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s ssh action', (menu) => {
+	const withDetails: Capabilities = { ...caps, details: true };
+
+	it('offers Remote-SSH on a running VM whose provider reports details, next to the other ways to connect', () => {
+		const commands = commandsFor(menu, vmContextValue(vm('running'), withDetails));
+		expect(commands).toContain('vmm.connectSsh');
+	});
+
+	it('does not offer it on a stopped VM or without details', () => {
+		expect(commandsFor(menu, vmContextValue(vm('stopped'), withDetails))).not.toContain('vmm.connectSsh');
+		expect(commandsFor(menu, vmContextValue(vm('running'), caps))).not.toContain('vmm.connectSsh');
+	});
+});
+
 describe.each(['view/item/context', 'webview/context'])('%s clone action', (menu) => {
 	it('offers Clone before Delete when the provider can clone, in any state', () => {
 		for (const state of ['running', 'stopped'] as const) {

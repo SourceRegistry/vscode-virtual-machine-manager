@@ -15,6 +15,7 @@ import { VmDashboardPanel } from '../webview/VmDashboardPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, log, showError } from '../util/log';
 import * as snapshotFlow from '../snapshots/flow';
+import { addSshForward, addToSshConfig, connectSsh, removeFromSshConfig } from '../ssh/connect';
 import { deleteVmDetail } from '../../shared/deleteDetail';
 import { matchesQuery } from '../../shared/vmSearch';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
@@ -293,6 +294,20 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		} catch (error) {
 			await showError(`Could not change the media of ${location.vm.name}`, error);
 		}
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// SSH
+	// -----------------------------------------------------------------------------------------
+
+	async function connectWithSsh(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to connect to over SSH', (l) => !!l.cluster.connection?.capabilities.details && l.vm.state === 'running');
+		if (location) await connectSsh(manager, context.globalState, location);
+	}
+
+	async function forwardSsh(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to forward SSH for', (l) => !!l.cluster.connection?.capabilities.forwards);
+		if (location) await addSshForward(manager, location);
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -766,6 +781,10 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}),
 		register('vmm.ejectMedia', (arg) => ejectMedia(arg)),
 		register('vmm.changeMedia', (arg) => changeMedia(arg)),
+		register('vmm.connectSsh', (arg) => connectWithSsh(arg)),
+		register('vmm.addSshForward', (arg) => forwardSsh(arg)),
+		register('vmm.addSshConfigEntries', () => addToSshConfig(manager, context.globalState)),
+		register('vmm.removeSshConfigEntries', () => removeFromSshConfig()),
 		register('vmm.cloneVm', (arg) => cloneVm(arg)),
 		register('vmm.takeSnapshot', (arg) => takeSnapshot(arg)),
 		register('vmm.revertSnapshot', (arg) => revertSnapshot(arg)),

@@ -159,6 +159,7 @@ export function nicDevice(model: string, mac: string | undefined, interfaces: Gu
 			model,
 			mac: address,
 			network: 'User networking (NAT)',
+			reachable: false,
 			ipAddresses: guest ? guestIpAddresses(guest) : undefined,
 			connected: running
 		}

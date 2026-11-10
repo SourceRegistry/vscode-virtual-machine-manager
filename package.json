@@ -194,6 +194,30 @@
         "icon": "$(files)"
       },
       {
+        "command": "vmm.connectSsh",
+        "title": "Connect with Remote-SSH…",
+        "category": "VM",
+        "icon": "$(remote)"
+      },
+      {
+        "command": "vmm.addSshForward",
+        "title": "Forward SSH Port…",
+        "category": "VM",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "vmm.addSshConfigEntries",
+        "title": "Add Machines to SSH Config…",
+        "category": "VM",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vmm.removeSshConfigEntries",
+        "title": "Remove Machines from SSH Config…",
+        "category": "VM",
+        "icon": "$(remove)"
+      },
+      {
         "command": "vmm.cloneVm",
         "title": "Clone…",
         "category": "VM",
@@ -382,6 +406,21 @@
         {
           "command": "vmm.changeMedia",
           "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.connectSsh",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.addSshForward",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.addSshConfigEntries",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.removeSshConfigEntries"
         },
         {
           "command": "vmm.cloneVm",
@@ -637,6 +676,11 @@
           "group": "2_connect@3"
         },
         {
+          "command": "vmm.connectSsh",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bdetails;/",
+          "group": "2_connect@4"
+        },
+        {
           "command": "vmm.ejectMedia",
           "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bejectable;/",
           "group": "2_media@1"
@@ -816,6 +860,11 @@
           "group": "2_connect@3"
         },
         {
+          "command": "vmm.connectSsh",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\bdetails;/",
+          "group": "2_connect@4"
+        },
+        {
           "command": "vmm.ejectMedia",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bejectable;/",
           "group": "2_media@1"
@@ -891,6 +940,16 @@
           "type": "boolean",
           "default": true,
           "description": "Ask for confirmation before a hard power off (Stop)."
+        },
+        "vmm.ssh.user": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The account to sign in as inside a guest when connecting with **VM: Connect with Remote-SSH…**. Empty: your user name on this computer. The answer is remembered per machine."
+        },
+        "vmm.ssh.addConfigEntry": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer to add an entry for the machine to your ssh config before connecting (it is always shown first and never written silently). Turn off to connect by address without touching the file."
         }
       }
     },

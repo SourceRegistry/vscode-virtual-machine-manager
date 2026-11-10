@@ -98,6 +98,7 @@ export type OverviewCommand =
 	| 'vmm.ejectMedia'
 	| 'vmm.changeMedia'
 	| 'vmm.cloneVm'
+	| 'vmm.connectSsh'
 	| 'vmm.takeSnapshot'
 	| 'vmm.revertSnapshot'
 	| 'vmm.deleteSnapshot'
