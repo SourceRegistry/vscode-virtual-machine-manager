@@ -158,6 +158,20 @@ describe.each(['view/item/context', 'webview/context'])('%s snapshot actions', (
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s clone action', (menu) => {
+	it('offers Clone before Delete when the provider can clone, in any state', () => {
+		for (const state of ['running', 'stopped'] as const) {
+			const commands = commandsFor(menu, vmContextValue(vm(state), { ...caps, clone: true }));
+			expect(commands).toContain('vmm.cloneVm');
+			expect(commands.indexOf('vmm.cloneVm')).toBeLessThan(commands.indexOf('vmm.deleteVm'));
+		}
+	});
+
+	it('hides it for providers that cannot', () => {
+		expect(commandsFor(menu, vmContextValue(vm('stopped'), caps))).not.toContain('vmm.cloneVm');
+	});
+});
+
 describe.each(['view/item/context', 'webview/context'])('%s details action', (menu) => {
 	it('offers Show Details first in the manage group when the provider reports details or stats', () => {
 		const detailed: Capabilities = { ...caps, details: true };

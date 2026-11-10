@@ -97,6 +97,7 @@ export type OverviewCommand =
 	| 'vmm.openVmDashboard'
 	| 'vmm.ejectMedia'
 	| 'vmm.changeMedia'
+	| 'vmm.cloneVm'
 	| 'vmm.takeSnapshot'
 	| 'vmm.revertSnapshot'
 	| 'vmm.deleteSnapshot'

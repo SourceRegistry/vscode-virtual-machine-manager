@@ -296,6 +296,39 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	}
 
 	// -----------------------------------------------------------------------------------------
+	// Clone
+	// -----------------------------------------------------------------------------------------
+
+	async function cloneVm(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to clone', (l) => !!l.cluster.connection?.capabilities.clone);
+		if (!location) return;
+		const caps = location.cluster.connection?.capabilities;
+		if (caps?.cloneNeedsStopped && location.vm.state !== 'stopped') {
+			void vscode.window.showInformationMessage(`Shut down "${location.vm.name}" before cloning it: a running machine keeps changing its disks.`);
+			return;
+		}
+		const name = await vscode.window.showInputBox({
+			title: `Clone ${location.vm.name}`,
+			prompt: 'Name of the copy. It gets its own disks and network address; snapshots, port forwards and passed-through devices are not copied.',
+			value: `${location.vm.name} (clone)`
+		});
+		if (name === undefined) return;
+		try {
+			const connection = await manager.connect(location.ref.clusterId);
+			if (!connection.cloneVm) return;
+			const copy = await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `Cloning ${location.vm.name}… (large disks take a while)` },
+				() => connection.cloneVm!(location.ref.nodeId, location.ref.vmId, name.trim())
+			);
+			await manager.refresh(location.ref.clusterId);
+			const choice = await vscode.window.showInformationMessage(`"${copy.name}" is ready.`, 'Start');
+			if (choice === 'Start') await power({ ...location.ref, vmId: copy.id }, 'start');
+		} catch (error) {
+			await showError(`Could not clone ${location.vm.name}`, error);
+		}
+	}
+
+	// -----------------------------------------------------------------------------------------
 	// Snapshots
 	// -----------------------------------------------------------------------------------------
 
@@ -733,6 +766,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}),
 		register('vmm.ejectMedia', (arg) => ejectMedia(arg)),
 		register('vmm.changeMedia', (arg) => changeMedia(arg)),
+		register('vmm.cloneVm', (arg) => cloneVm(arg)),
 		register('vmm.takeSnapshot', (arg) => takeSnapshot(arg)),
 		register('vmm.revertSnapshot', (arg) => revertSnapshot(arg)),
 		register('vmm.deleteSnapshot', (arg) => deleteSnapshot(arg)),

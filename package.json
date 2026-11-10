@@ -194,6 +194,12 @@
         "icon": "$(files)"
       },
       {
+        "command": "vmm.cloneVm",
+        "title": "Clone…",
+        "category": "VM",
+        "icon": "$(copy)"
+      },
+      {
         "command": "vmm.takeSnapshot",
         "title": "Take Snapshot…",
         "category": "VM",
@@ -375,6 +381,10 @@
         },
         {
           "command": "vmm.changeMedia",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.cloneVm",
           "when": "vmm.hasVms"
         },
         {
@@ -662,9 +672,14 @@
           "group": "3_manage@1"
         },
         {
+          "command": "vmm.cloneVm",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bclone;/",
+          "group": "3_manage@2"
+        },
+        {
           "command": "vmm.deleteVm",
           "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdelete;/",
-          "group": "3_manage@2"
+          "group": "3_manage@3"
         },
         {
           "command": "vmm.copyId",
@@ -836,9 +851,14 @@
           "group": "3_manage@1"
         },
         {
+          "command": "vmm.cloneVm",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bclone;/",
+          "group": "3_manage@2"
+        },
+        {
           "command": "vmm.deleteVm",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bdelete;/",
-          "group": "3_manage@2"
+          "group": "3_manage@3"
         },
         {
           "command": "vmm.copyId",

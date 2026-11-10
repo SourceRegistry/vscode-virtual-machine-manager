@@ -248,7 +248,8 @@ Status: **in progress** on `feat/snapshots`. QEMU snapshots work end to end on t
 - [x] **Bug found by that check, fixed:** a VM created without an ISO had no CD/DVD drive at all, so **Change ISO** (offered anyway) did nothing on a running VM and there was no drive to boot from after a restart. Every VM now gets a CD/DVD drive, empty without an ISO (`buildArgs`), on both architectures. Verified: unit tests, e2e (fails without the fix), and the empty `scsi-cd` insert and eject on real ARM64 under HVF. Existing VMs get the drive at their next start. Probably also the cause of the earlier Eject / Change ISO "needed a reload" report
 - [ ] Full-state snapshots: needs the UEFI vars store in a snapshottable format (qcow2 pflash) and a check that `savevm`/`loadvm` work under HVF on Apple Silicon
 - [ ] Snapshot size, and a snapshot tree/"current" marker (qcow2 does not track the current one)
-- [ ] Clone / linked clone (`qemu-img create -b`, new MAC and name), `Capabilities.clone`
+- [x] Clone (full copy): `VM: Clone…`, `cloneVm`, `Capabilities.clone` / `cloneNeedsStopped`. `qemu-img convert` per disk (compact, drops the source's snapshots), copy of `efivars.fd`, new MAC, forwards / passed-through devices / imported marker not copied (`extensions/qemu/src/clone.ts`). Stopped VMs only; attached VMs refused. Unit tests plus an e2e on real QEMU (data copied, independent, no snapshots, new MAC, running VM refused, name clash refused). Not yet clicked through by hand
+- [ ] Linked clone (`qemu-img create -b`): deferred on purpose. The clone depends on the original's disk staying untouched, and nothing stops the original from being started and corrupting it. Needs a template concept (a read-only base) first, see phase 14
 - [ ] Hyper-V (checkpoints) and Proxmox (snapshot API) map onto the same SDK: **not local**, write against docs + mocks
 - [ ] Revert for a running VM without powering off (needs memory snapshots)
 
