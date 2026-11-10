@@ -1,5 +1,22 @@
 # Changelog
 
+# [0.6.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.5.0...v0.6.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* **qemu:** always give a VM a CD/DVD drive ([642839c](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/642839c79f271a7693a8db18dd4e10a9039b1d91))
+
+
+### Features
+
+* close the tabs of a VM that disappears and tell the user ([a943e28](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/a943e28485205220c3aaf55580138499a83013d0))
+* **qemu:** clone a stopped VM into an independent copy ([e5b70ce](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/e5b70ced090620106a1c28f7db67e7985b7b6247))
+* **qemu:** snapshots of a VM's disks ([bf52865](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/bf52865cec9bcde6a399639c950e39f5e819ae82))
+* say what deleting a VM does to its snapshots, and close its views ([7a61c66](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/7a61c66a1e0a2e658a0e9b6a482302a278e9541d))
+* take, revert and delete snapshots from VS Code ([8fa91bc](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/8fa91bc44c0bea0c3382aa037fac816c88c3f357))
+* VM: Clone… in the palette and the tree and Overview menus ([26f0b4d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/26f0b4de391e73d8541db32f18294f546af542f2))
+
 # [0.5.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.4.0...v0.5.0) (2026-11-08)
 
 
