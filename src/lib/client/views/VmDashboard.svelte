@@ -23,7 +23,6 @@
 		trimWindow,
 		type MetricPoint
 	} from '../../../shared/metrics';
-	import { OPERATION_LABEL } from '../../../shared/operations';
 	import LineChart from '../components/LineChart.svelte';
 	import { onMessage, request } from '../rpc/bridge';
 	import { vmStates } from '../vmState';
@@ -297,7 +296,6 @@
 				{/if}
 				<Button transparent onclick={() => run('vmm.editVm')}><Icon icon="gear" margin="right" />Settings</Button>
 				{#if actionError}<span class="error">{actionError}</span>{/if}
-				{#if vm.operation}<span class="operation">{OPERATION_LABEL[vm.operation as keyof typeof OPERATION_LABEL] ?? ''}</span>{/if}
 			</Flexbox>
 		</Section>
 
@@ -707,8 +705,7 @@
 		font-family: var(--vscode-editor-font-family, monospace);
 		white-space: nowrap;
 	}
-	.muted,
-	.operation {
+	.muted {
 		color: var(--vscode-descriptionForeground);
 	}
 	.error {

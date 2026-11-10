@@ -87,7 +87,7 @@ describe.skipIf(!image)('a machine from a cloud image', () => {
 			expect(fs.readFileSync(original).includes(`vmm-${vmId}`)).toBe(true);
 		} finally {
 			await connection.setTemplate!('local', vmId, false);
-			await connection.deleteVm?.('local', copy.id).catch(() => undefined);
+			await connection.deleteVm('local', copy.id, { deleteDisks: true }).catch(() => undefined);
 		}
 	}, 120_000);
 
