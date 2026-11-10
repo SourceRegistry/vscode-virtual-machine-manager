@@ -140,6 +140,24 @@ describe.each(['view/item/context', 'webview/context'])('%s media actions', (men
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s snapshot actions', (menu) => {
+	const withSnapshots: Capabilities = { ...caps, snapshots: true };
+
+	it('offers take, revert and delete together, in that order, when the provider supports snapshots', () => {
+		for (const state of ['running', 'stopped'] as const) {
+			const commands = commandsFor(menu, vmContextValue(vm(state), withSnapshots));
+			expect(commands).toEqual(expect.arrayContaining(['vmm.takeSnapshot', 'vmm.revertSnapshot', 'vmm.deleteSnapshot']));
+			expect(commands.indexOf('vmm.takeSnapshot')).toBeLessThan(commands.indexOf('vmm.revertSnapshot'));
+			expect(commands.indexOf('vmm.revertSnapshot')).toBeLessThan(commands.indexOf('vmm.deleteSnapshot'));
+		}
+	});
+
+	it('hides them for providers without snapshots', () => {
+		const commands = commandsFor(menu, vmContextValue(vm('stopped'), caps));
+		expect(commands.filter((c) => c.endsWith('Snapshot'))).toEqual([]);
+	});
+});
+
 describe.each(['view/item/context', 'webview/context'])('%s details action', (menu) => {
 	it('offers Show Details first in the manage group when the provider reports details or stats', () => {
 		const detailed: Capabilities = { ...caps, details: true };

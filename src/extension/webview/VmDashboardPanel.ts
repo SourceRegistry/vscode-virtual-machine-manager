@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { OverviewCommand, VmRef } from '../../shared/protocol';
 import type { ConnectionManager } from '../clusters/ConnectionManager';
 import { browserUrl, sshCommand } from '../../shared/forwards';
+import { deleteSnapshot, listSnapshots, revertSnapshot, takeSnapshot } from '../snapshots/flow';
 import { panelIcon, renderHtml, WebviewChannel, webviewOptions } from './WebviewHost';
 
 export const VM_DASHBOARD_VIEW_TYPE = 'vmm.vmDashboard';
@@ -90,6 +91,24 @@ export class VmDashboardPanel implements vscode.Disposable {
 				await connection.changePassthrough(ref.nodeId, ref.vmId, deviceId, action, { confirmed: true });
 				await manager.refresh(ref.clusterId);
 				return { changed: true };
+			},
+			listSnapshots: async () => {
+				const location = manager.findVm(ref);
+				return location ? listSnapshots(manager, location) : [];
+			},
+			takeSnapshot: async ({ name }) => {
+				const location = manager.findVm(ref);
+				return location ? takeSnapshot(manager, location, name) : undefined;
+			},
+			revertSnapshot: async ({ snapshotId }) => {
+				const location = manager.findVm(ref);
+				const snapshot = location && (await listSnapshots(manager, location)).find((s) => s.id === snapshotId);
+				return location && snapshot ? revertSnapshot(manager, location, snapshot) : false;
+			},
+			deleteSnapshot: async ({ snapshotId }) => {
+				const location = manager.findVm(ref);
+				const snapshot = location && (await listSnapshots(manager, location)).find((s) => s.id === snapshotId);
+				return location && snapshot ? deleteSnapshot(manager, location, snapshot) : false;
 			},
 			addForward: async ({ forward }) => {
 				const connection = await manager.connect(ref.clusterId);

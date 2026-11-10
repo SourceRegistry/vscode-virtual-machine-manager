@@ -194,6 +194,24 @@
         "icon": "$(files)"
       },
       {
+        "command": "vmm.takeSnapshot",
+        "title": "Take Snapshot…",
+        "category": "VM",
+        "icon": "$(device-camera)"
+      },
+      {
+        "command": "vmm.revertSnapshot",
+        "title": "Revert to Snapshot…",
+        "category": "VM",
+        "icon": "$(history)"
+      },
+      {
+        "command": "vmm.deleteSnapshot",
+        "title": "Delete Snapshot…",
+        "category": "VM",
+        "icon": "$(trash)"
+      },
+      {
         "command": "vmm.deleteVm",
         "title": "Delete",
         "category": "VM",
@@ -357,6 +375,18 @@
         },
         {
           "command": "vmm.changeMedia",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.takeSnapshot",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.revertSnapshot",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.deleteSnapshot",
           "when": "vmm.hasVms"
         },
         {
@@ -607,6 +637,21 @@
           "group": "2_media@2"
         },
         {
+          "command": "vmm.takeSnapshot",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bsnapshots;/",
+          "group": "2_snapshots@1"
+        },
+        {
+          "command": "vmm.revertSnapshot",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bsnapshots;/",
+          "group": "2_snapshots@2"
+        },
+        {
+          "command": "vmm.deleteSnapshot",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bsnapshots;/",
+          "group": "2_snapshots@3"
+        },
+        {
           "command": "vmm.openVmDashboard",
           "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdetails;/",
           "group": "3_manage@0"
@@ -764,6 +809,21 @@
           "command": "vmm.changeMedia",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bmedia;/",
           "group": "2_media@2"
+        },
+        {
+          "command": "vmm.takeSnapshot",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bsnapshots;/",
+          "group": "2_snapshots@1"
+        },
+        {
+          "command": "vmm.revertSnapshot",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bsnapshots;/",
+          "group": "2_snapshots@2"
+        },
+        {
+          "command": "vmm.deleteSnapshot",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bsnapshots;/",
+          "group": "2_snapshots@3"
         },
         {
           "command": "vmm.openVmDashboard",

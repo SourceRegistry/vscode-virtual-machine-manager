@@ -14,6 +14,7 @@ import { OverviewPanel } from '../webview/OverviewPanel';
 import { VmDashboardPanel } from '../webview/VmDashboardPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, log, showError } from '../util/log';
+import * as snapshotFlow from '../snapshots/flow';
 import { matchesQuery } from '../../shared/vmSearch';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
 
@@ -291,6 +292,31 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		} catch (error) {
 			await showError(`Could not change the media of ${location.vm.name}`, error);
 		}
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Snapshots
+	// -----------------------------------------------------------------------------------------
+
+	const canSnapshot = (l: VmLocation) => !!l.cluster.connection?.capabilities.snapshots;
+
+	async function takeSnapshot(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to snapshot', canSnapshot);
+		if (location) await snapshotFlow.takeSnapshot(manager, location);
+	}
+
+	async function revertSnapshot(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to revert', canSnapshot);
+		if (!location) return;
+		const snapshot = await snapshotFlow.pickSnapshot(manager, location, `Revert ${location.vm.name} to…`);
+		if (snapshot) await snapshotFlow.revertSnapshot(manager, location, snapshot);
+	}
+
+	async function deleteSnapshot(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to delete a snapshot of', canSnapshot);
+		if (!location) return;
+		const snapshot = await snapshotFlow.pickSnapshot(manager, location, `Delete a snapshot of ${location.vm.name}`);
+		if (snapshot) await snapshotFlow.deleteSnapshot(manager, location, snapshot);
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -679,6 +705,9 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}),
 		register('vmm.ejectMedia', (arg) => ejectMedia(arg)),
 		register('vmm.changeMedia', (arg) => changeMedia(arg)),
+		register('vmm.takeSnapshot', (arg) => takeSnapshot(arg)),
+		register('vmm.revertSnapshot', (arg) => revertSnapshot(arg)),
+		register('vmm.deleteSnapshot', (arg) => deleteSnapshot(arg)),
 		register('vmm.deleteVm', (arg) => deleteVm(arg)),
 		register('vmm.start', (arg) => power(arg, 'start')),
 		register('vmm.shutdown', (arg) => power(arg, 'shutdown')),
