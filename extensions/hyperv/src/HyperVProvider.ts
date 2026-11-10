@@ -17,6 +17,7 @@ import {
 	type PassthroughInfo,
 	type PassthroughPlan,
 	type PowerAction,
+	type Snapshot,
 	type PreviewFrame,
 	type ProviderContext,
 	type RdpTarget,
@@ -30,6 +31,8 @@ import { PowerShellError, PowerShellSession } from './PowerShellSession';
 import { createWindowsSecurityContext } from './sspi';
 import * as scripts from './scripts';
 import { parseDeviceId, planAttach, planDetach, toPassthroughInfo, type RawDdaInfo } from './dda';
+import { isTemplate, visibleNotes, withTemplate } from './template';
+import { toSnapshots, type RawSnapshot } from './snapshots';
 import { toDetails, toStats, type RawDetails, type RawStats } from './inspect';
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -130,7 +133,8 @@ export function toVmInfo(raw: RawVm): VmInfo {
 		memoryMB: state === 'running' ? raw.MemoryMB : raw.StartupMB,
 		uptimeSeconds: raw.Uptime || undefined,
 		ipAddresses: ips,
-		description: raw.Notes || undefined,
+		description: visibleNotes(raw.Notes) || undefined,
+		...(isTemplate(raw.Notes) ? { template: true } : {}),
 		os: `Generation ${raw.Generation}`,
 		// Every VM has the VMConnect (RDP) console; the serial pipe only when a COM port is configured.
 		consoles: raw.ComPort ? ['rdp', 'serial'] : ['rdp'],
@@ -227,7 +231,10 @@ export class HyperVConnection implements ClusterConnection {
 		media: true,
 		details: true,
 		passthrough: true,
-		stats: true
+		stats: true,
+		snapshots: true,
+		clone: true,
+		templates: true
 	};
 
 	/** Fast queries (polling). */
@@ -442,7 +449,7 @@ export class HyperVConnection implements ClusterConnection {
 			schema,
 			values: {
 				name: config.Name,
-				notes: config.Notes || undefined,
+				notes: visibleNotes(config.Notes) || undefined,
 				generation: config.Generation,
 				path: config.Path,
 				cpus: config.Cpus,
@@ -464,7 +471,48 @@ export class HyperVConnection implements ClusterConnection {
 		if (values.name !== undefined && !VM_NAME.test(String(values.name).trim())) {
 			throw new ProviderError('The name contains characters that are not allowed: \\ / : * ? " < > |', 'invalid');
 		}
-		await this.run(this.ops, scripts.UPDATE_VM, { id: assertVmId(vmId), values }, 2 * 60_000);
+		const id = assertVmId(vmId);
+		if (values.notes !== undefined) {
+			// A template keeps its marker when the user edits the notes.
+			const [current] = await this.run<RawConfig>(this.query, scripts.GET_CONFIG, { id });
+			if (isTemplate(current?.Notes)) values = { ...values, notes: withTemplate(String(values.notes ?? ''), true) };
+		}
+		await this.run(this.ops, scripts.UPDATE_VM, { id, values }, 2 * 60_000);
+	}
+
+	async listSnapshots(_nodeId: string, vmId: string): Promise<Snapshot[]> {
+		return toSnapshots(await this.run<RawSnapshot>(this.query, scripts.SNAPSHOT_LIST, { id: assertVmId(vmId) }, 60_000));
+	}
+
+	async createSnapshot(_nodeId: string, vmId: string, name: string): Promise<Snapshot> {
+		const trimmed = name.trim();
+		if (!trimmed || trimmed.length > 100) throw new ProviderError('A snapshot name has 1 to 100 characters.', 'invalid');
+		const [created] = await this.run<RawSnapshot>(this.ops, scripts.SNAPSHOT_CREATE, { id: assertVmId(vmId), name: trimmed }, 10 * 60_000);
+		if (!created) throw new ProviderError('Hyper-V did not return the new snapshot');
+		return toSnapshots([created])[0];
+	}
+
+	async revertSnapshot(_nodeId: string, vmId: string, snapshotId: string): Promise<void> {
+		await this.run(this.ops, scripts.SNAPSHOT_RESTORE, { id: assertVmId(vmId), snapshot: assertVmId(snapshotId) }, 10 * 60_000);
+	}
+
+	async deleteSnapshot(_nodeId: string, vmId: string, snapshotId: string): Promise<void> {
+		await this.run(this.ops, scripts.SNAPSHOT_DELETE, { id: assertVmId(vmId), snapshot: assertVmId(snapshotId) }, 10 * 60_000);
+	}
+
+	async cloneVm(_nodeId: string, vmId: string, name: string): Promise<VmInfo> {
+		const trimmed = name.trim();
+		if (!VM_NAME.test(trimmed)) throw new ProviderError('The name contains characters that are not allowed: \\ / : * ? " < > |', 'invalid');
+		const [copy] = await this.run<{ Id: string; Name: string }>(this.ops, scripts.CLONE_VM, { id: assertVmId(vmId), name: trimmed }, 60 * 60_000);
+		if (!copy) throw new ProviderError('Hyper-V did not return the new virtual machine');
+		return (await this.listVms()).find((v) => v.id === copy.Id) ?? { id: copy.Id, name: copy.Name, state: 'stopped' };
+	}
+
+	async setTemplate(_nodeId: string, vmId: string, template: boolean): Promise<void> {
+		const id = assertVmId(vmId);
+		const [current] = await this.run<RawConfig>(this.query, scripts.GET_CONFIG, { id });
+		if (isTemplate(current?.Notes) === template) return;
+		await this.run(this.ops, scripts.SET_NOTES_TEMPLATE, { id, notes: withTemplate(current?.Notes, template) }, 60_000);
 	}
 
 	async deleteVm(_nodeId: string, vmId: string, options: DeleteOptions): Promise<void> {

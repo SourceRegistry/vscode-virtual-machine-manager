@@ -1,0 +1,49 @@
+{
+  "name": "vm-manager-libvirt",
+  "displayName": "VM Manager – libvirt",
+  "description": "Manage libvirt (KVM/QEMU) domains on this computer or over SSH from VS Code: power, details, consoles and snapshots.",
+  "version": "0.0.0",
+  "publisher": "sourceregistry",
+  "icon": "media/icon.png",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SourceRegistry/vscode-virtual-machine-manager.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "libvirt",
+    "kvm",
+    "qemu",
+    "virsh",
+    "virtual machine",
+    "vm-manager-provider"
+  ],
+  "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "sourceregistry.vm-manager"
+  ],
+  "activationEvents": [],
+  "contributes": {
+    "vmManager.providers": [
+      {
+        "id": "libvirt",
+        "displayName": "libvirt",
+        "description": "libvirt domains (KVM/QEMU) on this computer or over SSH, through virsh",
+        "apiVersion": 1
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "cd ../.. && node esbuild.mjs --only libvirt"
+  },
+  "dependencies": {
+    "@vmm/sdk": "*"
+  }
+}

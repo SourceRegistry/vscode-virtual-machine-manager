@@ -20,7 +20,7 @@ const session = await api.browserLogin({
 });
 ```
 
-The provider must allow the exact redirect `http://localhost:<port>/`. The listener binds only to loopback. It is ready before the browser opens; each attempt owns its server, with a five-minute timeout and optional cancellation signal. Core deactivation cancels outstanding attempts. Proxmox uses its own `/access/openid/auth-url` and `/access/openid/login` endpoints within these callbacks.
+The provider must allow the exact redirect `http://localhost:<port>/`. The listener binds only to loopback. It is ready before the browser opens; each attempt owns its server, with a five-minute timeout (a provider can ask for up to 30 through `timeoutMs`; Proxmox asks for 15) and optional cancellation signal. Core deactivation cancels outstanding attempts. Proxmox uses its own `/access/openid/auth-url` and `/access/openid/login` endpoints within these callbacks.
 
 ## Page and assets
 
@@ -30,4 +30,4 @@ The shipped template is `media/auth/callback.html`. Edit HTML and CSS there. All
 
 The page reports success only after the exchange resolves. After sending the page, the server closes and releases its port on both success and failure. Authorization-URL errors, browser-launch errors, timeout and cancellation also close it.
 
-On success, the page clears callback parameters from its history entry. It attempts to close when hidden (for example when returning to VS Code), or when its local health check can no longer reach the completed callback server. Browsers can refuse `window.close()` on tabs they consider user-opened. In that case, the page retains manual-close instructions and stops polling. Error pages stay visible so the user can read what happened. This is a best-effort tab cleanup, not a guarantee of browser control.
+On success, the page also tries to open the editor by itself (the *Open VS Code* button stays as the fallback, since browsers may ask first or refuse without a click) and clears callback parameters from its history entry. It attempts to close when hidden (for example when returning to VS Code), or when its local health check can no longer reach the completed callback server. Browsers can refuse `window.close()` on tabs they consider user-opened. In that case, the page retains manual-close instructions and stops polling. Error pages stay visible so the user can read what happened. This is a best-effort tab cleanup, not a guarantee of browser control.

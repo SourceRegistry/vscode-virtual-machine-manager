@@ -59,10 +59,13 @@ export function withParam(url: string, key: string, value: string): string {
 }
 
 /** Browser sign-in through a Proxmox OpenID realm. The identity provider must allow `http://localhost:<port>/` as a redirect. */
+/** Time to finish the OpenID sign-in in the browser: identity providers with a second factor or a password manager take a while. */
+export const OPENID_TIMEOUT_MS = 15 * 60 * 1000;
+
 export async function openIdLogin(fetchImpl: typeof fetch, baseUrl: string, realm: string, port: number, ui: SessionUi, signal: AbortSignal, forceLogin = false): Promise<Session> {
 	if (!ui.browserLogin) throw new ProviderError('Update VM Manager to use shared browser sign-in.', 'unavailable');
 	return ui.browserLogin({
-		providerName: 'Proxmox VE', providerIcon: ui.providerIcon, port, signal,
+		providerName: 'Proxmox VE', providerIcon: ui.providerIcon, port, signal, timeoutMs: OPENID_TIMEOUT_MS,
 		getAuthorizationUrl: async (redirectUrl) => {
 			const authUrl = await call<string>(fetchImpl, baseUrl, '/access/openid/auth-url', { realm, 'redirect-url': redirectUrl });
 			return forceLogin ? withParam(authUrl, 'prompt', 'login') : authUrl;
@@ -82,8 +85,11 @@ interface StoredEntry extends Session { baseUrl: string; /** The VS Code launch 
 /** Persists live sessions (never passwords) so a reconnect or reload does not ask for the second factor again. */
 export class SessionStore {
 	/** `launch` identifies this VS Code run: a session left by another run (a crash, a killed window) is never reused. */
-	constructor(private readonly vault: SessionVault, private readonly launch?: string) {}
-	private mine(entry: StoredEntry): boolean { return !this.launch || entry.launch === this.launch; }
+	/** `remember` (the opt-in setting): sessions of earlier VS Code runs are reused instead of dropped. */
+	constructor(private readonly vault: SessionVault, private readonly launch?: string, private readonly remember: () => boolean = () => false) {}
+	/** Whether sessions outlive VS Code; the extension then keeps them on close. */
+	get remembers(): boolean { return this.remember(); }
+	private mine(entry: StoredEntry): boolean { return this.remember() || !this.launch || entry.launch === this.launch; }
 	private async all(): Promise<Record<string, StoredEntry>> {
 		try { return JSON.parse((await this.vault.read()) ?? '{}') as Record<string, StoredEntry>; } catch { return {}; }
 	}

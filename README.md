@@ -14,7 +14,7 @@
 Manage your virtual machines without leaving VS Code. See every machine at a glance, start and stop
 them, change their settings and work in their consoles in an editor tab, next to your code.
 
-* **One place for all your hypervisors**: Hyper-V, QEMU and Proxmox VE.
+* **One place for all your hypervisors**: Hyper-V, QEMU, Proxmox VE and libvirt.
 * **Consoles in the editor**: the machine's screen or its serial console in a tab, which you can
   drag to another window.
 * **Looks like VS Code**: everything follows your theme and uses the views, menus and command
@@ -28,6 +28,7 @@ them, change their settings and work in their consoles in an editor tab, next to
    | Provider | For |
    |---|---|
    | [VM Manager – Hyper-V](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-hyperv) | Hyper-V on this Windows machine |
+   | [VM Manager – libvirt](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-libvirt) | libvirt (KVM/QEMU) domains on this computer or over SSH |
    | [VM Manager – Proxmox VE](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-proxmox) | Remote Proxmox VE clusters over HTTPS |
    | [VM Manager – QEMU](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-qemu) | QEMU machines on Windows, Linux and macOS |
 
@@ -107,14 +108,15 @@ QEMU only, through the QEMU provider:
 | Port forwards | | ✓ | |
 | Attach and import | | ✓ (attach also on an SSH host) | |
 | Host device passthrough | PCI (DDA), experimental | USB; PCI (VFIO, Linux), experimental | |
-| Snapshots | | disks only (qcow2) | |
-| Clone | | ✓ | |
+| Snapshots | ✓ (checkpoints), untested | disks only (qcow2) | ✓ (disks only), mock-tested |
+| Clone | ✓ (export and import), untested | ✓ | ✓ (full copy), mock-tested |
+| Templates | ✓ (marked in the notes), untested | ✓ | ✓ (one way), mock-tested |
 | Create from a cloud image (cloud-init) | | ✓ | |
 | Connect with Remote-SSH | via address | via forward or address | via address |
 | Run on a remote host | | over SSH (Linux hosts) | server API |
 
 Experimental means implemented and unit tested, but not yet verified on real hardware.
-Snapshots for Hyper-V and Proxmox and remote Hyper-V are on the [roadmap](docs/ROADMAP.md).
+Hyper-V snapshots, clone and templates have not run on a Windows host; Proxmox ones are tested against a mocked API only. Remote Hyper-V is on the [roadmap](docs/ROADMAP.md).
 
 ## Consoles
 

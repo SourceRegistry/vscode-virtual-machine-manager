@@ -24,8 +24,10 @@ Supported:
 - Open the VM in the Proxmox web UI (browser sign-in required).
 - Delete VMs and their owned disks. Disk-preserving deletion is rejected.
 
+**Staying signed in:** by default a session is forgotten when VS Code closes or reloads. Set `vmm.proxmox.rememberSession` to keep it in the operating system keychain, so the next start reuses it while it is valid (2 hours) instead of asking again. **Sign Out** removes it either way.
+
 **Status:** the provider is covered by unit tests against a mocked API client (inventory, power tasks, creation, stats, console choice, sign-in). It has not been run against a live Proxmox VE server yet, so treat console and sign-in behaviour on your own setup as unverified and report what you find.
 
-LXC creation, templates, ISO upload, snapshots, migration and hardware passthrough are not included. Create ISO volumes through Proxmox first. Some settings require a guest restart; Proxmox manages pending changes. Long tasks may continue on the server after the extension's two-minute wait expires; inspect Proxmox task status before retrying.
+Snapshots (disk state, no RAM), full clone and converting a VM to a template are included (a template cannot be turned back into a VM; clone it). Not included: LXC creation, ISO upload, migration and hardware passthrough are not included. Create ISO volumes through Proxmox first. Some settings require a guest restart; Proxmox manages pending changes. Long tasks may continue on the server after the extension's two-minute wait expires; inspect Proxmox task status before retrying.
 
 Build from the repository root with `node esbuild.mjs --only proxmox`. Package with `node scripts/package.mjs proxmox`.

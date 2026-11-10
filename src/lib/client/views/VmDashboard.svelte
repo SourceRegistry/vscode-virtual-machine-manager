@@ -10,7 +10,7 @@
 	import Status from '#lib/client-lib/components/feedback/Status.svelte';
 	import { formatMemory, formatUptime, type Capabilities, type PassthroughInfo, type Snapshot, type VmDetails, type VmInfo, type VmStats } from '@vmm/sdk';
 	import type { BootData, OverviewCommand } from '../../../shared/protocol';
-	import { originLabel } from '../../../shared/origin';
+	import { guestLabel, originLabel } from '../../../shared/origin';
 	import { browserUrl, GUEST_HOST_ADDRESS, sshCommand } from '../../../shared/forwards';
 	import {
 		column,
@@ -262,6 +262,7 @@
 		{#if vm}
 			<Flexbox gap="0.6rem" align="center">
 				{#if vm.displayId}<span class="vmid" title="ID">#{vm.displayId}</span>{/if}
+				{#if guestLabel(vm)}<span class="badge" title="A container shares the host kernel; it is not a full virtual machine.">{guestLabel(vm)}</span>{/if}
 				{#if originLabel(vm)}
 					<span class="badge" title={vm.template ? 'A template: it cannot be started, only copied into new machines.' : vm.controllable === false ? 'Started outside VM Manager without a control socket: it can only be observed and powered off.' : vm.origin === 'adopted' ? 'Started outside VM Manager; attached through its control socket.' : 'Created from existing disks or definitions.'}>{originLabel(vm)}</span>
 				{/if}

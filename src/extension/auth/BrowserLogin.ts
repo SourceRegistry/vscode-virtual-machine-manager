@@ -16,6 +16,9 @@ export function renderLoginPage(template: string, values: Record<string, string>
 	});
 }
 
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_TIMEOUT_MS = 30 * 60 * 1000;
+
 /** Each login owns its listener. Disposing the service cancels every active attempt. */
 export class BrowserLoginService {
 	private readonly pending = new Set<AbortController>();
@@ -27,7 +30,7 @@ export class BrowserLoginService {
 		if (!Number.isInteger(options.port) || options.port < 1024 || options.port > 65535) throw new ProviderError('Invalid browser callback port.', 'invalid');
 		const controller = new AbortController();
 		this.pending.add(controller);
-		const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(5 * 60 * 1000), ...(options.signal ? [options.signal] : [])]);
+		const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(Math.min(Math.max(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1000), MAX_TIMEOUT_MS)), ...(options.signal ? [options.signal] : [])]);
 		const redirectUrl = `http://localhost:${options.port}/`;
 		try {
 			return await new Promise<T>((resolve, reject) => {
@@ -55,7 +58,7 @@ export class BrowserLoginService {
 					const page = renderLoginPage(this.host.template, {
 						title: success ? 'You’re signed in' : 'Sign-in wasn’t completed',
 						description: success ? 'Your connection is ready. Return to VS Code to manage your cluster.' : 'Return to VS Code to review the error and start a new sign-in.',
-						note: success ? 'This tab will close automatically if your browser allows it. Otherwise, you can close it now.' : 'You can close this tab and try again from VM Manager.',
+						note: success ? 'VS Code should open by itself. If it does not, click Open VS Code. This tab closes automatically if your browser allows it.' : 'You can close this tab and try again from VM Manager.',
 						statusPath: success ? 'm8 12 3 3 5-6' : 'm9 9 6 6m0-6-6 6',
 						providerName: options.providerName, providerIcon, favicon: providerIcon,
 						editorUrl: this.host.editorUrl, nonce, autoClose: String(success)

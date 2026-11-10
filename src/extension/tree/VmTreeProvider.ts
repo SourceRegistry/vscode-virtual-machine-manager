@@ -23,6 +23,16 @@ const VM_ICONS: Record<VmState, [string, string?]> = {
 	unknown: ['question', 'descriptionForeground']
 };
 
+/**
+ * A template looks like neither a running nor a stopped machine, and a container differs from a VM in
+ * shape; the state still shows through the colour (a running container is green, a stopped one plain).
+ */
+function vmIcon(vm: { state: VmState; template?: boolean; guestKind?: 'vm' | 'container' }): [string, string?] {
+	if (vm.template) return ['layers', 'descriptionForeground'];
+	const [icon, color] = VM_ICONS[vm.state];
+	return vm.guestKind === 'container' && (vm.state === 'running' || vm.state === 'stopped') ? ['package', color] : [icon, color];
+}
+
 const STATE_LABEL: Record<VmState, string> = {
 	running: 'Running',
 	stopped: 'Off',
@@ -183,7 +193,7 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		if (!location) return item;
 		const { vm } = location;
 		const caps = location.cluster.connection?.capabilities;
-		const [icon, color] = VM_ICONS[vm.state];
+		const [icon, color] = vmIcon(vm);
 		item.iconPath = new vscode.ThemeIcon(icon, color ? new vscode.ThemeColor(color) : undefined);
 		const label = vm.operation ? OPERATION_LABEL[vm.operation] : stateLabel(vm.state);
 		const parts = [...(vm.displayId ? [`#${vm.displayId}`] : []), label];

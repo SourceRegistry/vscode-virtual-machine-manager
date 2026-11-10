@@ -249,6 +249,9 @@
   // Avoid leaving the authorization code in the browser address bar or history entry.
   history.replaceState(null, '', '/');
   if (document.body.dataset.autoClose !== 'true') return;
+  // Hand control back to the editor. Browsers may ask first or refuse without a click; the button stays as the fallback.
+  const editor = document.querySelector('a.action');
+  if (editor && editor.href) setTimeout(() => { location.href = editor.href; }, 400);
   let timer;
   const closeTab = () => { clearTimeout(timer); window.close(); };
   document.addEventListener('visibilitychange', () => { if (document.hidden) closeTab(); });
