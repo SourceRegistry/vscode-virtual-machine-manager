@@ -45,7 +45,10 @@ Get-VMSwitch | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Type = $_.Swi
 export const POWER = String.raw`
 $vm = Get-VM -Id $p.id
 switch ($p.action) {
-	'start' { Start-VM -VM $vm }
+	'start' {
+		if ($vm.Notes.StartsWith('[vmm:template]')) { throw 'This is a template. Create a machine from it instead of starting it.' }
+		Start-VM -VM $vm
+	}
 	'shutdown' { Stop-VM -VM $vm -Force }
 	'stop' { Stop-VM -VM $vm -TurnOff -Force }
 	'reboot' {
@@ -311,4 +314,72 @@ Mount-VMHostAssignableDevice -LocationPath $p.path
 
 export const VM_NAME = String.raw`
 [pscustomobject]@{ Name = (Get-VM -Id $p.id).Name }
+`;
+
+export const SNAPSHOT_LIST = String.raw`
+Get-VMSnapshot -VM (Get-VM -Id $p.id) | ForEach-Object {
+	[pscustomobject]@{
+		Id = $_.Id.ToString()
+		Name = [string]$_.Name
+		Created = [int64]([DateTimeOffset]$_.CreationTime).ToUnixTimeMilliseconds()
+	}
+}
+`;
+
+export const SNAPSHOT_CREATE = String.raw`
+$vm = Get-VM -Id $p.id
+if (Get-VMSnapshot -VM $vm -Name $p.name -ErrorAction SilentlyContinue) { throw "A snapshot named '$($p.name)' already exists" }
+Checkpoint-VM -VM $vm -SnapshotName ([string]$p.name)
+$s = Get-VMSnapshot -VM $vm -Name $p.name | Select-Object -Last 1
+[pscustomobject]@{
+	Id = $s.Id.ToString()
+	Name = [string]$s.Name
+	Created = [int64]([DateTimeOffset]$s.CreationTime).ToUnixTimeMilliseconds()
+}
+`;
+
+const SNAPSHOT_BY_ID = String.raw`
+$vm = Get-VM -Id $p.id
+$s = Get-VMSnapshot -VM $vm | Where-Object { $_.Id.ToString() -eq $p.snapshot } | Select-Object -First 1
+if (-not $s) { throw 'The snapshot no longer exists' }
+`;
+
+export const SNAPSHOT_RESTORE = SNAPSHOT_BY_ID + String.raw`
+Restore-VMSnapshot -VMSnapshot $s -Confirm:$false
+`;
+
+export const SNAPSHOT_DELETE = SNAPSHOT_BY_ID + String.raw`
+Remove-VMSnapshot -VMSnapshot $s -Confirm:$false
+`;
+
+/**
+ * Copy through Export-VM / Import-VM: the copy gets a new id and its own disks in a folder of its own, so
+ * nothing is shared with the original. The export is a temporary folder next to the VM storage.
+ */
+export const CLONE_VM = String.raw`
+$source = Get-VM -Id $p.id
+if (Get-VM -Name $p.name -ErrorAction SilentlyContinue) { throw "A virtual machine named '$($p.name)' already exists" }
+$base = (Get-VMHost).VirtualHardDiskPath
+$tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+$export = Join-Path $base ('.vmm-export-' + $tag)
+$target = Join-Path $base ([string]$p.name + '-' + $tag)
+try {
+	Export-VM -VM $source -Path $export
+	$config = Get-ChildItem -LiteralPath (Join-Path (Join-Path $export $source.Name) 'Virtual Machines') -Filter '*.vmcx' | Select-Object -First 1
+	if (-not $config) { throw 'The export did not produce a configuration file' }
+	$copy = Import-VM -Path $config.FullName -Copy -GenerateNewId -VirtualMachinePath $target -VhdDestinationPath (Join-Path $target 'Virtual Hard Disks') -SnapshotFilePath (Join-Path $target 'Snapshots') -SmartPagingFilePath $target
+	Rename-VM -VM $copy -NewName ([string]$p.name)
+	# A copy of a template is a normal machine; the clone keeps no snapshots of the original.
+	if ($copy.Notes.StartsWith('[vmm:template]')) { Set-VM -VM $copy -Notes ($copy.Notes.Substring(14).TrimStart(@([char]13, [char]10))) }
+	Get-VMSnapshot -VM $copy | Remove-VMSnapshot -Confirm:$false
+	[pscustomobject]@{ Id = $copy.VMId.ToString(); Name = [string]$copy.Name }
+} finally {
+	if (Test-Path -LiteralPath $export) { Remove-Item -LiteralPath $export -Recurse -Force -ErrorAction SilentlyContinue }
+}
+`;
+
+export const SET_NOTES_TEMPLATE = String.raw`
+$vm = Get-VM -Id $p.id
+if ($vm.State.ToString() -ne 'Off') { throw 'Shut the virtual machine down before turning it into a template' }
+Set-VM -VM $vm -Notes ([string]$p.notes)
 `;
