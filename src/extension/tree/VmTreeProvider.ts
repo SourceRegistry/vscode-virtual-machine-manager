@@ -5,7 +5,7 @@ import { clusterContextValue, nodeContextValue, vmContextValue } from '../../sha
 import { OPERATION_LABEL } from '../../shared/operations';
 import type { ConnectionManager, ClusterRuntime } from '../clusters/ConnectionManager';
 import type { ProviderRegistry } from '../registry/ProviderRegistry';
-import { guestLabel, originLabel } from '../../shared/origin';
+import { originLabel } from '../../shared/origin';
 
 export type TreeNode =
 	| { kind: 'cluster'; clusterId: string }
@@ -197,8 +197,6 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		item.iconPath = new vscode.ThemeIcon(icon, color ? new vscode.ThemeColor(color) : undefined);
 		const label = vm.operation ? OPERATION_LABEL[vm.operation] : stateLabel(vm.state);
 		const parts = [...(vm.displayId ? [`#${vm.displayId}`] : []), label];
-		const guest = guestLabel(vm);
-		if (guest) parts.push(guest);
 		const origin = originLabel(vm);
 		if (origin) parts.push(origin);
 		item.description = parts.join(' · ');
