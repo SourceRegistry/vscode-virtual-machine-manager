@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.9.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.8.0...v0.9.0) (2026-11-10)
+
+
+### Features
+
+* **libvirt:** official libvirt logo as the extension badge; per-provider feature table ([fb64f90](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/fb64f909c446df16913e2fcf4386e39ecad4b8a2))
+
 # [0.8.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.7.0...v0.8.0) (2026-11-10)
 
 
