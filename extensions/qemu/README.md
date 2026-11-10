@@ -20,6 +20,7 @@ Create and run QEMU virtual machines from VS Code on Windows, Linux and macOS.
 * **Details page**: disks, CD/DVD drives, network adapters (with guest IP addresses when the agent
   answers), PCI devices, port forwards, and live CPU, memory and disk charts.
 * **Media**: eject or change the ISO of a running VM.
+* **Snapshots**: take, revert and delete snapshots of the disks, from the VM menu or the details page. They are qcow2 internal snapshots, so every disk of the VM must be qcow2 (raw disks are refused with the reason). They save **disk state only**: taken while the VM runs, a snapshot is crash-consistent, like a power cut, and memory is not saved. Reverting needs the VM stopped. The UEFI variable store (`efivars.fd`) is not part of a snapshot.
 * **Port forwards**: add and remove host-to-guest forwards while the VM runs. They are saved with the VM.
 * **Attach and import**: attach to `qemu-system-*` processes started elsewhere (marked
   **external**), or import disks, `vm.json`, libvirt XML and UTM bundles from a folder.
@@ -38,6 +39,7 @@ or set `vmm.qemu.path`.
 
 ## Known limits
 
+* Snapshots do not include memory or the UEFI variable store, and are not available for VMs attached from outside.
 * Memory charts show the memory QEMU uses on the host, not the memory the guest uses.
 * Guest IP addresses need `qemu-guest-agent` in the guest. With user networking the guest is
   usually `10.0.2.15`; use port forwards to reach it from the host.
