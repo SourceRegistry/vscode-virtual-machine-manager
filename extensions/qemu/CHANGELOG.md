@@ -1,5 +1,18 @@
 # Changelog
 
+# [0.6.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.5.0...vm-manager-qemu-v0.6.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* **qemu:** always give a VM a CD/DVD drive ([642839c](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/642839c79f271a7693a8db18dd4e10a9039b1d91))
+
+
+### Features
+
+* **qemu:** clone a stopped VM into an independent copy ([e5b70ce](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/e5b70ced090620106a1c28f7db67e7985b7b6247))
+* **qemu:** snapshots of a VM's disks ([bf52865](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/bf52865cec9bcde6a399639c950e39f5e819ae82))
+
 # [0.5.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.4.0...vm-manager-qemu-v0.5.0) (2026-11-08)
 
 
