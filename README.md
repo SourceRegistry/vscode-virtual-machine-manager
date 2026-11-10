@@ -77,6 +77,12 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
 * **Eject** and **Change ISO…** swap the installation media, also while the machine runs.
 * **Snapshots** (**Take Snapshot…**, **Revert to Snapshot…**, **Delete Snapshot…**, or the *Snapshots* card on the details page) save the state of a machine's disks so you can return to it. QEMU saves disks only: taken while the machine runs, a snapshot is like a power cut. Reverting discards everything changed since and needs the machine powered off; VM Manager asks first and does it for you.
 * **Clone…** makes an independent copy of a machine: its own disks and network address, the same hardware. Snapshots, port forwards and passed-through devices are not copied. The original must be shut down first, and a large disk takes a while.
+* **Connect with Remote-SSH…** opens a running machine in a Remote - SSH window. It finds the way in from the
+  machine's details: a port forward to port 22 (QEMU's NAT address is never offered), or an address the
+  computer can reach. It checks that an SSH server answers first, and asks before adding an entry for the
+  machine to your ssh config; nothing is written silently. **Forward SSH Port…** sets up the forward.
+  **Add Machines to SSH Config…** and **Remove Machines from SSH Config…** let you choose which machines
+  have an entry, so they work with plain `ssh <name>` and in Remote - SSH's host list.
 * **Delete** removes the machine, and its disks if you choose so.
 
 ### Bring in machines you already have
@@ -103,6 +109,7 @@ QEMU only, through the QEMU provider:
 | Host device passthrough | PCI (DDA), experimental | USB; PCI (VFIO, Linux), experimental | |
 | Snapshots | | disks only (qcow2) | |
 | Clone | | ✓ | |
+| Connect with Remote-SSH | via address | via forward or address | via address |
 
 Experimental means implemented and unit tested, but not yet verified on real hardware.
 Snapshots for Hyper-V and Proxmox, remote Hyper-V and QEMU over SSH are on the [roadmap](docs/ROADMAP.md).
@@ -132,6 +139,8 @@ When a console does ask for a password, **VM: Forget Console Sign-in** removes t
 | `vmm.console.openInNewWindow` | `false` | Open consoles in a new window instead of an editor tab. |
 | `vmm.console.scaleViewport` | `true` | Scale graphical consoles to fit the tab. |
 | `vmm.confirmPowerOff` | `true` | Ask before a hard power off (*Stop*). |
+| `vmm.ssh.user` | empty | Account to sign in as in a guest. Empty: your user name on this computer. Remembered per machine. |
+| `vmm.ssh.addConfigEntry` | `true` | Offer to add an ssh config entry before connecting. Turn off to connect by address without touching the file. |
 
 Providers add their own settings, for example `vmm.qemu.path`.
 

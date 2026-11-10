@@ -255,12 +255,17 @@ Status: **in progress** on `feat/snapshots`. QEMU snapshots work end to end on t
 
 ### Phase 13: `feat/remote-ssh-connect`  (Local: yes)
 
-The VS Code-specific edge: work inside the VM from the editor.
-- [ ] `VM: Open in Remote-SSH`: host and port from a port forward (QEMU user networking) or guest IP; user from a per-VM setting
-- [ ] Offer to add an `~/.ssh/config` entry (shown before writing, never silent)
-- [ ] Offer to add a public key to the guest (needs guest agent or cloud-init, see phase 14)
-- [ ] `VM: Add SSH Port Forward` shortcut (uses the phase 5 forwards)
-- [ ] Tests: ssh config rendering, host selection. Manual: arm64 Linux guest on the Mac, `ssh` over `hostfwd`
+Status: **built** on `feat/remote-ssh-connect` (stacked on `feat/snapshots`); automated checks done, not yet clicked through by hand.
+
+- [x] `VM: Connect with Remote-SSH…` (`src/extension/ssh/connect.ts`): target from the VM's details (`chooseSshTarget`: a TCP forward to guest port 22 first, else a reachable IPv4 address; `NicDevice.reachable: false` keeps QEMU's NAT address out), Remote - SSH installed check (offers to install), SSH banner probe before connecting (QEMU's forward accepts connections even with no sshd behind it), then Remote - SSH's `opensshremotes.openEmptyWindow` with `{ host }` (shape read from the installed 0.128 extension: an **internal, undocumented** command, so it may change; failures show the error)
+- [x] ssh config entry, shown in full before writing, never silent: marked block (`# BEGIN VM Manager: <key>`), `HostKeyAlias` so a reused forwarded port never triggers "host identification changed", values validated against config injection, other lines untouched, one-time `config.vmm.bak`, honours `remote.SSH.configFile`. Verified with the real client: `ssh -G` resolves the block, and a login through the alias works
+- [x] Choose machines: `VM: Add Machines to SSH Config…` (multi-select, shows routes and what is already there, one confirmation) and `VM: Remove Machines from SSH Config…` (multi-select of the blocks VM Manager wrote). Add then remove restores the file exactly
+- [x] `VM: Forward SSH Port…`: free host port from 2222, forward to guest port 22
+- [x] Settings `vmm.ssh.user` (per-machine answer remembered) and `vmm.ssh.addConfigEntry`
+- [x] Tests: target choice, aliases, block rendering / injection guards / listing / removal round-trips, `ssh -G`, banner probe against local servers, menus; **real guest** (Debian 12 arm64, HVF): no route before a forward, route from real details after, a real sshd banner, a login with plain `ssh` through the written alias, host key stored under the alias
+- [ ] Manual check in VS Code with Remote - SSH installed: connect to a running VM, add and remove machines, the prompts
+- [ ] Not done: injecting a public key into a guest (needs guest-agent file writes, phase 16, or cloud-init, phase 14); an ssh key choice (`IdentityFile`) per machine; Hyper-V and Proxmox untested (they use the address route, which has no hardware here)
+- [ ] The ssh config entry goes stale when the forward port changes later; Connect rewrites it, a batch entry is not refreshed on its own
 
 ### Phase 14: `feat/provisioning`  (Local: yes)
 
