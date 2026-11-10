@@ -99,24 +99,51 @@ QEMU only, through the QEMU provider:
 
 ## What each provider supports
 
-| | Hyper-V | QEMU | Proxmox VE |
-|---|---|---|---|
-| Create, edit, delete, power | ✓ | ✓ | ✓ |
-| Graphical and serial consoles | ✓ | ✓ | ✓ |
-| Details page with live charts | ✓ | ✓ | ✓ |
-| Change or eject ISO | ✓ | ✓ | |
-| Port forwards | | ✓ | |
-| Attach and import | | ✓ (attach also on an SSH host) | |
-| Host device passthrough | PCI (DDA), experimental | USB; PCI (VFIO, Linux), experimental | |
-| Snapshots | ✓ (checkpoints), untested | disks only (qcow2) | ✓ (disks only), mock-tested |
-| Clone | ✓ (export and import), untested | ✓ | ✓ (full copy), mock-tested |
-| Templates | ✓ (marked in the notes), untested | ✓ | ✓ (one way), mock-tested |
-| Create from a cloud image (cloud-init) | | ✓ | |
-| Connect with Remote-SSH | via address | via forward or address | via address |
-| Run on a remote host | | over SSH (Linux hosts) | server API |
+✓ works · – not available · *(note)* a limit worth knowing. Anything marked untested has not run on real hardware: see [How far each is verified](#how-far-each-is-verified).
+
+| | Hyper-V | QEMU | Proxmox VE | libvirt |
+|---|---|---|---|---|
+| **Runs on** | Windows | Windows, Linux, macOS | any (server API) | Linux, macOS (needs `virsh`) |
+| **Where the machines run** | this computer | this computer, or a Linux host over SSH | a Proxmox server | this computer, or a host over SSH (`qemu+ssh://`) |
+| **Machines** | | | | |
+| Create | ✓ | ✓ | ✓ | – *(define with `virt-install` or `virsh`; it appears here)* |
+| Edit settings | ✓ | ✓ | ✓ | – |
+| Delete (and its disks) | ✓ | ✓ | ✓ *(disks always go too)* | ✓ |
+| Power: start, shut down, reboot, force stop | ✓ | ✓ | ✓ | ✓ |
+| Reset (hardware reset) | – | – | ✓ | ✓ |
+| Containers (LXC) | – | – | ✓ | – |
+| Attach to running processes, import from a folder | – | ✓ *(attach also over SSH)* | – | – |
+| Create from a cloud image (cloud-init) | – | ✓ | – | – |
+| **Consoles** | | | | |
+| Graphical console in an editor tab | ✓ *(RDP, single sign-on)* | ✓ *(VNC)* | ✓ *(VNC)* | ✓ *(VNC)* |
+| Serial console | ✓ | ✓ | ✓ | ✓ *(pty, socket or TCP; over SSH TCP only)* |
+| Open the hypervisor's own viewer | ✓ | – | ✓ *(web UI)* | – |
+| **Inspect** | | | | |
+| Details page, live CPU / memory / disk charts | ✓ | ✓ | ✓ | ✓ |
+| Guest IP addresses | ✓ *(integration services)* | ✓ *(guest agent)* | ✓ *(guest agent)* | ✓ *(DHCP leases, guest agent)* |
+| Change or eject ISO | ✓ | ✓ | – | ✓ |
+| **Protect and copy** | | | | |
+| Snapshots | ✓ *(checkpoints)* | ✓ *(disks only, qcow2)* | ✓ *(disks only)* | ✓ *(with memory when running; not for UEFI with a raw nvram)* |
+| Clone | ✓ *(export and import)* | ✓ | ✓ *(full copy)* | – |
+| Templates | ✓ *(marked in the notes)* | ✓ | ✓ *(one way)* | – |
+| **Network and devices** | | | | |
+| Port forwards | – | ✓ | – | – |
+| Host device passthrough | experimental *(PCI, DDA)* | experimental *(USB; PCI on Linux)* | – | – |
+| Connect with Remote-SSH | via address | via forward or address | via address | via address |
+| **Sign-in** | Windows account | – | API token, password, OpenID Connect | SSH key or agent (for SSH hosts) |
 
 Experimental means implemented and unit tested, but not yet verified on real hardware.
-Hyper-V snapshots, clone and templates have not run on a Windows host; Proxmox ones are tested against a mocked API only. Remote Hyper-V is on the [roadmap](docs/ROADMAP.md).
+
+### How far each is verified
+
+| | Verified against |
+|---|---|
+| Hyper-V | Unit tests only: there is no Windows host to run it on. Snapshots, clone and templates are new and have never run. |
+| QEMU | Real QEMU on macOS (Apple Silicon, HVF) and Linux in CI, including a real Debian guest; SSH through a stand-in `ssh`, not yet a real remote machine. |
+| Proxmox VE | Unit tests against a mocked API client; not yet a real Proxmox server. |
+| libvirt | Real libvirt 12.9 with QEMU 11.1 on macOS (`qemu:///session`, HVF). Not yet Linux `qemu:///system`, a KVM host, or `qemu+ssh://`. |
+
+Remote Hyper-V and more libvirt features (create, clone, storage pools) are on the [roadmap](docs/ROADMAP.md).
 
 ## Consoles
 
