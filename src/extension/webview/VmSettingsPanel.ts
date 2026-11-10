@@ -24,6 +24,11 @@ export class VmSettingsPanel implements vscode.Disposable {
 		VmSettingsPanel.panels.set(key, new VmSettingsPanel(key, panel, extensionUri, manager, ref, vm?.name));
 	}
 
+	/** Closes the settings tab of a VM that no longer exists. */
+	static closeFor(ref: VmRef): void {
+		VmSettingsPanel.panels.get(`${ref.clusterId}/${ref.nodeId}/${ref.vmId}`)?.dispose();
+	}
+
 	private constructor(
 		private readonly key: string,
 		private readonly panel: vscode.WebviewPanel,

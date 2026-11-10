@@ -347,6 +347,13 @@ export class ConsoleManager implements vscode.Disposable {
 		}
 	}
 
+	/** Closes every console of a VM that no longer exists: display (VNC, RDP, preview) and serial. */
+	closeFor(ref: VmRef): void {
+		for (const session of [...this.sessions.values()]) {
+			if (session.ref.clusterId === ref.clusterId && session.ref.nodeId === ref.nodeId && session.ref.vmId === ref.vmId) session.panel.dispose();
+		}
+	}
+
 	/** The console the editor toolbar command applies to. */
 	active(): ConsoleSession | undefined {
 		for (const session of this.sessions.values()) if (session.panel.active) return session;

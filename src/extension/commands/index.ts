@@ -15,6 +15,7 @@ import { VmDashboardPanel } from '../webview/VmDashboardPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, log, showError } from '../util/log';
 import * as snapshotFlow from '../snapshots/flow';
+import { deleteVmDetail } from '../../shared/deleteDetail';
 import { matchesQuery } from '../../shared/vmSearch';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
 
@@ -562,6 +563,13 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}
 	}
 
+	/** A VM that is gone leaves nothing to show: close its details, settings and consoles (display and serial). */
+	function closeViews(ref: VmRef): void {
+		VmDashboardPanel.closeFor(ref);
+		VmSettingsPanel.closeFor(ref);
+		consoles.closeFor(ref);
+	}
+
 	async function deleteVm(arg: Arg): Promise<void> {
 		const location = await resolveVm(arg, 'Select the virtual machine to delete');
 		if (!location) return;
@@ -572,15 +580,17 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			try {
 				const connection = await manager.connect(location.ref.clusterId);
 				await connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: false });
+				closeViews(location.ref);
 				await manager.refresh(location.ref.clusterId);
 			} catch (error) {
 				await showError(`Could not detach from ${location.vm.name}`, error);
 			}
 			return;
 		}
+		const snapshots = location.cluster.connection?.capabilities.snapshots ? await snapshotFlow.listSnapshots(manager, location).then((list) => list.length, () => undefined) : undefined;
 		const choice = await vscode.window.showWarningMessage(
 			`Delete virtual machine "${location.vm.name}"?`,
-			{ modal: true, detail: 'This cannot be undone. A running machine is powered off first.' },
+			{ modal: true, detail: deleteVmDetail(snapshots) },
 			'Delete VM',
 			'Delete VM and Disks'
 		);
@@ -591,6 +601,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 				{ location: vscode.ProgressLocation.Notification, title: `Deleting ${location.vm.name}…` },
 				() => connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: choice === 'Delete VM and Disks' })
 			);
+			closeViews(location.ref);
 			await manager.refresh(location.ref.clusterId);
 		} catch (error) {
 			await showError(`Could not delete ${location.vm.name}`, error);

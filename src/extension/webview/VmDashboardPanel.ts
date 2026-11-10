@@ -45,6 +45,11 @@ export class VmDashboardPanel implements vscode.Disposable {
 		VmDashboardPanel.panels.set(key, new VmDashboardPanel(key, panel, extensionUri, manager, ref, vm?.name));
 	}
 
+	/** Closes the details tab of a VM that no longer exists. */
+	static closeFor(ref: VmRef): void {
+		VmDashboardPanel.panels.get(`${ref.clusterId}/${ref.nodeId}/${ref.vmId}`)?.dispose();
+	}
+
 	private constructor(
 		private readonly key: string,
 		private readonly panel: vscode.WebviewPanel,
