@@ -229,6 +229,8 @@ interface RunResult {
 export interface SshHostOptions {
 	/** The ssh program; tests point it at a stand-in. */
 	command?: string;
+	/** Arguments used to launch a wrapper command, before normal ssh arguments. */
+	commandArgs?: string[];
 	/** Extra `-o` style arguments, placed before the destination. */
 	extraArgs?: string[];
 	/** Skip the Linux check (tests run the "remote" commands on the development machine). */
@@ -244,6 +246,7 @@ export class SshHost implements Host {
 	readonly path = path.posix;
 	readonly label: string;
 	private readonly command: string;
+	private readonly commandArgs: string[];
 	private readonly base: string[];
 	private readonly controlDir: string | undefined;
 	private cpuBefore: CpuTimes | undefined;
@@ -258,6 +261,7 @@ export class SshHost implements Host {
 		if (problem) throw new Error(problem);
 		this.label = sshLabel(target);
 		this.command = options.command ?? 'ssh';
+		this.commandArgs = options.commandArgs ?? [];
 		this.anyPlatform = !!options.anyPlatform;
 		this.controlDir = process.platform === 'win32' ? undefined : controlDirectory();
 		this.base = [...sshBaseArgs(target, { controlDir: this.controlDir, password: !!options.password }), ...(options.extraArgs ?? [])];
@@ -275,7 +279,7 @@ export class SshHost implements Host {
 
 	private run(command: string, options: ExecOptions = {}): Promise<RunResult> {
 		return new Promise((resolve, reject) => {
-			const child = spawn(this.command, [...this.base, this.target.host, command], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env });
+			const child = spawn(this.command, [...this.commandArgs, ...this.base, this.target.host, command], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env });
 			let stdout = '';
 			let stderr = '';
 			const timer = options.timeout
@@ -398,7 +402,7 @@ export class SshHost implements Host {
 	}
 
 	private async tunnel(args: string[]): Promise<Duplex> {
-		const child = spawn(this.command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env });
+		const child = spawn(this.command, [...this.commandArgs, ...args], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env });
 		const stream = new SshStream(child, this.target);
 		// `-W` has no "connected" signal: it either dies within moments or stays. Wait for the first
 		// byte (VNC and QMP greet), a failure, or a short quiet period (a serial port says nothing).
@@ -473,7 +477,7 @@ export class SshHost implements Host {
 	dispose(): void {
 		if (!this.controlDir) return;
 		// Close the shared connection now instead of after ControlPersist.
-		spawn(this.command, [...this.base, '-O', 'exit', this.target.host], { stdio: 'ignore', windowsHide: true, env: this.env }).once('error', () => undefined);
+		spawn(this.command, [...this.commandArgs, ...this.base, '-O', 'exit', this.target.host], { stdio: 'ignore', windowsHide: true, env: this.env }).once('error', () => undefined);
 	}
 }
 
