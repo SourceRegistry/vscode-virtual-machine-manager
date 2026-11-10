@@ -85,8 +85,11 @@ interface StoredEntry extends Session { baseUrl: string; /** The VS Code launch 
 /** Persists live sessions (never passwords) so a reconnect or reload does not ask for the second factor again. */
 export class SessionStore {
 	/** `launch` identifies this VS Code run: a session left by another run (a crash, a killed window) is never reused. */
-	constructor(private readonly vault: SessionVault, private readonly launch?: string) {}
-	private mine(entry: StoredEntry): boolean { return !this.launch || entry.launch === this.launch; }
+	/** `remember` (the opt-in setting): sessions of earlier VS Code runs are reused instead of dropped. */
+	constructor(private readonly vault: SessionVault, private readonly launch?: string, private readonly remember: () => boolean = () => false) {}
+	/** Whether sessions outlive VS Code; the extension then keeps them on close. */
+	get remembers(): boolean { return this.remember(); }
+	private mine(entry: StoredEntry): boolean { return this.remember() || !this.launch || entry.launch === this.launch; }
 	private async all(): Promise<Record<string, StoredEntry>> {
 		try { return JSON.parse((await this.vault.read()) ?? '{}') as Record<string, StoredEntry>; } catch { return {}; }
 	}

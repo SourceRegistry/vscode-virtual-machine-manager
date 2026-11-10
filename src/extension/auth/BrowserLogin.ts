@@ -58,7 +58,7 @@ export class BrowserLoginService {
 					const page = renderLoginPage(this.host.template, {
 						title: success ? 'You’re signed in' : 'Sign-in wasn’t completed',
 						description: success ? 'Your connection is ready. Return to VS Code to manage your cluster.' : 'Return to VS Code to review the error and start a new sign-in.',
-						note: success ? 'This tab will close automatically if your browser allows it. Otherwise, you can close it now.' : 'You can close this tab and try again from VM Manager.',
+						note: success ? 'VS Code should open by itself. If it does not, click Open VS Code. This tab closes automatically if your browser allows it.' : 'You can close this tab and try again from VM Manager.',
 						statusPath: success ? 'm8 12 3 3 5-6' : 'm9 9 6 6m0-6-6 6',
 						providerName: options.providerName, providerIcon, favicon: providerIcon,
 						editorUrl: this.host.editorUrl, nonce, autoClose: String(success)

@@ -62,6 +62,21 @@ describe('Proxmox session store', () => {
 		expect(v.peek()).toBeUndefined();
 	});
 
+	it('reuses a session of an earlier run when the user opted in, until the setting is turned off', async () => {
+		const v = vault();
+		await new SessionStore(v, 'run-1').set('c', base, fresh);
+		let remember = true;
+		const next = new SessionStore(v, 'run-2', () => remember);
+		expect(next.remembers).toBe(true);
+		expect(await next.get('c', base, 'u@pam')).toMatchObject({ ticket: 'T' });
+		await next.prune();
+		expect(v.peek()).toBeDefined();
+		remember = false;
+		expect(await next.get('c', base, 'u@pam')).toBeUndefined();
+		await next.prune();
+		expect(v.peek()).toBeUndefined();
+	});
+
 	it('never holds a password', async () => {
 		const v = vault();
 		await new SessionStore(v).set('c', base, fresh);

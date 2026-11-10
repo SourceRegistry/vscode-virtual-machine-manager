@@ -162,7 +162,7 @@ export class ProxmoxProvider implements HypervisorProvider {
 		return client.session!;
 	}
 	/** Forgets every stored session. Called when VS Code closes. */
-	async endSessions(): Promise<void> { await this.host.store.clear(); }
+	async endSessions(): Promise<void> { if (!this.host.store.remembers) await this.host.store.clear(); }
 	async testConnection(cluster: ClusterConfig, secrets: SecretBag): Promise<void> { (await this.connect(cluster, secrets)).dispose(); }
 }
 

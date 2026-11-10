@@ -20,9 +20,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	const store = new SessionStore({
 		read: () => context.secrets.get(SESSION_SECRET),
 		write: async (value) => { if (value === undefined) await context.secrets.delete(SESSION_SECRET); else await context.secrets.store(SESSION_SECRET, value); }
-	}, vscode.env.sessionId);
+	}, vscode.env.sessionId, () => vscode.workspace.getConfiguration('vmm.proxmox').get<boolean>('rememberSession', false));
 	// A crash or a killed window can leave sessions behind; drop those of earlier runs.
 	await store.prune().catch(() => {});
+	// Turning the setting off must not leave the saved sessions of earlier runs behind.
+	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('vmm.proxmox.rememberSession')) void store.prune().catch(() => {}); }));
 	provider = new ProxmoxProvider({
 		store,
 		browserLogin: api.browserLogin?.bind(api),
@@ -34,7 +36,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 /**
- * VS Code is closing (or reloading): forget every session. Proxmox has no logout call, so the ticket
+ * VS Code is closing (or reloading): forget every session, unless the user opted in to remembering them
+ * (`vmm.proxmox.rememberSession`; the tickets then stay in the keychain until they expire or the user signs out). Proxmox has no logout call, so the ticket
  * itself only dies at its two hour expiry; what matters is that no copy of it stays on this machine.
  */
 export async function deactivate(): Promise<void> {
