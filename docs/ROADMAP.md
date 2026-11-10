@@ -330,7 +330,7 @@ Finishes phase 5's deferred item.
 One provider that covers most Linux KVM users.
 - [ ] New `extensions/libvirt`: `qemu:///system`, `qemu:///session`, and `qemu+ssh://`; talk through `virsh` (no native binding) or the libvirt remote protocol
 - [ ] Map domains, storage pools, networks, snapshots onto the SDK
-- [ ] Local: Homebrew has `libvirt` with the QEMU driver, so `qemu:///session` on the Mac is a realistic target; confirm it runs HVF guests before promising it
+- [x] Local check (2026-11-10): Homebrew `libvirt` 12.9.0 + QEMU 11.1.2 on Apple Silicon runs an arm64 guest under `qemu:///session` with `<domain type='hvf'>`. Needs `<features><gic version='3'/></features>` (libvirt's default GICv2 fails: "HVF does not support GICv2 emulation") and `<os firmware='efi'>`. `virsh domstats --cpu-total` reports 0 on macOS (no cgroups), so CPU% must come from the QEMU process instead. The session daemon starts on demand; no `brew services` needed
 - [ ] Remote hosts through `qemu+ssh://` can reuse the phase 9 SSH plumbing
 
 ### Phase 20: `feat/more-providers`  (Local: mostly no)
