@@ -1,5 +1,28 @@
 # Changelog
 
+# [0.7.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.6.0...vm-manager-qemu-v0.7.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* make remote SSH CI tests cross-platform ([88ed8dd](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/88ed8ddb5289bbce00c0edee528eef1da1e45c0f))
+* spawn the stand-in ssh through node in the unreachable-host test ([7a8ef58](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/7a8ef58b2b9241761918fe65cdfe148a058f5115))
+* **ui:** drop the duplicate operation label from the VM details buttons ([b6bd915](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/b6bd9150c663c2241062e9edbe0c51812e6f8e01))
+
+
+### Features
+
+* connect to a running VM with Remote-SSH ([d30071e](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/d30071eb2072dce8918045bfb941240127ec07f4))
+* Detach for attached VMs, progress while attaching, remote marker in the tree ([40cb3fc](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/40cb3fc23d0ad20f43fdc1b069c9695a5dfb8cb6))
+* pick the SSH host of a QEMU cluster from the ssh config ([c24664d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/c24664d01e2e5d73d42e5277e654bdffc6bc7d78))
+* **qemu:** ask only what the ssh config does not answer; password sign-in ([0c5f0eb](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/0c5f0eb63a1b7f347e69aa4893ab8a6d56a77806))
+* **qemu:** attach to running VMs on an SSH host ([4555b85](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/4555b85d1a634044ce73d19c74716940fa4d1ece))
+* **qemu:** choose Local or Remote (SSH) for a cluster ([9d32f9c](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/9d32f9ceb6b776afb1ba88815ce6c818253f681b))
+* **qemu:** create a VM from a cloud image with cloud-init ([30426b0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/30426b0e29dd091dfc880ce810bfacd3ba5dac9c))
+* **qemu:** ISO 9660 writer, cloud-init data and a verified image downloader ([3e0ec57](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/3e0ec57fe3b3155ec94c3424980b94219d1137bb))
+* **qemu:** run QEMU on another Linux computer over SSH ([fcb19a9](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/fcb19a92962afbee7e877150a1fc4c5813ab0307))
+* templates — convert a stopped VM, create machines from it ([1fa1191](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/1fa11916546a677ef9f852199e1e2f273815b42b))
+
 # [0.6.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.5.0...vm-manager-qemu-v0.6.0) (2026-11-10)
 
 
