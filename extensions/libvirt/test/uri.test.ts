@@ -38,8 +38,11 @@ describe('virsh', () => {
 	it('finds virsh: configured, on PATH, or in a usual folder', () => {
 		expect(findVirsh('/x/virsh', (f) => f === '/x/virsh')).toBe('/x/virsh');
 		expect(findVirsh('/x/virsh', () => false)).toBeUndefined();
-		expect(findVirsh(undefined, (f) => f === '/opt/homebrew/bin/virsh', '/usr/games')).toBe('/opt/homebrew/bin/virsh');
-		expect(findVirsh(undefined, () => false, '')).toBeUndefined();
+		expect(findVirsh(undefined, (f) => f === '/opt/homebrew/bin/virsh', '/usr/games', 'darwin')).toBe('/opt/homebrew/bin/virsh');
+		expect(findVirsh(undefined, (f) => f === '/usr/games/virsh', '/x:/usr/games', 'linux')).toBe('/usr/games/virsh');
+		expect(findVirsh(undefined, (f) => f === 'C:\\libvirt\\bin\\virsh.exe', 'C:\\Windows;C:\\libvirt\\bin', 'win32')).toBe('C:\\libvirt\\bin\\virsh.exe');
+		expect(findVirsh(undefined, (f) => f === '/opt/homebrew/bin/virsh', '', 'win32')).toBeUndefined();
+		expect(findVirsh(undefined, () => false, '', 'linux')).toBeUndefined();
 	});
 	it('explains errors', () => {
 		expect(explainVirshError("error: failed to connect to the hypervisor\nerror: Failed to connect socket to '/run/libvirt/libvirt-sock': No such file or directory", 'qemu:///system')).toMatchObject({ code: 'unavailable', message: expect.stringContaining('Is libvirt running') });

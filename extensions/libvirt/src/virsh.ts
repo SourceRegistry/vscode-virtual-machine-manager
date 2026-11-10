@@ -19,12 +19,14 @@ export const execRunner: Runner = (file, args, options) =>
 const WELL_KNOWN = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/opt/homebrew/sbin', '/usr/local/sbin'];
 
 /** The virsh to run: the configured path, else the first one on PATH or in the usual install folders. */
-export function findVirsh(configured?: string, exists: (file: string) => boolean = existsSync, pathEnv = process.env.PATH ?? ''): string | undefined {
+export function findVirsh(configured?: string, exists: (file: string) => boolean = existsSync, pathEnv = process.env.PATH ?? '', platform: NodeJS.Platform = process.platform): string | undefined {
 	if (configured?.trim()) return exists(configured.trim()) ? configured.trim() : undefined;
-	const name = process.platform === 'win32' ? 'virsh.exe' : 'virsh';
-	for (const dir of [...pathEnv.split(delimiter), ...WELL_KNOWN]) {
+	const windows = platform === 'win32';
+	const name = windows ? 'virsh.exe' : 'virsh';
+	// The usual folders are POSIX ones; `delimiter` is the host's, so split with the target's.
+	for (const dir of [...pathEnv.split(windows ? ';' : ':'), ...(windows ? [] : WELL_KNOWN)]) {
 		if (!dir) continue;
-		const candidate = `${dir.replace(/[\\/]$/, '')}${process.platform === 'win32' ? '\\' : '/'}${name}`;
+		const candidate = `${dir.replace(/[\\/]$/, '')}${windows ? '\\' : '/'}${name}`;
 		if (exists(candidate)) return candidate;
 	}
 	return undefined;
@@ -52,6 +54,8 @@ export class Virsh {
 
 	private env(): NodeJS.ProcessEnv {
 		// A GUI-started VS Code has a short PATH: virsh finds the session daemon through it. C locale: output is parsed.
+		// Windows keeps its own PATH (and calls it `Path`): only the POSIX hosts get the usual folders added.
+		if (process.platform === 'win32') return { ...process.env, LC_ALL: 'C', LANG: 'C' };
 		return { ...process.env, LC_ALL: 'C', LANG: 'C', PATH: [process.env.PATH, ...WELL_KNOWN].filter(Boolean).join(delimiter) };
 	}
 
