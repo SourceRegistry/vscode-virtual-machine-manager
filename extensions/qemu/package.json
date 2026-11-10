@@ -45,17 +45,6 @@
         "category": "VM"
       }
     ],
-    "configuration": {
-      "title": "VM Manager – QEMU",
-      "properties": {
-        "vmm.qemu.path": {
-          "type": "string",
-          "default": "",
-          "scope": "machine",
-          "markdownDescription": "Directory containing `qemu-system-*` and `qemu-img`. Leave empty to detect from `PATH` and common install locations. Clusters can override this."
-        }
-      }
-    },
     "walkthroughs": [
       {
         "id": "qemuSetup",

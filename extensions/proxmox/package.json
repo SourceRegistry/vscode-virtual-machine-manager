@@ -28,16 +28,6 @@
   ],
   "activationEvents": [],
   "contributes": {
-    "configuration": {
-      "title": "VM Manager – Proxmox VE",
-      "properties": {
-        "vmm.proxmox.rememberSession": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Keep the Proxmox sign-in (OpenID Connect or password) in the operating system keychain after VS Code closes or reloads, so the next start reuses it while it is valid (Proxmox sessions last 2 hours) instead of asking again. Off: the session is forgotten when VS Code closes. **Sign Out** always removes it."
-        }
-      }
-    },
     "vmManager.providers": [
       {
         "id": "proxmox",

@@ -996,43 +996,66 @@
         }
       ]
     },
-    "configuration": {
-      "title": "VM Manager",
-      "properties": {
-        "vmm.refreshInterval": {
-          "type": "number",
-          "default": 5,
-          "minimum": 1,
-          "maximum": 300,
-          "markdownDescription": "Seconds between state refreshes while the Clusters view or the Overview is visible. Providers that push change events refresh immediately."
-        },
-        "vmm.console.openInNewWindow": {
-          "type": "boolean",
-          "default": false,
-          "description": "Open consoles directly in a new window instead of an editor tab."
-        },
-        "vmm.console.scaleViewport": {
-          "type": "boolean",
-          "default": true,
-          "description": "Scale graphical consoles to fit the editor."
-        },
-        "vmm.confirmPowerOff": {
-          "type": "boolean",
-          "default": true,
-          "description": "Ask for confirmation before a hard power off (Stop)."
-        },
-        "vmm.ssh.user": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "The account to sign in as inside a guest when connecting with **VM: Connect with Remote-SSH…**. Empty: your user name on this computer. The answer is remembered per machine."
-        },
-        "vmm.ssh.addConfigEntry": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Offer to add an entry for the machine to your ssh config before connecting (it is always shown first and never written silently). Turn off to connect by address without touching the file."
+    "configuration": [
+      {
+        "title": "VM Manager",
+        "properties": {
+          "vmm.refreshInterval": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 300,
+            "markdownDescription": "Seconds between state refreshes while the Clusters view or the Overview is visible. Providers that push change events refresh immediately."
+          },
+          "vmm.console.openInNewWindow": {
+            "type": "boolean",
+            "default": false,
+            "description": "Open consoles directly in a new window instead of an editor tab."
+          },
+          "vmm.console.scaleViewport": {
+            "type": "boolean",
+            "default": true,
+            "description": "Scale graphical consoles to fit the editor."
+          },
+          "vmm.confirmPowerOff": {
+            "type": "boolean",
+            "default": true,
+            "description": "Ask for confirmation before a hard power off (Stop)."
+          },
+          "vmm.ssh.user": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "The account to sign in as inside a guest when connecting with **VM: Connect with Remote-SSH…**. Empty: your user name on this computer. The answer is remembered per machine."
+          },
+          "vmm.ssh.addConfigEntry": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Offer to add an entry for the machine to your ssh config before connecting (it is always shown first and never written silently). Turn off to connect by address without touching the file."
+          }
+        }
+      },
+      {
+        "title": "QEMU",
+        "properties": {
+          "vmm.qemu.path": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Directory containing `qemu-system-*` and `qemu-img`. Leave empty to detect from `PATH` and common install locations. Clusters can override this."
+          }
+        }
+      },
+      {
+        "title": "Proxmox VE",
+        "properties": {
+          "vmm.proxmox.rememberSession": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Keep the Proxmox sign-in (OpenID Connect or password) in the operating system keychain after VS Code closes or reloads, so the next start reuses it while it is valid (Proxmox sessions last 2 hours) instead of asking again. Off: the session is forgotten when VS Code closes. **Sign Out** always removes it."
+          }
         }
       }
-    },
+    ],
     "walkthroughs": [
       {
         "id": "gettingStarted",
