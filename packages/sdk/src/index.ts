@@ -217,6 +217,8 @@ export interface VmInfo {
 	 * extension that it attached to, `imported` = built from existing disk images or definitions.
 	 */
 	origin?: 'adopted' | 'imported';
+	/** What kind of guest this is, when the hypervisor runs more than one (a Proxmox LXC container next to its QEMU VMs). Absent: a VM. */
+	guestKind?: 'vm' | 'container';
 	/** A template: it cannot be started, only cloned into new machines. */
 	template?: boolean;
 	/** `false` for an adopted VM without a control channel: it can only be observed and powered off. */

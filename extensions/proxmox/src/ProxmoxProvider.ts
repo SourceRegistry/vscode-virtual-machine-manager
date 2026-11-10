@@ -241,7 +241,7 @@ export class ProxmoxConnection implements ClusterConnection {
 				const guestConfig = v.container ? await api.lxc.id(v.vmid).config.get().then((c) => c as object, () => undefined) : config;
 				const macs = macAddresses(guestConfig);
 				const addresses = v.status === 'running' ? allAddresses(await this.guestAddresses(node, String(v.vmid), v.container, guestConfig)) : [];
-				return ({ id: String(v.vmid), displayId: String(v.vmid), ...(macs.length ? { macAddresses: macs } : {}), ...(addresses.length ? { ipAddresses: addresses } : {}), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', ...(v.template ? { template: true } : {}), cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
+				return ({ id: String(v.vmid), displayId: String(v.vmid), ...(macs.length ? { macAddresses: macs } : {}), ...(addresses.length ? { ipAddresses: addresses } : {}), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', guestKind: v.container ? 'container' : 'vm', ...(v.template ? { template: true } : {}), cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
 			}));
 	}
 	async getVmDetails(node: string, id: string): Promise<VmDetails> {

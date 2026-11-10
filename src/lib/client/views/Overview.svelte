@@ -19,7 +19,7 @@
 	import { clusterContextValue, nodeContextValue, vmContextValue } from '../../../shared/contextValue';
 	import { OPERATION_LABEL, allowedDuring } from '../../../shared/operations';
 	import { formatPercent } from '../../../shared/metrics';
-	import { originLabel } from '../../../shared/origin';
+	import { guestLabel, originLabel } from '../../../shared/origin';
 	import {
 		eligibleFor,
 		filterRows,
@@ -457,6 +457,7 @@
 											{:else}
 												<strong>{vm.name}</strong>
 											{/if}
+											{#if guestLabel(vm)}<span class="badge" title="A container shares the host kernel; it is not a full virtual machine.">{guestLabel(vm)}</span>{/if}
 											{#if originLabel(vm)}<span class="badge" title={vm.template ? 'A template: it cannot be started, only copied.' : 'Not created by VM Manager'}>{originLabel(vm)}</span>{/if}
 										</td>
 										<td class="muted">{row.cluster.name} › {row.node.name}</td>

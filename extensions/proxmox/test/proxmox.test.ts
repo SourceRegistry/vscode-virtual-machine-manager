@@ -100,7 +100,14 @@ describe('Proxmox provider', () => {
 	it('maps nodes and VMs, marking templates', async () => {
 		const { connection } = fixture();
 		expect(await connection.listNodes()).toMatchObject([{ id: 'pve', status: 'online', memoryMB: 4096, memoryUsedMB: 1 }]);
-		expect(await connection.listVms('pve')).toEqual([{ id: '100', displayId: '100', name: 'test', state: 'running', cpus: undefined, memoryMB: 2048, uptimeSeconds: undefined, consoles: ['vnc'] }, { id: '101', displayId: '101', name: 'Guest 101', state: 'unknown', template: true, cpus: undefined, memoryMB: undefined, uptimeSeconds: undefined, consoles: ['vnc'] }]);
+		expect(await connection.listVms('pve')).toEqual([{ id: '100', displayId: '100', name: 'test', state: 'running', guestKind: 'vm', cpus: undefined, memoryMB: 2048, uptimeSeconds: undefined, consoles: ['vnc'] }, { id: '101', displayId: '101', name: 'Guest 101', state: 'unknown', guestKind: 'vm', template: true, cpus: undefined, memoryMB: undefined, uptimeSeconds: undefined, consoles: ['vnc'] }]);
+	});
+	it('tells a container from a VM', async () => {
+		const { connection, lxc } = fixture();
+		lxc.list.mockResolvedValue([{ vmid: 200, name: 'ct', status: 'stopped' }]);
+		const guests = await connection.listVms('pve');
+		expect(guests.find((v) => v.id === '200')).toMatchObject({ guestKind: 'container', description: 'LXC container' });
+		expect(guests.find((v) => v.id === '100')?.guestKind).toBe('vm');
 	});
 	it('offers the terminal of a QEMU VM only without a display and with a serial socket', async () => {
 		const { connection, config } = fixture();
