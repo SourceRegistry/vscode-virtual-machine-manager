@@ -132,6 +132,14 @@ export interface Capabilities {
 	external: boolean;
 	/** Implements `ejectMedia` / `insertMedia` for CD/DVD drives. */
 	media?: boolean;
+	/** Implements `listSnapshots` / `createSnapshot` / `revertSnapshot` / `deleteSnapshot`. */
+	snapshots?: boolean;
+	/** `revertSnapshot` needs the VM stopped: the core asks the user to power it off first. */
+	snapshotRevertNeedsStopped?: boolean;
+	/** Implements `cloneVm`. */
+	clone?: boolean;
+	/** `cloneVm` needs the VM stopped: the core tells the user to shut it down first instead of trying. */
+	cloneNeedsStopped?: boolean;
 	/** Implements `getVmDetails` (hardware inventory). */
 	details?: boolean;
 	/** Implements `getVmStats` (live usage counters). */
@@ -233,6 +241,19 @@ export interface DiskDevice {
 	readOnly?: boolean;
 	/** Media can be swapped (CD/DVD drives). */
 	removable?: boolean;
+}
+
+/** A saved state of a VM's disks that it can be returned to. */
+export interface Snapshot {
+	/** Stable handle for `revertSnapshot` / `deleteSnapshot`. */
+	id: string;
+	name: string;
+	/** Milliseconds since the epoch. */
+	createdAt?: number;
+	/** Disk space the snapshot holds, when the hypervisor reports it. */
+	sizeBytes?: number;
+	/** The snapshot also holds memory and CPU state, so reverting resumes a running guest. Otherwise it is disk-only. */
+	includesMemory?: boolean;
 }
 
 export interface NicDevice {
@@ -469,6 +490,22 @@ export interface ClusterConnection extends Disposable {
 	ejectMedia?(nodeId: string, vmId: string, deviceId: string): Promise<void>;
 	/** Inserts an image into a CD/DVD drive, replacing the current one. */
 	insertMedia?(nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void>;
+	/**
+	 * Makes an independent copy of a VM under a new name (`createVm`'s name rules apply): its own disks, its own
+	 * identity (MAC address), nothing shared with the original. Snapshots, port forwards and passed-through
+	 * host devices are not carried over. Can take minutes for a large disk.
+	 */
+	cloneVm?(nodeId: string, vmId: string, name: string): Promise<VmInfo>;
+	/** Snapshots of a VM, oldest first. */
+	listSnapshots?(nodeId: string, vmId: string): Promise<Snapshot[]>;
+	/**
+	 * Saves the current state under `name` (unique within the VM). A provider that can only snapshot
+	 * disks takes a crash-consistent copy when the VM runs and says so through `Snapshot.includesMemory`.
+	 */
+	createSnapshot?(nodeId: string, vmId: string, name: string): Promise<Snapshot>;
+	/** Returns the VM to a snapshot, discarding everything changed since. See `Capabilities.snapshotRevertNeedsStopped`. */
+	revertSnapshot?(nodeId: string, vmId: string, snapshotId: string): Promise<void>;
+	deleteSnapshot?(nodeId: string, vmId: string, snapshotId: string): Promise<void>;
 	/** Host devices that can be given to the VM, and what is supported on this host. */
 	getPassthrough?(nodeId: string, vmId: string): Promise<PassthroughInfo>;
 	planPassthrough?(nodeId: string, vmId: string, deviceId: string, action: 'attach' | 'detach'): Promise<PassthroughPlan>;

@@ -154,16 +154,16 @@ export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvi
 		else args.push('-device', `ide-hd,drive=disk${index},bus=ide.${index},bootindex=${index + 1}`);
 	});
 
-	if (def.cdrom) {
-		args.push('-drive', `file=${escapeOptionValue(def.cdrom)},if=none,id=cd0,media=cdrom,readonly=on`);
-		if (arm) {
-			// No IDE/AHCI on `virt`: a virtio-scsi controller carries the CD (removable, so eject/insert work).
-			args.push('-device', 'virtio-scsi-pci,id=scsi0');
-			args.push('-device', `scsi-cd,drive=cd0,bus=scsi0.0,bootindex=${def.disks.length + 1}`);
-		} else {
-			// The AHCI controller of q35 has six ports (ide.0 … ide.5); the CD takes the last one.
-			args.push('-device', `ide-cd,drive=cd0,bus=ide.5,bootindex=${def.disks.length + 1}`);
-		}
+	// Always present, empty when there is no ISO: media can then be inserted at any time, also on a
+	// running VM (a drive cannot be hot-added), and the guest sees the drive on its next boot.
+	args.push('-drive', `${def.cdrom ? `file=${escapeOptionValue(def.cdrom)},` : ''}if=none,id=cd0,media=cdrom,readonly=on`);
+	if (arm) {
+		// No IDE/AHCI on `virt`: a virtio-scsi controller carries the CD (removable, so eject/insert work).
+		args.push('-device', 'virtio-scsi-pci,id=scsi0');
+		args.push('-device', `scsi-cd,drive=cd0,bus=scsi0.0,bootindex=${def.disks.length + 1}`);
+	} else {
+		// The AHCI controller of q35 has six ports (ide.0 … ide.5); the CD takes the last one.
+		args.push('-device', `ide-cd,drive=cd0,bus=ide.5,bootindex=${def.disks.length + 1}`);
 	}
 
 	args.push('-nic', def.nic === 'none' ? 'none' : `user,model=${def.nic}${def.mac ? `,mac=${def.mac}` : ''}${hostfwdOptions(def.forwards)}`);

@@ -14,6 +14,8 @@ import { OverviewPanel } from '../webview/OverviewPanel';
 import { VmDashboardPanel } from '../webview/VmDashboardPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, log, showError } from '../util/log';
+import * as snapshotFlow from '../snapshots/flow';
+import { deleteVmDetail } from '../../shared/deleteDetail';
 import { matchesQuery } from '../../shared/vmSearch';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
 
@@ -294,6 +296,64 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	}
 
 	// -----------------------------------------------------------------------------------------
+	// Clone
+	// -----------------------------------------------------------------------------------------
+
+	async function cloneVm(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to clone', (l) => !!l.cluster.connection?.capabilities.clone);
+		if (!location) return;
+		const caps = location.cluster.connection?.capabilities;
+		if (caps?.cloneNeedsStopped && location.vm.state !== 'stopped') {
+			void vscode.window.showInformationMessage(`Shut down "${location.vm.name}" before cloning it: a running machine keeps changing its disks.`);
+			return;
+		}
+		const name = await vscode.window.showInputBox({
+			title: `Clone ${location.vm.name}`,
+			prompt: 'Name of the copy. It gets its own disks and network address; snapshots, port forwards and passed-through devices are not copied.',
+			value: `${location.vm.name} (clone)`
+		});
+		if (name === undefined) return;
+		try {
+			const connection = await manager.connect(location.ref.clusterId);
+			if (!connection.cloneVm) return;
+			const copy = await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `Cloning ${location.vm.name}… (large disks take a while)` },
+				() => connection.cloneVm!(location.ref.nodeId, location.ref.vmId, name.trim())
+			);
+			await manager.refresh(location.ref.clusterId);
+			const choice = await vscode.window.showInformationMessage(`"${copy.name}" is ready.`, 'Start');
+			if (choice === 'Start') await power({ ...location.ref, vmId: copy.id }, 'start');
+		} catch (error) {
+			await showError(`Could not clone ${location.vm.name}`, error);
+		}
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Snapshots
+	// -----------------------------------------------------------------------------------------
+
+	const canSnapshot = (l: VmLocation) => !!l.cluster.connection?.capabilities.snapshots;
+
+	async function takeSnapshot(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to snapshot', canSnapshot);
+		if (location) await snapshotFlow.takeSnapshot(manager, location);
+	}
+
+	async function revertSnapshot(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to revert', canSnapshot);
+		if (!location) return;
+		const snapshot = await snapshotFlow.pickSnapshot(manager, location, `Revert ${location.vm.name} to…`);
+		if (snapshot) await snapshotFlow.revertSnapshot(manager, location, snapshot);
+	}
+
+	async function deleteSnapshot(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to delete a snapshot of', canSnapshot);
+		if (!location) return;
+		const snapshot = await snapshotFlow.pickSnapshot(manager, location, `Delete a snapshot of ${location.vm.name}`);
+		if (snapshot) await snapshotFlow.deleteSnapshot(manager, location, snapshot);
+	}
+
+	// -----------------------------------------------------------------------------------------
 	// Clusters
 	// -----------------------------------------------------------------------------------------
 
@@ -536,6 +596,13 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}
 	}
 
+	/** A VM that is gone leaves nothing to show: close its details, settings and consoles (display and serial). */
+	function closeViews(ref: VmRef): void {
+		VmDashboardPanel.closeFor(ref);
+		VmSettingsPanel.closeFor(ref);
+		consoles.closeFor(ref);
+	}
+
 	async function deleteVm(arg: Arg): Promise<void> {
 		const location = await resolveVm(arg, 'Select the virtual machine to delete');
 		if (!location) return;
@@ -546,15 +613,18 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			try {
 				const connection = await manager.connect(location.ref.clusterId);
 				await connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: false });
+				manager.forgetVm(location.ref);
+				closeViews(location.ref);
 				await manager.refresh(location.ref.clusterId);
 			} catch (error) {
 				await showError(`Could not detach from ${location.vm.name}`, error);
 			}
 			return;
 		}
+		const snapshots = location.cluster.connection?.capabilities.snapshots ? await snapshotFlow.listSnapshots(manager, location).then((list) => list.length, () => undefined) : undefined;
 		const choice = await vscode.window.showWarningMessage(
 			`Delete virtual machine "${location.vm.name}"?`,
-			{ modal: true, detail: 'This cannot be undone. A running machine is powered off first.' },
+			{ modal: true, detail: deleteVmDetail(snapshots) },
 			'Delete VM',
 			'Delete VM and Disks'
 		);
@@ -565,6 +635,8 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 				{ location: vscode.ProgressLocation.Notification, title: `Deleting ${location.vm.name}…` },
 				() => connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: choice === 'Delete VM and Disks' })
 			);
+			manager.forgetVm(location.ref);
+			closeViews(location.ref);
 			await manager.refresh(location.ref.clusterId);
 		} catch (error) {
 			await showError(`Could not delete ${location.vm.name}`, error);
@@ -635,6 +707,21 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	const register = (id: string, fn: (...args: unknown[]) => unknown) => vscode.commands.registerCommand(id, fn);
 
 	return [
+		// A VM that disappears for any reason (deleted in the hypervisor's own tools, an attached process that
+		// exited, a removed cluster) takes its tabs with it, not only one deleted from here. The user is only
+		// told when they did not cause it (a power-off or delete from here explains it).
+		manager.onDidRemoveVms((gone) => {
+			for (const vm of gone) {
+				closeViews(vm.ref);
+				if (vm.expected) continue;
+				const cluster = manager.cluster(vm.ref.clusterId)?.cluster.name;
+				if (vm.adopted) {
+					void vscode.window.showWarningMessage(`"${vm.name}" was detached: the attached virtual machine is no longer running. Its tabs were closed.`);
+				} else {
+					void vscode.window.showInformationMessage(`"${vm.name}" no longer exists${cluster ? ` on ${cluster}` : ''}. Its tabs were closed.`);
+				}
+			}
+		}),
 		register('vmm.addCluster', () => addCluster()),
 		register('vmm.editCluster', (arg) => editCluster(arg)),
 		register('vmm.removeCluster', (arg) => removeCluster(arg)),
@@ -679,6 +766,10 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}),
 		register('vmm.ejectMedia', (arg) => ejectMedia(arg)),
 		register('vmm.changeMedia', (arg) => changeMedia(arg)),
+		register('vmm.cloneVm', (arg) => cloneVm(arg)),
+		register('vmm.takeSnapshot', (arg) => takeSnapshot(arg)),
+		register('vmm.revertSnapshot', (arg) => revertSnapshot(arg)),
+		register('vmm.deleteSnapshot', (arg) => deleteSnapshot(arg)),
 		register('vmm.deleteVm', (arg) => deleteVm(arg)),
 		register('vmm.start', (arg) => power(arg, 'start')),
 		register('vmm.shutdown', (arg) => power(arg, 'shutdown')),

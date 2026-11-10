@@ -31,6 +31,28 @@ describe('splitArgs', () => {
 	});
 });
 
+describe('buildArgs CD/DVD drive', () => {
+	const env = { accelerators: ['tcg'], firmwareCode: '/fw/code.fd', firmwareVars: '/vms/a/vars.fd' };
+	const withoutIso = { ...def, cdrom: undefined };
+
+	it('always has a CD/DVD drive, empty without an ISO, so media can be inserted into a running VM', () => {
+		const args = buildArgs(withoutIso, runtime, env);
+		expect(args).toContain('if=none,id=cd0,media=cdrom,readonly=on'); // no file=
+		expect(args.some((a) => a.startsWith('ide-cd,drive=cd0'))).toBe(true);
+	});
+
+	it('names the ISO in the drive when there is one', () => {
+		expect(buildArgs(def, runtime, env)).toContain('file=/isos/debian.iso,if=none,id=cd0,media=cdrom,readonly=on');
+	});
+
+	it('does the same on ARM64 through virtio-scsi', () => {
+		const args = buildArgs({ ...withoutIso, arch: 'aarch64' }, runtime, env);
+		expect(args).toContain('if=none,id=cd0,media=cdrom,readonly=on');
+		expect(args).toContain('virtio-scsi-pci,id=scsi0');
+		expect(args.some((a) => a.startsWith('scsi-cd,drive=cd0'))).toBe(true);
+	});
+});
+
 describe('buildArgs', () => {
 	const args = buildArgs(def, runtime, { accelerators: ['kvm', 'tcg'], firmwareCode: '/fw/code.fd', firmwareVars: '/vms/a/vars.fd' });
 	const value = (flag: string) => args.filter((_, i) => args[i - 1] === flag);

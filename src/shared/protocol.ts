@@ -8,6 +8,7 @@ import type {
 	FieldValues,
 	NodeInfo,
 	PortForward,
+	Snapshot,
 	PowerAction,
 	PreviewFrame,
 	VmConfig,
@@ -96,6 +97,10 @@ export type OverviewCommand =
 	| 'vmm.openVmDashboard'
 	| 'vmm.ejectMedia'
 	| 'vmm.changeMedia'
+	| 'vmm.cloneVm'
+	| 'vmm.takeSnapshot'
+	| 'vmm.revertSnapshot'
+	| 'vmm.deleteSnapshot'
 	| 'vmm.deleteVm'
 	| 'vmm.createVm'
 	| 'vmm.attachRunningVm'
@@ -131,6 +136,13 @@ export interface RpcMethods {
 	 * when it changes the host (VFIO rebinds, shared groups); `changed` is false when they declined.
 	 */
 	changePassthrough: { params: { deviceId: string; action: 'attach' | 'detach' }; result: { changed: boolean } };
+	/** Snapshots of this VM, oldest first. */
+	listSnapshots: { params: void; result: Snapshot[] };
+	/** `name` is optional: the host asks for one. `undefined` when the user cancelled or it failed (already reported). */
+	takeSnapshot: { params: { name?: string }; result: Snapshot | undefined };
+	/** The host asks the user to confirm, and powers the VM off first when the hypervisor needs it. `false` when declined or failed. */
+	revertSnapshot: { params: { snapshotId: string }; result: boolean };
+	deleteSnapshot: { params: { snapshotId: string }; result: boolean };
 	addForward: { params: { forward: PortForward }; result: void };
 	removeForward: { params: { forward: PortForward }; result: void };
 	/** Copies the ssh command or opens the forward in the browser. */

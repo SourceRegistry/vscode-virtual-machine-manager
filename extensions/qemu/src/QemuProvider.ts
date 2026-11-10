@@ -30,6 +30,7 @@ import {
 	type Logger,
 	type NodeInfo,
 	type PortForward,
+	type Snapshot,
 	type PowerAction,
 	type ProviderContext,
 	type VmConfig,
@@ -43,6 +44,8 @@ import { buildArgs, usableAccelerators, type DiskBus, type Firmware, type NicMod
 import { detectQemu, type ArchInstallation, type QemuInstallation } from './detect';
 import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
+import { cloneDefinition } from './clone';
+import { commonSnapshots, qmpSnapshots, snapshotNameProblem, type QemuSnapshotInfo, type QmpSnapshotBlock } from './snapshots';
 import { availableMemoryMB, CpuLoadSampler } from './hostInfo';
 import { listProcesses, processStartedAt, sampleProcess, walkFiles } from './hostProcess';
 import { iommuEnabled, listPciHost, listUsbHost, pciDriver, runPrivileged } from './hostDevices';
@@ -210,6 +213,10 @@ export class QemuConnection implements ClusterConnection {
 		preview: false,
 		external: false,
 		media: true,
+		snapshots: true,
+		snapshotRevertNeedsStopped: true,
+		clone: true,
+		cloneNeedsStopped: true,
 		details: true,
 		forwards: true,
 		adopt: true,
@@ -727,6 +734,172 @@ export class QemuConnection implements ClusterConnection {
 	async insertMedia(_nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void> {
 		if (!fs.existsSync(imagePath)) throw new ProviderError(`Image not found: ${imagePath}`, 'invalid');
 		await this.changeMedia(vmId, deviceId, imagePath);
+	}
+
+	async cloneVm(_nodeId: string, vmId: string, name: string): Promise<VmInfo> {
+		name = name.trim();
+		if (!VM_NAME.test(name)) throw new ProviderError('Use 1–64 letters, digits, spaces or . _ ( ) - for the name', 'invalid');
+		if ((await this.definitions()).some((d) => d.name.toLowerCase() === name.toLowerCase())) {
+			throw new ProviderError(`A virtual machine named "${name}" already exists`, 'invalid');
+		}
+		const source = await this.definition(vmId);
+		if (source.origin === 'adopted') {
+			throw new ProviderError('A VM that was attached from outside cannot be cloned. Import it or recreate it here first.', 'unsupported');
+		}
+		// A running guest keeps writing: a copy taken now would be torn.
+		if (await this.runtime(vmId)) throw new ProviderError(`Shut down "${source.name}" before cloning it`, 'invalid');
+		for (const disk of source.disks) {
+			if (!fs.existsSync(disk)) throw new ProviderError(`The disk ${disk} of "${source.name}" was not found`, 'notFound');
+		}
+		const id = randomUUID();
+		const dir = this.dir(id);
+		await fs.promises.mkdir(dir, { recursive: true });
+		try {
+			// `convert` writes a compact qcow2 and leaves the source's internal snapshots behind.
+			const disks: string[] = [];
+			for (let index = 0; index < source.disks.length; index++) {
+				const target = path.join(dir, `disk${index}.qcow2`);
+				try {
+					await execFileAsync(this.qemu.img, ['convert', '-O', 'qcow2', source.disks[index]!, target], { windowsHide: true, timeout: 60 * 60_000 });
+				} catch (error) {
+					const detail = String((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
+					throw new ProviderError(`Could not copy ${path.basename(source.disks[index]!)}: ${detail}`, 'failed');
+				}
+				disks.push(target);
+			}
+			// The UEFI variables (boot entries) travel with the machine.
+			const vars = path.join(this.dir(vmId), 'efivars.fd');
+			if (source.firmware === 'uefi' && fs.existsSync(vars)) await fs.promises.copyFile(vars, path.join(dir, 'efivars.fd'));
+			const def = cloneDefinition(source, { id, name, disks, mac: randomMac(), now: Date.now() });
+			if (def.firmware === 'uefi') await this.ensureVars(def);
+			await this.saveDefinition(def);
+			this.log.info(`Cloned ${source.name} to ${name} in ${dir}`);
+			this.changes.fire({ nodeId: NODE_ID, vmId: id });
+			return { id, name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB };
+		} catch (error) {
+			await fs.promises.rm(dir, { recursive: true, force: true });
+			throw error;
+		}
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Snapshots: qcow2 internal snapshots, disk state only (see snapshots.ts)
+	// -----------------------------------------------------------------------------------------
+
+	/** Snapshots need every disk to be qcow2 and the VM to be one we manage. Returns the disk files. */
+	private async snapshotDisks(def: VmDefinition): Promise<string[]> {
+		if (def.origin === 'adopted') {
+			throw new ProviderError('Snapshots are not available for a VM that was attached from outside. Import it or recreate it here.', 'unsupported');
+		}
+		if (!def.disks.length) throw new ProviderError('The VM has no disk to snapshot', 'unsupported');
+		for (const disk of def.disks) {
+			const info = await this.snapshotInfo(disk);
+			if (info?.format !== 'qcow2') {
+				throw new ProviderError(`Snapshots need qcow2 disks, but ${path.basename(disk)} is ${info?.format ?? 'unreadable'}. Convert it first.`, 'unsupported');
+			}
+		}
+		return def.disks;
+	}
+
+	/** `-U` reads an image that a running VM holds open. */
+	private async snapshotInfo(file: string): Promise<{ format?: string; snapshots?: QemuSnapshotInfo[] } | undefined> {
+		try {
+			const { stdout } = await execFileAsync(this.qemu.img, ['info', '-U', '--output=json', file], { windowsHide: true, timeout: 15_000 });
+			return JSON.parse(stdout) as { format?: string; snapshots?: QemuSnapshotInfo[] };
+		} catch {
+			return undefined;
+		}
+	}
+
+	private async snapshotImg(args: string[], what: string): Promise<void> {
+		try {
+			await execFileAsync(this.qemu.img, ['snapshot', ...args], { windowsHide: true, timeout: 120_000 });
+		} catch (error) {
+			const detail = String((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
+			throw new ProviderError(`${what}: ${detail}`, 'failed');
+		}
+	}
+
+	async listSnapshots(_nodeId: string, vmId: string): Promise<Snapshot[]> {
+		const def = await this.definition(vmId);
+		if (def.origin === 'adopted') return [];
+		const runtime = await this.runtime(vmId);
+		if (runtime) {
+			const blocks = await (await this.client(vmId, runtime)).execute<QmpSnapshotBlock[]>('query-block');
+			return commonSnapshots(qmpSnapshots(blocks, def.disks.map((_, index) => `disk${index}`)));
+		}
+		const infos = await Promise.all(def.disks.map((disk) => this.snapshotInfo(disk)));
+		return commonSnapshots(infos.map((info) => info?.snapshots ?? []));
+	}
+
+	async createSnapshot(nodeId: string, vmId: string, name: string): Promise<Snapshot> {
+		const problem = snapshotNameProblem(name);
+		if (problem) throw new ProviderError(problem, 'invalid');
+		const def = await this.definition(vmId);
+		const disks = await this.snapshotDisks(def);
+		if ((await this.listSnapshots(nodeId, vmId)).some((snap) => snap.name.toLowerCase() === name.toLowerCase())) {
+			throw new ProviderError(`A snapshot named "${name}" already exists`, 'invalid');
+		}
+		const runtime = await this.runtime(vmId);
+		const done: number[] = [];
+		try {
+			if (runtime) {
+				// A running guest: the disks are captured as they are, like pulling the plug (crash-consistent).
+				const client = await this.client(vmId, runtime);
+				for (let index = 0; index < disks.length; index++) {
+					await client.execute('blockdev-snapshot-internal-sync', { device: `disk${index}`, name });
+					done.push(index);
+				}
+			} else {
+				for (let index = 0; index < disks.length; index++) {
+					await this.snapshotImg(['-c', name, disks[index]!], `Could not snapshot ${path.basename(disks[index]!)}`);
+					done.push(index);
+				}
+			}
+		} catch (error) {
+			// All disks or none: a snapshot that exists on only some of them could not be reverted.
+			await this.removeSnapshot(vmId, runtime, disks, name, done).catch(() => undefined);
+			throw error instanceof ProviderError ? error : new ProviderError(`Could not take the snapshot: ${(error as Error).message}`, 'failed');
+		}
+		this.log.info(`Snapshot "${name}" of ${def.name}${runtime ? ' (running, disk state only)' : ''}`);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+		return { id: name, name, createdAt: Date.now(), includesMemory: false };
+	}
+
+	async revertSnapshot(nodeId: string, vmId: string, snapshotId: string): Promise<void> {
+		const def = await this.definition(vmId);
+		const disks = await this.snapshotDisks(def);
+		if (await this.runtime(vmId)) {
+			throw new ProviderError('Power the VM off before reverting: the snapshot holds disk state only, so a running guest cannot continue from it.', 'invalid');
+		}
+		if (!(await this.listSnapshots(nodeId, vmId)).some((snap) => snap.id === snapshotId)) {
+			throw new ProviderError(`Snapshot "${snapshotId}" was not found on every disk`, 'notFound');
+		}
+		for (const disk of disks) await this.snapshotImg(['-a', snapshotId, disk], `Could not revert ${path.basename(disk)}`);
+		this.log.info(`Reverted ${def.name} to "${snapshotId}"`);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
+	async deleteSnapshot(nodeId: string, vmId: string, snapshotId: string): Promise<void> {
+		const def = await this.definition(vmId);
+		const disks = await this.snapshotDisks(def);
+		if (!(await this.listSnapshots(nodeId, vmId)).some((snap) => snap.id === snapshotId)) {
+			throw new ProviderError(`Snapshot "${snapshotId}" was not found`, 'notFound');
+		}
+		const runtime = await this.runtime(vmId);
+		await this.removeSnapshot(vmId, runtime, disks, snapshotId, disks.map((_, index) => index));
+		this.log.info(`Deleted snapshot "${snapshotId}" of ${def.name}`);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
+	/** Removes a snapshot from the listed disks, a running VM through QMP and a stopped one through qemu-img. */
+	private async removeSnapshot(vmId: string, runtime: VmRuntime | undefined, disks: string[], name: string, indexes: number[]): Promise<void> {
+		if (runtime) {
+			const client = await this.client(vmId, runtime);
+			for (const index of indexes) await client.execute('blockdev-snapshot-delete-internal-sync', { device: `disk${index}`, name });
+		} else {
+			for (const index of indexes) await this.snapshotImg(['-d', name, disks[index]!], `Could not delete the snapshot from ${path.basename(disks[index]!)}`);
+		}
 	}
 
 	async addPortForward(_nodeId: string, vmId: string, forward: PortForward): Promise<void> {

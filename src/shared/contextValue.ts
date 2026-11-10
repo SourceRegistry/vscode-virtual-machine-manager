@@ -5,7 +5,7 @@
  *
  *   cluster;status=<status>;[signout;][rdp;]     rdp: the provider opens RDP consoles (remembered credentials)
  *   node;status=<status>;[create;][adopt;][import;]
- *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial, terminal (serial without a display), external, media, ejectable, details, edit, delete
+ *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial, terminal (serial without a display), external, media, ejectable, snapshots, clone, details, edit, delete
  *
  * While a power operation runs, `state` is the transitional state and only the actions allowed
  * during it are listed (see operations.ts), plus `busy`.
@@ -44,6 +44,8 @@ export function vmContextValue(vm: VmInfo & { operation?: PowerAction }, caps: C
 			flags.push('media');
 			if (vm.mediaInserted) flags.push('ejectable');
 		}
+		if (caps.snapshots) flags.push('snapshots');
+		if (caps.clone) flags.push('clone');
 		if (caps.edit) flags.push('edit');
 		if (caps.delete) flags.push('delete');
 	}

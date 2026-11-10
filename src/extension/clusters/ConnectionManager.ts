@@ -6,6 +6,18 @@ import type { ClusterStore, StoredCluster } from './ClusterStore';
 import type { ProviderRegistry } from '../registry/ProviderRegistry';
 import { errorMessage, log, scopedLogger } from '../util/log';
 import { OPERATION_LABEL, OPERATION_STATE, allowedDuring } from '../../shared/operations';
+import { VanishedVms, type GoneVm, type ObservedNode } from '../../shared/vanished';
+
+/** A VM that disappeared. `expected`: the user powered it off from here, so there is nothing to tell them. */
+export interface VanishedVm {
+	ref: VmRef;
+	name: string;
+	adopted: boolean;
+	expected: boolean;
+}
+
+/** How long a power-off request still explains a VM disappearing (a graceful shutdown can take minutes). */
+const POWER_OFF_EXPLAINS_MS = 15 * 60_000;
 
 /** How long a graceful shutdown keeps the VM shown as shutting down after the request was sent. */
 const SHUTDOWN_WAIT_MS = 10 * 60_000;
@@ -49,11 +61,17 @@ export class ConnectionManager implements vscode.Disposable {
 	private readonly emitter = new vscode.EventEmitter<string | undefined>();
 	/** Fires with the cluster id that changed, or undefined for structural changes. */
 	readonly onDidChange = this.emitter.event;
+	private readonly vanishedEmitter = new vscode.EventEmitter<VanishedVm[]>();
+	/** Fires with the VMs that have disappeared (deleted elsewhere, an attached process that exited, a removed cluster). */
+	readonly onDidRemoveVms = this.vanishedEmitter.event;
+	private readonly vanished = new VanishedVms();
+	/** When a shutdown or power-off was last requested from here, by VM. */
+	private readonly powerOffRequested = new Map<string, number>();
 	private readonly visibility = new Set<string>();
 	private timer: NodeJS.Timeout | undefined;
 	/** Power operations in flight, by VM (see `power`). */
 	private readonly operations = new Map<string, { action: PowerAction }>();
-	private readonly disposables: vscode.Disposable[] = [this.emitter];
+	private readonly disposables: vscode.Disposable[] = [this.emitter, this.vanishedEmitter];
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -250,12 +268,14 @@ export class ConnectionManager implements vscode.Disposable {
 			try {
 				const connection = await this.connect(rt.cluster.id, interactive);
 				const nodes = await connection.listNodes();
+				const observed: ObservedNode[] = [];
 				const snapshots = await Promise.all(
 					nodes.map(async (node): Promise<NodeSnapshot> => {
 						if (node.status === 'offline') return { ...node, vms: [] };
 						try {
 							const vms = await connection.listVms(node.id);
 							vms.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+							observed.push({ nodeId: node.id, listed: true, vms: vms.map((v) => ({ id: v.id, name: v.name, adopted: v.origin === 'adopted' })) });
 							return { ...node, vms };
 						} catch (error) {
 							log.warn(`Listing VMs of ${node.name} failed: ${errorMessage(error)}`);
@@ -271,6 +291,7 @@ export class ConnectionManager implements vscode.Disposable {
 				if (rt.status !== 'connected') this.setStatus(rt, 'connected');
 				this.emitter.fire(rt.cluster.id);
 				this.updateContextKeys();
+				this.reportVanished(this.vanished.update(rt.cluster.id, observed));
 			} catch (error) {
 				if (rt.signedOut) return;
 				rt.loaded = true;
@@ -303,6 +324,7 @@ export class ConnectionManager implements vscode.Disposable {
 		if (running && !allowedDuring(running.action, action)) {
 			throw new Error(`${OPERATION_LABEL[running.action].replace('…', '')} is already in progress.`);
 		}
+		if (action === 'shutdown' || action === 'stop') this.powerOffRequested.set(key, Date.now());
 		const operation = { action };
 		this.operations.set(key, operation);
 		this.applyOperations(ref.clusterId);
@@ -404,6 +426,8 @@ export class ConnectionManager implements vscode.Disposable {
 			if (!ids.has(id)) {
 				this.disconnect(rt);
 				this.runtimes.delete(id);
+				// The user removed the cluster themselves: close its tabs, tell them nothing.
+				this.reportVanished(this.vanished.removeCluster(id), true);
 			}
 		}
 		for (const cluster of stored) {
@@ -414,6 +438,7 @@ export class ConnectionManager implements vscode.Disposable {
 				// Configuration changed: drop the connection, reload lazily.
 				this.disconnect(rt);
 				rt.cluster = cluster;
+				this.vanished.reset(cluster.id);
 				rt.nodes = [];
 				rt.loaded = false;
 				rt.status = 'disconnected';
@@ -434,6 +459,24 @@ export class ConnectionManager implements vscode.Disposable {
 			}
 		}
 		this.emitter.fire(undefined);
+	}
+
+	private reportVanished(gone: GoneVm[], expected = false): void {
+		if (!gone.length) return;
+		const now = Date.now();
+		this.vanishedEmitter.fire(
+			gone.map(({ ref, name, adopted }) => {
+				const requested = this.powerOffRequested.get(vmKey(ref));
+				this.powerOffRequested.delete(vmKey(ref));
+				return { ref, name, adopted, expected: expected || (requested !== undefined && now - requested < POWER_OFF_EXPLAINS_MS) };
+			})
+		);
+	}
+
+	/** The user deleted or detached this VM from here: close nothing later, report nothing. */
+	forgetVm(ref: VmRef): void {
+		this.vanished.forget(ref);
+		this.powerOffRequested.delete(vmKey(ref));
 	}
 
 	private updateContextKeys(): void {

@@ -8,7 +8,7 @@
 	import Icon from '#lib/client-lib/components/icons/Icon.svelte';
 	import Loader from '#lib/client-lib/components/feedback/Loader.svelte';
 	import Status from '#lib/client-lib/components/feedback/Status.svelte';
-	import { formatMemory, formatUptime, type Capabilities, type PassthroughInfo, type VmDetails, type VmInfo, type VmStats } from '@vmm/sdk';
+	import { formatMemory, formatUptime, type Capabilities, type PassthroughInfo, type Snapshot, type VmDetails, type VmInfo, type VmStats } from '@vmm/sdk';
 	import type { BootData, OverviewCommand } from '../../../shared/protocol';
 	import { originLabel } from '../../../shared/origin';
 	import { browserUrl, GUEST_HOST_ADDRESS, sshCommand } from '../../../shared/forwards';
@@ -150,6 +150,46 @@
 		} catch (error) {
 			detailsError = (error as Error).message;
 		}
+		if (caps?.snapshots) await loadSnapshots();
+	}
+
+	// Snapshots
+	let snapshots = $state<Snapshot[]>([]);
+	let snapshotError = $state<string | undefined>();
+	let snapshotBusy = $state(false);
+	let takingSnapshot = $state(false);
+	let newSnapshotName = $state('');
+
+	async function loadSnapshots() {
+		try {
+			snapshots = await request('listSnapshots');
+			snapshotError = undefined;
+		} catch (error) {
+			snapshotError = (error as Error).message;
+		}
+	}
+
+	async function snapshotCall(call: () => Promise<unknown>) {
+		snapshotBusy = true;
+		try {
+			await call();
+			await loadSnapshots();
+		} catch (error) {
+			snapshotError = (error as Error).message;
+		} finally {
+			snapshotBusy = false;
+		}
+	}
+
+	function takeSnapshot(event: SubmitEvent) {
+		event.preventDefault();
+		void snapshotCall(async () => {
+			const taken = await request('takeSnapshot', { name: newSnapshotName.trim() || undefined });
+			if (taken) {
+				takingSnapshot = false;
+				newSnapshotName = '';
+			}
+		});
 	}
 
 	async function sampleOnce() {
@@ -476,6 +516,43 @@
 							<p class="muted hint">Forwards listen on 127.0.0.1 only. From the guest, the host is reachable at <span class="mono">{GUEST_HOST_ADDRESS}</span>.</p>
 						{/if}
 					</Card>
+					{#if caps?.snapshots}
+						<Card title="Snapshots">
+							{#snippet header()}
+								<span class="icon-only"><Button transparent title="Take a snapshot" aria-label="Take a snapshot" disabled={takingSnapshot || snapshotBusy} onclick={() => (takingSnapshot = true)}><Icon icon="plus-lg" /></Button></span>
+							{/snippet}
+							{#if snapshotError}<p class="error" role="alert">{snapshotError}</p>{/if}
+							<table class="grid">
+								<thead><tr><th>Name</th><th>Taken</th><th>Saved</th><th></th></tr></thead>
+								<tbody>
+									{#each [...snapshots].reverse() as snapshot (snapshot.id)}
+										<tr>
+											<td>{snapshot.name}</td>
+											<td>{snapshot.createdAt ? new Date(snapshot.createdAt).toLocaleString() : '–'}</td>
+											<td>{snapshot.includesMemory ? 'Disks and memory' : 'Disks only'}</td>
+											<td class="actions">
+												<Button transparent disabled={snapshotBusy} title="Revert to this snapshot" aria-label="Revert to {snapshot.name}" onclick={() => snapshotCall(() => request('revertSnapshot', { snapshotId: snapshot.id }))}><Icon icon="arrow-counterclockwise" /></Button>
+												<Button transparent disabled={snapshotBusy} title="Delete this snapshot" aria-label="Delete {snapshot.name}" onclick={() => snapshotCall(() => request('deleteSnapshot', { snapshotId: snapshot.id }))}><Icon icon="trash" /></Button>
+											</td>
+										</tr>
+									{/each}
+									{#if takingSnapshot}
+										<tr class="new-row">
+											<td colspan="3"><input form="snapshot-form" type="text" placeholder="Name (empty: the current date and time)" aria-label="Snapshot name" maxlength="64" bind:value={newSnapshotName} /></td>
+											<td class="actions">
+												<Button transparent type="submit" form="snapshot-form" disabled={snapshotBusy} title="Take snapshot" aria-label="Confirm snapshot"><Icon icon="check-lg" /></Button>
+												<Button transparent title="Cancel" aria-label="Cancel" onclick={() => ((takingSnapshot = false), (newSnapshotName = ''))}><Icon icon="x-lg" /></Button>
+											</td>
+										</tr>
+									{:else if !snapshots.length}
+										<tr class="empty-row"><td colspan="4" class="empty">No snapshots. Use + to save the state of the disks so you can return to it.</td></tr>
+									{/if}
+								</tbody>
+							</table>
+							<form id="snapshot-form" onsubmit={takeSnapshot}></form>
+							<p class="muted hint">Snapshots hold the disks only. Taken while the machine runs, they are like a power cut: the guest recovers as it would after one. Reverting needs the machine powered off.</p>
+						</Card>
+					{/if}
 					{#if caps?.passthrough}
 						<Card title="Host devices">
 							{#snippet header()}

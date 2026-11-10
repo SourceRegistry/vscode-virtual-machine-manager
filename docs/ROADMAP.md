@@ -4,6 +4,18 @@ Tracks the dashboard / QEMU / remote-node work. Update the status column and che
 
 Status: `todo` · `in progress` · `testing` · `merged`
 
+## Goal
+
+**Be the best VM extension for VS Code**: trustworthy first, then the features developers reach for.
+
+1. **Trust (phase 11):** everything shipped is verified on real hardware where we have it, and honestly labelled where we do not.
+2. **Dev workflow (phases 12-14):** snapshots, Remote-SSH into a VM, cloud images with cloud-init.
+3. **Reach (phases 9, 19, 8):** remote hosts and libvirt.
+
+Done when: phase 11 has no open box we can close on this Mac, and a new user can create a cloud-image VM, snapshot it and open it in Remote-SSH without leaving VS Code.
+
+Working now: **phase 11**. Next: phase 12.
+
 ## Ground rules
 
 - One branch per phase: `feat/<name>` (or `fix/<name>`), cut from `main`.
@@ -15,20 +27,41 @@ Status: `todo` · `in progress` · `testing` · `merged`
 
 ## Overview
 
+Phases 1-10 are built (most still need a manual check). Phases 11-20 are the backlog; 8 and 9 are the remote-host phases.
+
+### Built / in testing
+
 | # | Branch | Release | Status |
 |---|--------|---------|--------|
 | 1 | `fix/qemu-shutdown` | patch | testing |
 | 2 | `feat/vm-details-sdk` | minor | testing (stacked on phase 1) |
 | 3 | `feat/vm-dashboard` | minor | testing (stacked on phase 2) |
 | 4 | `feat/host-dashboard` | minor | testing (stacked on phase 3) |
-| 5 | `feat/qemu-network` | minor | todo |
-| 6 | `feat/qemu-import` | minor | todo |
-| 7 | `feat/passthrough` | minor | todo |
-| 8 | `feat/hyperv-remote` | minor | todo |
-| 9 | `feat/qemu-remote-ssh` | minor | todo |
-| 10 | `feat/qemu-arm64` | minor | todo |
+| 5 | `feat/qemu-network` | minor | testing (status was stale; code and tests done) |
+| 6 | `feat/qemu-import` | minor | testing (status was stale; code and tests done) |
+| 7 | `feat/passthrough` | minor | testing (status was stale; code and tests done) |
+| 10 | `feat/qemu-arm64` | minor | testing |
 
-Order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 (10 is independent and can move up; it fixes slow x86 emulation on Apple Silicon). After phase 2, phases 6–9 are mostly independent and can be reordered.
+### Backlog, highest value first
+
+Value = how much it moves "best VM extension for VS Code", weighed against effort. **Mac** = can be built and tested on the dev Mac.
+
+| Rank | Phase | Branch | Why it ranks here | Mac |
+|---|---|---|---|---|
+| 1 | 11 | `fix/validate-existing` | Trust: unverified code and open manual checks undercut everything else | partly |
+| 2 | 12 | `feat/snapshots` | First thing dev/test users reach for; absent today | yes |
+| 3 | 13 | `feat/remote-ssh-connect` | The feature only a VS Code extension can offer; small effort | yes |
+| 4 | 14 | `feat/provisioning` | Image downloader + cloud-init removes the slow ISO install | yes |
+| 5 | 9 | `feat/qemu-remote-ssh` | Remote/headless hosts are the main reason to want this in an editor | yes (localhost) |
+| 6 | 19 | `feat/libvirt-provider` | One provider covers most Linux KVM users | partly |
+| 7 | 8 | `feat/hyperv-remote` | Remote Hyper-V hosts; large Windows audience, but no Windows host to test | no |
+| 8 | 16 | `feat/guest-integration` | Guest memory, run/copy, clipboard; makes VMs feel integrated | partly |
+| 9 | 18 | `feat/dev-ux` | Countdown, notifications, logs, API; cheap polish, wide effect | yes |
+| 10 | 15 | `feat/disk-management` | Resize/convert/export; useful, not a differentiator | yes |
+| 11 | 17 | `feat/qemu-network-v2` | NIC editor, bridge/vmnet; privileges make it costly on macOS | partly |
+| 12 | 20 | `feat/more-providers` | VMware, VirtualBox, Parallels, XCP-ng, Nutanix; big but each is its own project | mostly no |
+
+Phase numbers stay stable (they name sections and branches); the rank is the build order. Phases 5-7 and 10 are built but their leftovers sit in their own sections.
 
 ## Phase 1: `fix/qemu-shutdown`
 
@@ -47,7 +80,7 @@ no `acpid`) ignores `system_powerdown`, and there is no timeout or escalation (`
 - [x] Reboot uses the agent when it answers, else `system_reset`
 - [x] Tests: ladder, guest agent client, args; opt-in end-to-end against real QEMU (`VMM_E2E_QEMU=1`)
 - [ ] Manual check in VS Code: Power Off prompt after a timed-out shutdown
-- [ ] Manual check with a real guest running qemu-guest-agent (only unit tested against a fake agent)
+- [x] Real guest running qemu-guest-agent: verified 2026-11-09 with Debian 12 arm64 on HVF (`extensions/qemu/test/guest.e2e.test.ts`): the agent answers, reports the NIC address, and *Shut Down* ends in `stopped` without the force-stop path
 
 ## Phase 2: `feat/vm-details-sdk`
 
@@ -177,6 +210,134 @@ QEMU logs `falling back to tcg` and every VM runs in slow software emulation. Th
 - [~] One-time "emulation is slow" notice: the create form and settings say so and the VM list marks emulated guests, but there is no pop-up
 - [ ] Windows on arm64 hosts: out of scope until someone can test it
 - Not verified: a full guest OS install on ARM64 (only firmware boot, devices, CD hot-swap), KVM on arm64 Linux, AAVMF on Debian/Ubuntu (path knowledge only)
+
+## Best-in-class backlog (phases 11-20)
+
+Gap analysis: [GAPS.md](GAPS.md). Sections are in phase-number order; build order is the rank table in the Overview. Phases 8 and 9 belong to this backlog too.
+**Dev Mac** = Apple Silicon macOS with QEMU (HVF for arm64 guests, TCG for x86_64). "Local" below means testable on that machine.
+
+### Phase 11: `fix/validate-existing`  (Local: partly)
+
+Trust first. Close the open "manual check" items before adding features.
+- [x] VS Code smoke test (`npm run test:integration`) passed 2026-11-10 on this Mac against the installed VS Code, using `VSCODE_EXECUTABLE_PATH="/Applications/Visual Studio Code.app/Contents/MacOS/Code"` (the default download of 340 MB timed out). It proves activation, provider registration, every contributed command has a handler, the overview opens. It does **not** drive a real VM or click anything
+- [~] Manual pass in VS Code on the Mac, 2026-11-10 (QEMU, Alpine 3.24 arm64 ISO, HVF), driven by the maintainer: add cluster (QEMU detected), create (ARM64 native default), boot to Alpine, graphical and serial consoles, Show Details and charts, Overview (summary, filter, sort, bulk bar), Shut Down timing out into the Power Off prompt, attach to a running external VM: **all work**. Eject / Change ISO works **but needed a window reload first** (see below). Port forward add/persist not checked yet
+- [~] Eject / Change ISO needed a VS Code reload in the manual pass. Likely the missing CD/DVD drive on VMs created without an ISO (fixed in phase 12, see there); confirm on a VM created before and after the fix. Original note: Eject / Change ISO needed a VS Code reload before it worked in the manual pass. Cause not found; reproduce on a fresh profile (`/private/tmp/vmm-dev`), check the context keys that gate the inline button and menu entries
+- [ ] Still to check by hand: port forward add, remove and persistence after restart
+- [x] (superseded, kept for reference) Manual pass in VS Code against real QEMU VMs: phases 1-7 and 10 unchecked boxes (Power Off prompt, eject button, charts, overview bulk actions)
+- [x] Guest agent test against a real guest: done 2026-11-09, opt-in `VMM_E2E_GUEST_IMAGE=<cloud image> npx vitest run extensions/qemu/test/guest.e2e.test.ts` (seed via cloud-init `cidata` ISO; the `-smbios ds=nocloud;s=http://` form fails on Debian 12's cloud-init 22.4)
+- [x] Verified 2026-11-09 on the Mac: `npm run check`, `npm test` (300 pass), opt-in QEMU e2e (6 pass)
+- [ ] Full guest OS install on ARM64 (only firmware boot verified so far)
+- [x] Proxmox provider: verified status written down 2026-11-09 (`extensions/proxmox/README.md`): unit tests use a mocked `pve-client`, nothing has run against a live server
+- [ ] Proxmox provider: run against a real server (HTTPS token, session ticket, OIDC, VNC and serial consoles, power tasks, create). Not possible on this Mac without a Proxmox host; ask whoever has one
+- [ ] Merge or close the stacked branches (phases 1-4)
+- [x] Views of a VM that disappears are closed (details, settings, display and serial consoles), also when it vanishes outside VM Manager. Deliberately slow to conclude: needs two successful listings in a row without it, and a failed or offline node counts for nothing. Told to the user unless they powered it off, deleted it or removed the cluster from here (`src/shared/vanished.ts`, unit tested). **Verified by hand 2026-11-10** with attached external VMs: force-killing the process closed the tabs and showed the notice; powering it off from VM Manager closed the tabs with no notice. The manager wiring itself has no automated test
+- [ ] Hyper-V, VFIO, DDA, Windows `sampleProcess`: **Not local** (need a Windows / Linux IOMMU host); keep marked experimental/untested
+- [~] CI: `qemu-e2e` job added to `.github/workflows/ci.yml` (ubuntu + macos, non-blocking via `continue-on-error`); **never run on GitHub yet**. Make it blocking once green on both. Still to do: a Windows job for Hyper-V script syntax
+
+### Phase 12: `feat/snapshots`  (Local: yes)
+
+Status: **in progress** on `feat/snapshots`. QEMU snapshots work end to end on this Mac; the UI is built but not yet clicked through by hand.
+
+- [x] SDK (optional, additive): `Snapshot`, `Capabilities.snapshots`, `Capabilities.snapshotRevertNeedsStopped`, `listSnapshots` / `createSnapshot` / `revertSnapshot` / `deleteSnapshot`
+- [x] QEMU, disk-only qcow2 internal snapshots (`extensions/qemu/src/snapshots.ts`): stopped VM through `qemu-img snapshot -c/-a/-d` and `qemu-img info -U`; running VM through QMP `blockdev-snapshot-internal-sync` / `-delete-internal-sync` and `query-block`. All disks or none (rolled back on failure); only snapshots present on every disk are listed; names validated and unique (case-insensitive); raw disks and attached-from-outside VMs refused with the reason
+- [x] Revert needs the VM stopped (the snapshot has no memory). The core asks, powers off, then reverts (`Capabilities.snapshotRevertNeedsStopped`)
+- [x] Core: `VM: Take Snapshot…`, `Revert to Snapshot…`, `Delete Snapshot…` (palette, tree and Overview context menus, same entries in both), Snapshots card on the details page, shared confirmation flow (`src/extension/snapshots/flow.ts`)
+- [x] Tests: parsers against real QEMU 11.1 output, name rules, menu entries; opt-in e2e on real QEMU covers stopped and running snapshots, duplicate and bad names, refusal to revert while running, and that a revert really restores the disk (data written after the snapshot is gone, checked with `qemu-io`)
+- Found by experiment on QEMU 11.1: **full-state snapshots (`savevm`) do not work** here: `Device 'pflash1' is writable but does not support snapshots`. The UEFI variable store is a raw pflash file. So v1 is disk-only; the UEFI vars are not rolled back
+- [~] Manual check in VS Code 2026-11-10: take (stopped and running), details card, delete, bad and duplicate names **work**. Revert-while-running and the data check inside a guest not done yet (blocked by the bug below)
+- [x] **Bug found by that check, fixed:** a VM created without an ISO had no CD/DVD drive at all, so **Change ISO** (offered anyway) did nothing on a running VM and there was no drive to boot from after a restart. Every VM now gets a CD/DVD drive, empty without an ISO (`buildArgs`), on both architectures. Verified: unit tests, e2e (fails without the fix), and the empty `scsi-cd` insert and eject on real ARM64 under HVF. Existing VMs get the drive at their next start. Probably also the cause of the earlier Eject / Change ISO "needed a reload" report
+- [ ] Full-state snapshots: needs the UEFI vars store in a snapshottable format (qcow2 pflash) and a check that `savevm`/`loadvm` work under HVF on Apple Silicon
+- [ ] Snapshot size, and a snapshot tree/"current" marker (qcow2 does not track the current one)
+- [x] Clone (full copy): `VM: Clone…`, `cloneVm`, `Capabilities.clone` / `cloneNeedsStopped`. `qemu-img convert` per disk (compact, drops the source's snapshots), copy of `efivars.fd`, new MAC, forwards / passed-through devices / imported marker not copied (`extensions/qemu/src/clone.ts`). Stopped VMs only; attached VMs refused. Unit tests plus an e2e on real QEMU (data copied, independent, no snapshots, new MAC, running VM refused, name clash refused). Not yet clicked through by hand
+- [ ] Linked clone (`qemu-img create -b`): deferred on purpose. The clone depends on the original's disk staying untouched, and nothing stops the original from being started and corrupting it. Needs a template concept (a read-only base) first, see phase 14
+- [ ] Hyper-V (checkpoints) and Proxmox (snapshot API) map onto the same SDK: **not local**, write against docs + mocks
+- [ ] Revert for a running VM without powering off (needs memory snapshots)
+
+### Phase 13: `feat/remote-ssh-connect`  (Local: yes)
+
+The VS Code-specific edge: work inside the VM from the editor.
+- [ ] `VM: Open in Remote-SSH`: host and port from a port forward (QEMU user networking) or guest IP; user from a per-VM setting
+- [ ] Offer to add an `~/.ssh/config` entry (shown before writing, never silent)
+- [ ] Offer to add a public key to the guest (needs guest agent or cloud-init, see phase 14)
+- [ ] `VM: Add SSH Port Forward` shortcut (uses the phase 5 forwards)
+- [ ] Tests: ssh config rendering, host selection. Manual: arm64 Linux guest on the Mac, `ssh` over `hostfwd`
+
+### Phase 14: `feat/provisioning`  (Local: yes)
+
+- [ ] ISO / cloud image downloader: curated list (Ubuntu, Debian, Fedora, Alpine, arm64 and x86_64), checksum verified, progress, cached in a configured folder
+- [ ] cloud-init seed ISO builder (user-data, meta-data: user, ssh key, hostname); create form option "cloud-init"
+- [ ] Templates: save a VM as template, create from it (builds on phase 12 clone)
+- [ ] Create form: "from cloud image" path that skips the installer
+- [ ] Tests: seed ISO contents, checksum failure, resume. Manual: boot a cloud image on the Mac
+
+### Phase 15: `feat/disk-management`  (Local: yes)
+
+- [ ] Add / remove / resize disks (stopped VM; running via QMP `block_resize` where possible), `qemu-img convert` between formats
+- [ ] Export / backup: qcow2 or raw copy, optional compression; import of OVA is out of scope for now
+- [ ] Disk usage vs allocated shown in the details page
+- [ ] Hyper-V (`Resize-VHD`, `New-VHD`) and Proxmox disk API: **not local**, mocks only
+
+### Phase 16: `feat/guest-integration`  (Local: partly)
+
+- [ ] Guest memory from the balloon driver or guest agent (`guest-get-memory-blocks`/`virtio-balloon` stats) so the memory chart shows guest usage, not host RSS
+- [ ] Run command in guest and copy files host to guest and back through the guest agent (`guest-exec`, `guest-file-*`)
+- [ ] Clipboard: bidirectional through the agent or SPICE agent; keyboard layout choice for **Type Clipboard Text** (US only today)
+- [ ] Audio: `-audiodev coreaudio` on macOS, `pa`/`pipewire` on Linux, `dsound` on Windows, with a VM setting; no browser playback path yet (decide: host audio only)
+- [ ] SPICE console (clipboard, resize, USB redirection): **check first** whether the QEMU build on the Mac has SPICE (Homebrew's usually does not); likely Linux only
+- [ ] Shared folders: 9p/virtiofs work only with a Linux host (virtiofs) and are not available on macOS QEMU; SMB (`-netdev user,smb=`) needs Samba on the host. Do on Linux, document the Mac limit
+
+### Phase 17: `feat/qemu-network-v2`  (Local: partly)
+
+Finishes phase 5's deferred item.
+- [ ] Multi-NIC definition; NIC editor (add / remove, model, MAC)
+- [ ] Modes: user (done), vmnet-shared / vmnet-bridged on macOS (needs root or the `com.apple.vm.networking` entitlement, so test what works unprivileged; document the rest), bridge/tap on Linux (**not local**)
+- [ ] Network throughput chart from `query-netstats` / tap counters where the backend has them (user networking has none)
+- [ ] Guest IP fallback for bridged NICs: ARP table / DHCP lease lookup
+
+### Phase 18: `feat/dev-ux`  (Local: yes)
+
+- [ ] Shutdown countdown (phase 1 left it undone)
+- [ ] State-change notifications (started, stopped, crashed) with a setting to silence
+- [ ] Per-VM output channel: QEMU stderr, QMP events, provider actions
+- [ ] Tree: favorites, tags, filter box, group by tag or state
+- [ ] Public command API for other extensions and tasks (`vmm.api`: list, start, stop, getIp); `tasks.json` problem-free task type "vm"
+- [ ] One-time "emulation is slow" notice (phase 10 leftover)
+- [ ] Marketplace page: screenshots, GIFs, a short demo, Proxmox link in the provider table
+
+### Phase 19: `feat/libvirt-provider`  (Local: partly)
+
+One provider that covers most Linux KVM users.
+- [ ] New `extensions/libvirt`: `qemu:///system`, `qemu:///session`, and `qemu+ssh://`; talk through `virsh` (no native binding) or the libvirt remote protocol
+- [ ] Map domains, storage pools, networks, snapshots onto the SDK
+- [ ] Local: Homebrew has `libvirt` with the QEMU driver, so `qemu:///session` on the Mac is a realistic target; confirm it runs HVF guests before promising it
+- [ ] Remote hosts through `qemu+ssh://` can reuse the phase 9 SSH plumbing
+
+### Phase 20: `feat/more-providers`  (Local: mostly no)
+
+Order by demand; each is its own extension and its own release line.
+- [ ] VMware: Fusion/Workstation via `vmrun` (**local on a Mac with Fusion**), ESXi/vSphere via REST (not local)
+- [ ] VirtualBox via `VBoxManage` (VirtualBox for Apple Silicon exists, arm64 guests only; check before starting)
+- [ ] Parallels via `prlctl` (needs a paid license on the Mac)
+- [ ] XCP-ng, Nutanix: remote APIs only, mocks + a real server later
+- [ ] Any new provider must pass the SDK conformance tests (add them first, using the fake provider as reference)
+
+## What we can build and test on this Mac now
+
+| Phase | Work | Why it works here |
+|---|---|---|
+| 11 | Manual passes, guest agent test, ARM64 OS install | Native HVF for arm64 guests |
+| 12 | Snapshots, clones | `qemu-img` and QMP, qcow2 |
+| 13 | Remote-SSH connect | Needs only `hostfwd` + an SSH-enabled Linux guest |
+| 14 | Image downloader, cloud-init, templates | Pure host-side files, cloud images run on HVF |
+| 15 | Disk add / resize / convert / export | `qemu-img` |
+| 16 | Balloon / agent memory, guest exec, file copy, clipboard, audio | Guest agent already wired; `coreaudio` backend |
+| 17 | Multi-NIC editor, vmnet (partly) | User mode works; vmnet may need privileges |
+| 18 | UX items, notifications, logs, API | Extension-only |
+| 9 | QEMU over SSH | Test against `localhost` with macOS Remote Login, or a second Linux VM |
+| 19 | libvirt `qemu:///session` | Via Homebrew, verify first |
+
+Cannot be validated on this Mac: Hyper-V (phase 8, parts of 2-4), VFIO/DDA (phase 7), Linux-only shared folders and bridges, Proxmox against a real cluster (Proxmox is x86 only; it could run nested under TCG but is slow), SPICE if the build lacks it.
+Build order on the Mac: 11 → 12 → 13 → 14 → 9 → 19 (check Homebrew libvirt first) → 16 → 18 → 15 → 17.
 
 ## Log
 

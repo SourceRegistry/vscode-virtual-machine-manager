@@ -57,3 +57,39 @@ jobs:
           name: vsix
           path: out/*.vsix
           if-no-files-found: error
+
+  # Drives the QEMU provider against a real QEMU (TCG, an empty UEFI VM; no guest OS is needed).
+  # Non-blocking until it has been seen passing on both runners; then drop `continue-on-error`.
+  # The guest-agent test (guest.e2e.test.ts) needs a cloud image, so it stays a local check.
+  qemu-e2e:
+    name: QEMU end to end (${{ matrix.os }})
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install QEMU (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-system-arm qemu-utils ovmf qemu-efi-aarch64
+
+      - name: Install QEMU (macOS)
+        if: runner.os == 'macOS'
+        run: brew install qemu
+
+      - run: npm ci
+
+      - name: End-to-end tests against real QEMU
+        run: npx vitest run extensions/qemu/test/e2e.test.ts
+        env:
+          VMM_E2E_QEMU: '1'

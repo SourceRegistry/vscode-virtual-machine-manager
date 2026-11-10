@@ -28,10 +28,10 @@ them, change their settings and work in their consoles in an editor tab, next to
    | Provider | For |
    |---|---|
    | [VM Manager – Hyper-V](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-hyperv) | Hyper-V on this Windows machine |
-   | VM Manager – Proxmox VE | Remote Proxmox VE clusters over HTTPS |
+   | [VM Manager – Proxmox VE](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-proxmox) | Remote Proxmox VE clusters over HTTPS |
    | [VM Manager – QEMU](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-qemu) | QEMU machines on Windows, Linux and macOS |
 
-   Proxmox VE, XCP-ng, VMware and Nutanix are planned.
+   XCP-ng, VMware and Nutanix are planned. **VM: Install Hypervisor Providers** lists the providers you can install.
 2. Open the **Virtual Machines** view in the activity bar and click **Add Cluster**.
 3. Your machines appear in the view. Right-click one for everything you can do with it.
 
@@ -50,8 +50,14 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
 
 * **Virtual Machines view**: state icons, the running count as a badge, and quick actions next to
   each machine (start, connect, shut down).
-* **Overview** (**VM: Open Overview**): a dashboard of every cluster, node and machine with CPU,
-  memory, uptime and IP addresses. Right-click a row for the same menu as in the tree.
+* **Overview** (**VM: Open Overview**): a dashboard of everything you manage.
+  * A summary of machines by state (click a state to filter the table) and of the processors and
+    memory allocated against what the nodes have, flagged when they are overcommitted.
+  * A card per node with its CPU load and memory, plus facts such as the QEMU version or host OS.
+  * One table of all machines across all clusters: filter by name, host or IP, sort by any column,
+    with a CPU sparkline per machine. Right-click a row for the same menu as in the tree.
+  * Select several machines to start, shut down or power them off together.
+* **Search** (**VM: Search Virtual Machines…**): jump to a machine by name from the command palette.
 * **Status bar**: the number of running machines; click it to open the Overview.
 
 ## Work with machines
@@ -64,7 +70,42 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
   *Stop* cuts the power. These run in the background: the machine shows a spinner and
   "Shutting down…" until it is done, and you can keep working. If a shutdown hangs, *Stop* is still
   available.
+* **Show Details** opens a page for one machine: state, power actions, uptime, processors, memory,
+  IP address, its disks, CD/DVD drives, network adapters, port forwards and PCI devices, and live
+  charts (CPU, memory, disk throughput, operations and latency, and network where the provider
+  reports it) over the last five minutes. Each chart has a **Show data** table.
+* **Eject** and **Change ISO…** swap the installation media, also while the machine runs.
+* **Snapshots** (**Take Snapshot…**, **Revert to Snapshot…**, **Delete Snapshot…**, or the *Snapshots* card on the details page) save the state of a machine's disks so you can return to it. QEMU saves disks only: taken while the machine runs, a snapshot is like a power cut. Reverting discards everything changed since and needs the machine powered off; VM Manager asks first and does it for you.
+* **Clone…** makes an independent copy of a machine: its own disks and network address, the same hardware. Snapshots, port forwards and passed-through devices are not copied. The original must be shut down first, and a large disk takes a while.
 * **Delete** removes the machine, and its disks if you choose so.
+
+### Bring in machines you already have
+
+QEMU only, through the QEMU provider:
+
+* **Attach to Running Virtual Machine…** finds `qemu-system-*` processes started outside VS Code and
+  adds them, marked **external**. With a QMP socket you get full control; without one the machine is
+  observe-only (stats and power off). An attached machine disappears when its process exits, and
+  deleting it only detaches it. When an attached machine stops on its own, its tabs close and you get a notice; powering it off from here does not show one.
+* **Import Virtual Machines from Folder…** reads disk images (qcow2, raw, vmdk, vdi, vhdx and more),
+  another install's `vm.json`, libvirt domain XML and the disks of UTM bundles.
+
+## What each provider supports
+
+| | Hyper-V | QEMU | Proxmox VE |
+|---|---|---|---|
+| Create, edit, delete, power | ✓ | ✓ | ✓ |
+| Graphical and serial consoles | ✓ | ✓ | ✓ |
+| Details page with live charts | ✓ | ✓ | ✓ |
+| Change or eject ISO | ✓ | ✓ | |
+| Port forwards | | ✓ | |
+| Attach and import | | ✓ | |
+| Host device passthrough | PCI (DDA), experimental | USB; PCI (VFIO, Linux), experimental | |
+| Snapshots | | disks only (qcow2) | |
+| Clone | | ✓ | |
+
+Experimental means implemented and unit tested, but not yet verified on real hardware.
+Snapshots for Hyper-V and Proxmox, remote Hyper-V and QEMU over SSH are on the [roadmap](docs/ROADMAP.md).
 
 ## Consoles
 

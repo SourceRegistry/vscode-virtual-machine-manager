@@ -20,6 +20,9 @@ Manage the Hyper-V virtual machines on your Windows machine from VS Code.
     session* (cluster setting) needs guest support (Windows, or Linux with xrdp).
   * Hyper-V allows one basic console connection per VM; connecting takes over an open vmconnect
     window.
+* Details page with disks, DVD drives, network adapters and live CPU and memory; change or eject the ISO.
+* **PCI passthrough (Discrete Device Assignment)**, experimental: dismount a host device and assign it to a VM
+  on Windows Server. The commands are shown and confirmed first. Not verified on real hardware yet.
 * One click to the native *Virtual Machine Connection*.
 * Serial console on the COM1 named pipe (requires VS Code to run as administrator).
 
