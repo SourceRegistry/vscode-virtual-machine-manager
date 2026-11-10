@@ -1,5 +1,22 @@
 # Changelog
 
+# [0.8.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.7.0...v0.8.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* **tree:** the container icon says it, no extra label ([285d03d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/285d03dea700c925aeb8ac98996c5b695db448e6))
+
+
+### Features
+
+* distinct tree icon for templates, container badge and icon for Proxmox LXC ([00346a3](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/00346a3f5f9d842e122e1f3f44697badc9fb5386))
+* **hyperv:** snapshots, clone and templates (untested on Windows) ([69a54c6](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/69a54c6edb410450d878d49d6034cb797c9b68a6))
+* **libvirt:** libvirt provider through virsh (domains, power, details, consoles, media, snapshots) ([17994ca](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/17994ca8713641a60fc59742fd60a5cb7623696e))
+* nest provider settings under VM Manager in the Settings editor ([e81276e](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/e81276ed4ba0f1355c782f5bc40eead2e13ec94c))
+* **proxmox:** opt-in remembered sessions; callback page opens VS Code by itself ([477624f](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/477624ff0e467343fcd3a8b44b22d7374e691f96))
+* **proxmox:** wait 15 minutes for the OpenID sign-in ([e3910b6](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/e3910b6fa095e7e63c735661489e7c29aee4eff2))
+
 # [0.7.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.6.0...v0.7.0) (2026-11-10)
 
 
