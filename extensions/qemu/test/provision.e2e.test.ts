@@ -75,6 +75,22 @@ describe.skipIf(!image)('a machine from a cloud image', () => {
 		expect((await connection.getVmConfig('local', vmId)).values).toMatchObject({ name: 'Cloud Test' });
 	}, 120_000);
 
+	it('a clone of a template gets its own seed disk with a new instance id', async () => {
+		const seedOf = async (id: string) => (await connection.getVmDetails!('local', id)).disks.find((d) => d.kind === 'cdrom')!.path!;
+		await connection.setTemplate!('local', vmId, true);
+		const copy = await connection.cloneVm!('local', vmId, 'Cloud Copy');
+		try {
+			const [original, own] = [await seedOf(vmId), await seedOf(copy.id)];
+			expect(own).not.toBe(original);
+			expect(fs.readFileSync(own).includes(`vmm-${copy.id}`)).toBe(true);
+			expect(fs.readFileSync(own).includes(`vmm-${vmId}`)).toBe(false);
+			expect(fs.readFileSync(original).includes(`vmm-${vmId}`)).toBe(true);
+		} finally {
+			await connection.setTemplate!('local', vmId, false);
+			await connection.deleteVm?.('local', copy.id).catch(() => undefined);
+		}
+	}, 120_000);
+
 	it('boots, runs cloud-init, and lets the new user in with the key', async () => {
 		await connection.power('local', vmId, 'start');
 		let addresses: string[] = [];

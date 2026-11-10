@@ -224,6 +224,24 @@
         "icon": "$(copy)"
       },
       {
+        "command": "vmm.convertToTemplate",
+        "title": "Convert to Template…",
+        "category": "VM",
+        "icon": "$(library)"
+      },
+      {
+        "command": "vmm.convertToVm",
+        "title": "Convert to Virtual Machine",
+        "category": "VM",
+        "icon": "$(vm)"
+      },
+      {
+        "command": "vmm.createFromTemplate",
+        "title": "New Machine from Template…",
+        "category": "VM",
+        "icon": "$(add)"
+      },
+      {
         "command": "vmm.takeSnapshot",
         "title": "Take Snapshot…",
         "category": "VM",
@@ -430,6 +448,18 @@
         },
         {
           "command": "vmm.cloneVm",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.convertToTemplate",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.convertToVm",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.createFromTemplate",
           "when": "vmm.hasVms"
         },
         {
@@ -731,6 +761,21 @@
           "group": "3_manage@2"
         },
         {
+          "command": "vmm.createFromTemplate",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bistemplate;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.convertToTemplate",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\btotemplate;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.convertToVm",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bistemplate;/",
+          "group": "3_manage@2"
+        },
+        {
           "command": "vmm.deleteVm",
           "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdelete;/",
           "group": "3_manage@3"
@@ -917,6 +962,21 @@
         {
           "command": "vmm.cloneVm",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bclone;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.createFromTemplate",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bistemplate;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.convertToTemplate",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\btotemplate;/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vmm.convertToVm",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bistemplate;/",
           "group": "3_manage@2"
         },
         {

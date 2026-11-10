@@ -162,6 +162,8 @@ export interface Capabilities {
 	clone?: boolean;
 	/** `cloneVm` needs the VM stopped: the core tells the user to shut it down first instead of trying. */
 	cloneNeedsStopped?: boolean;
+	/** Implements `setTemplate`: a stopped VM can become a template that machines are created from (with `cloneVm`). */
+	templates?: boolean;
 	/** Implements `getVmDetails` (hardware inventory). */
 	details?: boolean;
 	/** Implements `getVmStats` (live usage counters). */
@@ -215,6 +217,8 @@ export interface VmInfo {
 	 * extension that it attached to, `imported` = built from existing disk images or definitions.
 	 */
 	origin?: 'adopted' | 'imported';
+	/** A template: it cannot be started, only cloned into new machines. */
+	template?: boolean;
 	/** `false` for an adopted VM without a control channel: it can only be observed and powered off. */
 	controllable?: boolean;
 }
@@ -523,6 +527,11 @@ export interface ClusterConnection extends Disposable {
 	 * host devices are not carried over. Can take minutes for a large disk.
 	 */
 	cloneVm?(nodeId: string, vmId: string, name: string): Promise<VmInfo>;
+	/**
+	 * Turns a stopped VM into a template (`true`) or back into a VM. A template cannot be started; `cloneVm`
+	 * of a template makes a normal machine (with a fresh identity where the provider can give one).
+	 */
+	setTemplate?(nodeId: string, vmId: string, template: boolean): Promise<void>;
 	/** Snapshots of a VM, oldest first. */
 	listSnapshots?(nodeId: string, vmId: string): Promise<Snapshot[]>;
 	/**

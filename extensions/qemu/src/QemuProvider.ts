@@ -363,6 +363,7 @@ export class QemuConnection implements ClusterConnection {
 		snapshotRevertNeedsStopped: true,
 		clone: true,
 		cloneNeedsStopped: true,
+		templates: true,
 		details: true,
 		forwards: true,
 		adopt: true,
@@ -588,6 +589,7 @@ export class QemuConnection implements ClusterConnection {
 					consoles,
 					mediaInserted,
 					origin: def.origin,
+					template: def.template,
 					controllable: runtime ? hasControlChannel(runtime) : undefined
 				} satisfies VmInfo;
 			})
@@ -763,18 +765,7 @@ export class QemuConnection implements ClusterConnection {
 
 			progress?.({ message: 'Writing the cloud-init disk', fraction: 0.94 });
 			const seed = this.host.path.join(dir, 'seed.iso');
-			const instanceId = `vmm-${id}`;
-			const options = { hostname, user, sshKeys, passwordHash, installAgent: values.ciAgent !== false, customUserData: custom, instanceId };
-			await this.host.writeBytes(
-				seed,
-				buildIso(
-					[
-						{ name: 'user-data', data: Buffer.from(userData(options), 'utf8') },
-						{ name: 'meta-data', data: Buffer.from(metaData(options), 'utf8') }
-					],
-					{ volumeId: 'cidata' }
-				)
-			);
+			await this.writeSeed(seed, id, { hostname, user, sshKeys, passwordHash, installAgent: values.ciAgent !== false, customUserData: custom });
 
 			const def: VmDefinition = {
 				id,
@@ -792,7 +783,7 @@ export class QemuConnection implements ClusterConnection {
 				vga: hardware.vga,
 				serial: values.serial !== false,
 				notes: `Set up by cloud-init from ${image ? image.label : this.host.path.basename(source)}. ${custom.trim() ? 'Custom user-data.' : `Sign in as ${user}.`}`,
-				cloudInit: { user: custom.trim() ? '' : user, hostname, image: image?.id },
+				cloudInit: { user: custom.trim() ? '' : user, hostname, image: image?.id, sshKeys, passwordHash, installAgent: values.ciAgent !== false, customUserData: custom },
 				createdAt: Date.now()
 			};
 			if (def.firmware === 'uefi') await this.ensureVars(def);
@@ -804,6 +795,32 @@ export class QemuConnection implements ClusterConnection {
 			await this.host.rm(dir, { recursive: true });
 			throw error;
 		}
+	}
+
+	/** A cloud-init `cidata` disk; `id` becomes the instance id, so each machine runs first-boot setup once, on its own. */
+	private async writeSeed(file: string, id: string, options: { hostname: string; user: string; sshKeys?: string[]; passwordHash?: string; installAgent?: boolean; customUserData?: string }): Promise<void> {
+		const full = { ...options, sshKeys: options.sshKeys ?? [], installAgent: options.installAgent !== false, customUserData: options.customUserData ?? '', instanceId: `vmm-${id}` };
+		await this.host.writeBytes(
+			file,
+			buildIso(
+				[
+					{ name: 'user-data', data: Buffer.from(userData(full), 'utf8') },
+					{ name: 'meta-data', data: Buffer.from(metaData(full), 'utf8') }
+				],
+				{ volumeId: 'cidata' }
+			)
+		);
+	}
+
+	async setTemplate(_nodeId: string, vmId: string, template: boolean): Promise<void> {
+		const def = await this.definition(vmId);
+		if (def.origin === 'adopted') throw new ProviderError('A VM that was attached from outside cannot become a template. Import it or recreate it here first.', 'unsupported');
+		if (await this.runtime(vmId)) throw new ProviderError(`Shut down "${def.name}" first`, 'invalid');
+		if (!!def.template === template) return;
+		if (template) def.template = true;
+		else delete def.template;
+		await this.saveDefinition(def);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
 	}
 
 	private async ensureVars(def: VmDefinition): Promise<string | undefined> {
@@ -1049,6 +1066,16 @@ export class QemuConnection implements ClusterConnection {
 			const vars = this.host.path.join(this.dir(vmId), 'efivars.fd');
 			if (source.firmware === 'uefi' && (await this.host.exists(vars))) await this.host.copyFile(vars, this.host.path.join(dir, 'efivars.fd'));
 			const def = cloneDefinition(source, { id, name, disks, mac: randomMac(), now: Date.now() });
+			// A machine from cloud-init gets its own seed: same instance id would make the guest skip first-boot
+			// setup (host name, SSH host keys), a fresh one runs it. The machine-id inside the disk is still shared.
+			const ci = source.cloudInit;
+			const ownSeed = source.cdrom && source.cdrom === this.host.path.join(this.dir(vmId), 'seed.iso');
+			if (ci && ownSeed && ci.installAgent !== undefined) {
+				const seed = this.host.path.join(dir, 'seed.iso');
+				await this.writeSeed(seed, id, { ...ci, hostname: hostnameFor(name) });
+				def.cdrom = seed;
+				def.cloudInit = { ...ci, hostname: hostnameFor(name) };
+			}
 			if (def.firmware === 'uefi') await this.ensureVars(def);
 			await this.saveDefinition(def);
 			this.log.info(`Cloned ${source.name} to ${name} in ${dir}`);
@@ -1349,6 +1376,7 @@ export class QemuConnection implements ClusterConnection {
 	}
 
 	private async startWithRetry(def: VmDefinition): Promise<void> {
+		if (def.template) throw new ProviderError(`${def.name} is a template. Create a machine from it, or convert it back to a VM first.`, 'invalid');
 		for (const disk of def.disks) {
 			if (!(await this.host.exists(disk))) throw new ProviderError(`Disk not found: ${disk}`, 'invalid');
 		}

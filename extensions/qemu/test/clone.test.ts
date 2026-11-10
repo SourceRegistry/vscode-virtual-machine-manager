@@ -54,6 +54,11 @@ describe('cloneDefinition', () => {
 		expect(clone).not.toHaveProperty('origin');
 	});
 
+	it('a clone of a template is a machine again', () => {
+		const copy = cloneDefinition({ ...source, template: true }, { id: 'n', name: 'n', disks: [], mac: 'm', now: 1 });
+		expect(copy).not.toHaveProperty('template');
+	});
+
 	it('does not change the original', () => {
 		expect(source).toMatchObject({ id: 'src-id', name: 'web', mac: '52:54:00:aa:bb:cc', origin: 'imported' });
 		expect(source.forwards).toHaveLength(1);
