@@ -85,6 +85,28 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 		expect(await state()).toBe('stopped');
 	}, 60_000);
 
+	it('has a CD/DVD drive even without an ISO, and takes one inserted while the VM runs', async () => {
+		const bare = await connection.createVm('local', { name: 'e2e-bare', arch: 'x86_64', cpus: 1, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'none', serial: false });
+		const cd = async () => (await connection.getVmDetails!('local', bare.id)).disks.find((d) => d.kind === 'cdrom');
+		try {
+			expect(await cd()).toMatchObject({ id: 'cd0', path: undefined });
+			expect((await connection.listVms('local')).find((v) => v.id === bare.id)).toMatchObject({ mediaInserted: false });
+
+			await connection.power('local', bare.id, 'start');
+			await new Promise((r) => setTimeout(r, 1500));
+			expect(await cd()).toMatchObject({ id: 'cd0', path: undefined }); // the empty drive exists in the running VM
+
+			await connection.insertMedia!('local', bare.id, 'cd0', iso);
+			expect(await cd()).toMatchObject({ id: 'cd0', path: iso });
+			expect((await connection.listVms('local')).find((v) => v.id === bare.id)).toMatchObject({ mediaInserted: true });
+
+			await connection.ejectMedia!('local', bare.id, 'cd0');
+			expect(await cd()).toMatchObject({ path: undefined });
+		} finally {
+			await connection.power('local', bare.id, 'stop').catch(() => undefined);
+		}
+	}, 60_000);
+
 	it('snapshots a stopped and a running VM, refuses to revert a running one, and reverts a stopped one', async () => {
 		const snapVm = await connection.createVm('local', { name: 'e2e-snap', arch: 'x86_64', cpus: 1, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'none', serial: false });
 		const names = async () => (await connection.listSnapshots!('local', snapVm.id)).map((s) => s.name);
