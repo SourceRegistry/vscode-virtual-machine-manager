@@ -29,7 +29,7 @@
   "activationEvents": [],
   "contributes": {
     "configuration": {
-      "title": "Proxmox VE",
+      "title": "VM Manager – Proxmox VE",
       "properties": {
         "vmm.proxmox.rememberSession": {
           "type": "boolean",
