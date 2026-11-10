@@ -588,6 +588,8 @@ export interface BrowserLoginOptions<T> {
 	providerIcon?: string;
 	port: number;
 	signal?: AbortSignal;
+	/** How long to wait for the user to finish in the browser (default 5 minutes, at most 30). Older cores ignore it. */
+	timeoutMs?: number;
 	getAuthorizationUrl(redirectUrl: string): Promise<string>;
 	/** Validate/exchange the response before the core displays success. Never log codes or tokens. */
 	exchange(response: { code: string; state: string; redirectUrl: string }): Promise<T>;

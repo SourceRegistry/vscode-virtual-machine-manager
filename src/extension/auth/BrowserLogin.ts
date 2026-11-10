@@ -16,6 +16,9 @@ export function renderLoginPage(template: string, values: Record<string, string>
 	});
 }
 
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_TIMEOUT_MS = 30 * 60 * 1000;
+
 /** Each login owns its listener. Disposing the service cancels every active attempt. */
 export class BrowserLoginService {
 	private readonly pending = new Set<AbortController>();
@@ -27,7 +30,7 @@ export class BrowserLoginService {
 		if (!Number.isInteger(options.port) || options.port < 1024 || options.port > 65535) throw new ProviderError('Invalid browser callback port.', 'invalid');
 		const controller = new AbortController();
 		this.pending.add(controller);
-		const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(5 * 60 * 1000), ...(options.signal ? [options.signal] : [])]);
+		const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(Math.min(Math.max(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1000), MAX_TIMEOUT_MS)), ...(options.signal ? [options.signal] : [])]);
 		const redirectUrl = `http://localhost:${options.port}/`;
 		try {
 			return await new Promise<T>((resolve, reject) => {

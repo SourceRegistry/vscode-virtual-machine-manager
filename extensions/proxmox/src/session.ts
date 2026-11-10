@@ -59,10 +59,13 @@ export function withParam(url: string, key: string, value: string): string {
 }
 
 /** Browser sign-in through a Proxmox OpenID realm. The identity provider must allow `http://localhost:<port>/` as a redirect. */
+/** Time to finish the OpenID sign-in in the browser: identity providers with a second factor or a password manager take a while. */
+export const OPENID_TIMEOUT_MS = 15 * 60 * 1000;
+
 export async function openIdLogin(fetchImpl: typeof fetch, baseUrl: string, realm: string, port: number, ui: SessionUi, signal: AbortSignal, forceLogin = false): Promise<Session> {
 	if (!ui.browserLogin) throw new ProviderError('Update VM Manager to use shared browser sign-in.', 'unavailable');
 	return ui.browserLogin({
-		providerName: 'Proxmox VE', providerIcon: ui.providerIcon, port, signal,
+		providerName: 'Proxmox VE', providerIcon: ui.providerIcon, port, signal, timeoutMs: OPENID_TIMEOUT_MS,
 		getAuthorizationUrl: async (redirectUrl) => {
 			const authUrl = await call<string>(fetchImpl, baseUrl, '/access/openid/auth-url', { realm, 'redirect-url': redirectUrl });
 			return forceLogin ? withParam(authUrl, 'prompt', 'login') : authUrl;

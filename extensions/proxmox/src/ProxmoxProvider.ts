@@ -5,7 +5,7 @@ import { consoleStream } from './console';
 import { proxmoxFetch } from './transport';
 import { tokenTerminal } from './terminal';
 import { agentAddresses, allAddresses, containerAddresses, diskDevices, hostDevices, mergeAddresses, nicDevices } from './inventory';
-import { openIdLogin, qualifiedUser, type SessionStore, type SessionUi } from './session';
+import { OPENID_TIMEOUT_MS, openIdLogin, qualifiedUser, type SessionStore, type SessionUi } from './session';
 
 import { ProviderError, validateValues, type Capabilities, type ClusterConfig, type ProviderContext, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type Snapshot, type VmDetails, type SecretBag, type VmInfo } from '@vmm/sdk';
 
@@ -148,7 +148,7 @@ export class ProxmoxProvider implements HypervisorProvider {
 	private async login(options: Extract<ConnectionOptions, { method: 'password' | 'openid' }>, again: boolean, signal: AbortSignal | undefined, ui: SessionUi, base: { baseUrl: string; agent: Agent; fetch: typeof fetch }): Promise<PveSession> {
 		// Do not even start the callback listener or ask Proxmox for the identity provider's address.
 		if (options.method === 'openid' && ui !== this.host) throw new ProviderError('Sign in required.', 'authRequired');
-		if (options.method === 'openid') return openIdLogin(base.fetch, options.baseUrl, options.realm, options.port, ui, AbortSignal.any([AbortSignal.timeout(5 * 60 * 1000), ...(signal ? [signal] : [])]), again);
+		if (options.method === 'openid') return openIdLogin(base.fetch, options.baseUrl, options.realm, options.port, ui, AbortSignal.any([AbortSignal.timeout(OPENID_TIMEOUT_MS), ...(signal ? [signal] : [])]), again);
 		const password = options.password ?? await ui.prompt({ title: `Proxmox sign-in for ${options.username}`, prompt: 'Password', password: true });
 		if (!password) throw new ProviderError('Sign-in cancelled.', 'permission');
 		const client = new Client({
