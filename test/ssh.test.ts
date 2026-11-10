@@ -221,14 +221,14 @@ describe('the ssh client reads the block as intended', () => {
 			writeFileSync(file, upsertSshConfigBlock('Host other\n  Port 99\n', 'c/n/1', block));
 			const resolved = Object.fromEntries(
 				execFileSync('ssh', ['-G', '-F', file, 'vmm-web-1111'], { encoding: 'utf8' })
-					.split('\n')
+					.split(/\r?\n/)
 					.map((line) => line.split(' ') as [string, ...string[]])
 					.map(([k, ...v]) => [k, v.join(' ')])
 			);
 			expect(resolved).toMatchObject({ hostname: '127.0.0.1', port: '2222', user: 'alex', hostkeyalias: 'vmm-web-1111' });
 			// The alias is the only thing that matches: another host name still gets the defaults.
 			const other = execFileSync('ssh', ['-G', '-F', file, 'something-else'], { encoding: 'utf8' });
-			expect(other).toMatch(/^port 22$/m);
+			expect(other).toMatch(/^port 22\r?$/m);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

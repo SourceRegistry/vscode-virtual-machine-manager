@@ -139,7 +139,8 @@ describe('SshHost through a stand-in ssh', () => {
 
 	beforeAll(async () => {
 		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmm-sshhost-'));
-		host = new SshHost({ host: 'lab' }, { command: FAKE_SSH, anyPlatform: true });
+		// Spawn Node explicitly so Windows does not try to execute the .mjs file as a native program.
+		host = new SshHost({ host: 'lab' }, { command: process.execPath, commandArgs: [FAKE_SSH], anyPlatform: true });
 		await host.ping();
 		server = net.createServer((socket) => socket.end('RFB 003.008\n'));
 		await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
