@@ -250,7 +250,7 @@ describe('SshHost through a stand-in ssh', () => {
 	});
 
 	it('says why a host cannot be reached', async () => {
-		const bad = new SshHost({ host: 'unreachable.invalid' }, { command: FAKE_SSH, anyPlatform: true });
+		const bad = new SshHost({ host: 'unreachable.invalid' }, { command: process.execPath, commandArgs: [FAKE_SSH], anyPlatform: true });
 		await expect(bad.ping()).rejects.toThrow(/could not be resolved/);
 		bad.dispose();
 	});
