@@ -235,13 +235,20 @@ Trust first. Close the open "manual check" items before adding features.
 
 ### Phase 12: `feat/snapshots`  (Local: yes)
 
-- [ ] SDK (optional): `listSnapshots`, `createSnapshot`, `revertSnapshot`, `deleteSnapshot`, `Capabilities.snapshots`; linked clone / `cloneVm`, `Capabilities.clone`
-- [ ] QEMU: disk-only snapshots via `qemu-img snapshot` (stopped VM) and QMP `blockdev-snapshot-sync`/internal `snapshot-save` (running, qcow2 only); raw disks reported unsupported with the reason
-- [ ] QEMU: clone via `qemu-img create -b` (backing file) or full copy; new MAC, new name
-- [ ] Details page card **Snapshots** (create, revert, delete, size, date); tree/overview context menu
-- [ ] Confirm before revert (loses current state); refuse while a shutdown is in progress
+Status: **in progress** on `feat/snapshots`. QEMU snapshots work end to end on this Mac; the UI is built but not yet clicked through by hand.
+
+- [x] SDK (optional, additive): `Snapshot`, `Capabilities.snapshots`, `Capabilities.snapshotRevertNeedsStopped`, `listSnapshots` / `createSnapshot` / `revertSnapshot` / `deleteSnapshot`
+- [x] QEMU, disk-only qcow2 internal snapshots (`extensions/qemu/src/snapshots.ts`): stopped VM through `qemu-img snapshot -c/-a/-d` and `qemu-img info -U`; running VM through QMP `blockdev-snapshot-internal-sync` / `-delete-internal-sync` and `query-block`. All disks or none (rolled back on failure); only snapshots present on every disk are listed; names validated and unique (case-insensitive); raw disks and attached-from-outside VMs refused with the reason
+- [x] Revert needs the VM stopped (the snapshot has no memory). The core asks, powers off, then reverts (`Capabilities.snapshotRevertNeedsStopped`)
+- [x] Core: `VM: Take Snapshot…`, `Revert to Snapshot…`, `Delete Snapshot…` (palette, tree and Overview context menus, same entries in both), Snapshots card on the details page, shared confirmation flow (`src/extension/snapshots/flow.ts`)
+- [x] Tests: parsers against real QEMU 11.1 output, name rules, menu entries; opt-in e2e on real QEMU covers stopped and running snapshots, duplicate and bad names, refusal to revert while running, and that a revert really restores the disk (data written after the snapshot is gone, checked with `qemu-io`)
+- Found by experiment on QEMU 11.1: **full-state snapshots (`savevm`) do not work** here: `Device 'pflash1' is writable but does not support snapshots`. The UEFI variable store is a raw pflash file. So v1 is disk-only; the UEFI vars are not rolled back
+- [ ] Manual check in VS Code: take a snapshot of a stopped and a running VM, revert (the power-off prompt), delete, card on the details page
+- [ ] Full-state snapshots: needs the UEFI vars store in a snapshottable format (qcow2 pflash) and a check that `savevm`/`loadvm` work under HVF on Apple Silicon
+- [ ] Snapshot size, and a snapshot tree/"current" marker (qcow2 does not track the current one)
+- [ ] Clone / linked clone (`qemu-img create -b`, new MAC and name), `Capabilities.clone`
 - [ ] Hyper-V (checkpoints) and Proxmox (snapshot API) map onto the same SDK: **not local**, write against docs + mocks
-- [ ] Tests: command building, listing parser from real `qemu-img snapshot -l` output; e2e against real QEMU
+- [ ] Revert for a running VM without powering off (needs memory snapshots)
 
 ### Phase 13: `feat/remote-ssh-connect`  (Local: yes)
 

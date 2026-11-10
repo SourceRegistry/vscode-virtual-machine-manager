@@ -75,6 +75,7 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
   charts (CPU, memory, disk throughput, operations and latency, and network where the provider
   reports it) over the last five minutes. Each chart has a **Show data** table.
 * **Eject** and **Change ISO…** swap the installation media, also while the machine runs.
+* **Snapshots** (**Take Snapshot…**, **Revert to Snapshot…**, **Delete Snapshot…**, or the *Snapshots* card on the details page) save the state of a machine's disks so you can return to it. QEMU saves disks only: taken while the machine runs, a snapshot is like a power cut. Reverting discards everything changed since and needs the machine powered off; VM Manager asks first and does it for you.
 * **Delete** removes the machine, and its disks if you choose so.
 
 ### Bring in machines you already have
@@ -99,10 +100,10 @@ QEMU only, through the QEMU provider:
 | Port forwards | | ✓ | |
 | Attach and import | | ✓ | |
 | Host device passthrough | PCI (DDA), experimental | USB; PCI (VFIO, Linux), experimental | |
-| Snapshots | | | |
+| Snapshots | | disks only (qcow2) | |
 
 Experimental means implemented and unit tested, but not yet verified on real hardware.
-Snapshots, remote Hyper-V and QEMU over SSH are on the [roadmap](docs/ROADMAP.md).
+Snapshots for Hyper-V and Proxmox, remote Hyper-V and QEMU over SSH are on the [roadmap](docs/ROADMAP.md).
 
 ## Consoles
 
