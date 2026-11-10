@@ -110,7 +110,7 @@ QEMU only, through the QEMU provider:
 | Edit settings | ✓ | ✓ | ✓ | – |
 | Delete (and its disks) | ✓ | ✓ | ✓ *(disks always go too)* | ✓ |
 | Power: start, shut down, reboot, force stop | ✓ | ✓ | ✓ | ✓ |
-| Reset | – | ✓ | ✓ | ✓ |
+| Reset (hardware reset) | – | – | ✓ | ✓ |
 | Containers (LXC) | – | – | ✓ | – |
 | Attach to running processes, import from a folder | – | ✓ *(attach also over SSH)* | – | – |
 | Create from a cloud image (cloud-init) | – | ✓ | – | – |
