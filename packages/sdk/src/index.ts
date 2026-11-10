@@ -86,9 +86,10 @@ export interface FieldSchema {
 	readonly?: boolean;
 	/**
 	 * `file` / `directory` fields: the path is on another computer (an SSH host), so a file dialog here would
-	 * pick the wrong thing and is not offered. A string names another field: remote while that one has a value.
+	 * pick the wrong thing and is not offered. A string names another field: remote while that one has a value;
+	 * `{ key, equals }`: remote while that field has that value.
 	 */
-	remotePath?: boolean | string;
+	remotePath?: boolean | string | { key: string; equals: FieldValue };
 	/** Section heading used by the webview settings editor. */
 	group?: string;
 	/**
@@ -105,6 +106,7 @@ export interface FieldSchema {
 /** Whether a path field points at another computer, given the current values (no file dialog then). */
 export function isRemotePath(field: FieldSchema, values: FieldValues): boolean {
 	if (typeof field.remotePath === 'string') return !!values[field.remotePath];
+	if (field.remotePath && typeof field.remotePath === 'object') return values[field.remotePath.key] === field.remotePath.equals;
 	return !!field.remotePath;
 }
 

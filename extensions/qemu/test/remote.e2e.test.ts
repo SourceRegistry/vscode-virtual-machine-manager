@@ -20,7 +20,7 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider on an SSH host', () =>
 		const log = { info() {}, warn() {}, error() {}, debug() {} };
 		const provider = new QemuProvider({ defaultQemuPath: () => undefined, sshCommand: path.resolve(__dirname, 'fakeSsh.mjs') });
 		connection = await provider.connect(
-			{ id: 'c', name: 'c', providerId: 'qemu', config: { sshHost: 'lab', vmDirectory: path.join(dir, 'remote vms'), accelerator: 'tcg', shutdownTimeout: 5 } },
+			{ id: 'c', name: 'c', providerId: 'qemu', config: { connection: 'ssh', sshHost: 'lab', vmDirectory: path.join(dir, 'remote vms'), accelerator: 'tcg', shutdownTimeout: 5 } },
 			{},
 			{ storagePath: path.join(dir, 'unused'), log }
 		);

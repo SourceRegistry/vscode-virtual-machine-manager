@@ -88,6 +88,10 @@ describe('remote path fields', () => {
 		expect(isRemotePath({ ...base, remotePath: 'sshHost' }, {})).toBe(false);
 		expect(isRemotePath({ ...base, remotePath: 'sshHost' }, { sshHost: '' })).toBe(false);
 		expect(isRemotePath({ ...base, remotePath: 'sshHost' }, { sshHost: 'lab' })).toBe(true);
+		const byChoice = { ...base, remotePath: { key: 'connection', equals: 'ssh' } };
+		expect(isRemotePath(byChoice, { connection: 'local' })).toBe(false);
+		expect(isRemotePath(byChoice, {})).toBe(false);
+		expect(isRemotePath(byChoice, { connection: 'ssh' })).toBe(true);
 	});
 });
 

@@ -89,21 +89,38 @@ import { telnetStream } from './telnet';
 const NODE_ID = 'local';
 const VM_NAME = /^[\w .()-]{1,64}$/;
 
+/** Shown only for a remote connection. `default` covers clusters saved before the choice existed. */
+const SSH_ONLY = { key: 'connection', equals: 'ssh', default: 'local' } as const;
+
 const CONNECTION_SCHEMA: FieldSchema[] = [
+	{
+		key: 'connection',
+		label: 'Connection',
+		type: 'select',
+		default: 'local',
+		required: true,
+		options: [
+			{ value: 'local', label: 'Local', description: 'QEMU on this computer' },
+			{ value: 'ssh', label: 'Remote (SSH)', description: 'QEMU on another Linux computer, reached with ssh' }
+		]
+	},
 	{
 		key: 'sshHost',
 		label: 'SSH host',
 		type: 'text',
+		required: true,
+		showWhen: SSH_ONLY,
 		group: 'Remote host',
-		description: 'Run the VMs on another Linux computer. A host name, an address or an alias of your ~/.ssh/config (jump hosts and keys from there apply). Leave empty to use this computer.',
-		placeholder: 'This computer'
+		description: 'A host name, an address or an alias of your ~/.ssh/config (jump hosts and keys from there apply).',
+		placeholder: 'lab.example.com'
 	},
-	{ key: 'sshUser', label: 'SSH user', type: 'text', group: 'Remote host', description: 'Empty: what your ssh config says, else your user name here.' },
-	{ key: 'sshPort', label: 'SSH port', type: 'number', min: 1, max: 65535, group: 'Remote host', description: 'Empty: 22, or what your ssh config says.' },
+	{ key: 'sshUser', label: 'SSH user', type: 'text', showWhen: SSH_ONLY, group: 'Remote host', description: 'Empty: what your ssh config says, else your user name here.' },
+	{ key: 'sshPort', label: 'SSH port', type: 'number', min: 1, max: 65535, showWhen: SSH_ONLY, group: 'Remote host', description: 'Empty: 22, or what your ssh config says.' },
 	{
 		key: 'sshIdentityFile',
 		label: 'SSH key',
 		type: 'text',
+		showWhen: SSH_ONLY,
 		group: 'Remote host',
 		description: 'Path of a private key on this computer. Empty: ssh-agent and the keys ssh finds itself. Passwords cannot be typed: use a key.',
 		placeholder: 'Agent or default keys'
@@ -112,7 +129,7 @@ const CONNECTION_SCHEMA: FieldSchema[] = [
 		key: 'qemuPath',
 		label: 'QEMU directory',
 		type: 'directory',
-		remotePath: 'sshHost',
+		remotePath: SSH_ONLY,
 		description: 'Directory with qemu-system-x86_64 and qemu-img (on the SSH host when one is set). Leave empty to detect automatically.',
 		placeholder: 'Detect automatically'
 	},
@@ -120,7 +137,7 @@ const CONNECTION_SCHEMA: FieldSchema[] = [
 		key: 'vmDirectory',
 		label: 'VM storage directory',
 		type: 'directory',
-		remotePath: 'sshHost',
+		remotePath: SSH_ONLY,
 		description: 'Where VM definitions and disks are stored (on the SSH host when one is set). Leave empty for the extension storage, or ~/vmm-qemu on an SSH host.',
 		placeholder: 'Default'
 	},
@@ -230,8 +247,9 @@ export class QemuProvider implements HypervisorProvider {
 	}
 
 	private hostFor(cluster: ClusterConfig): Host {
+		if (!isRemote(cluster)) return new LocalHost();
 		const name = String(cluster.config.sshHost ?? '').trim();
-		if (!name) return new LocalHost();
+		if (!name) throw new ProviderError('Enter the SSH host to connect to.', 'invalid');
 		const port = Number(cluster.config.sshPort);
 		const target = {
 			host: name,
@@ -246,8 +264,13 @@ export class QemuProvider implements HypervisorProvider {
 
 	private qemuPath(cluster: ClusterConfig): string | undefined {
 		// The VS Code setting names a directory on this computer: it does not apply to another one.
-		return (cluster.config.qemuPath as string | undefined) || (cluster.config.sshHost ? undefined : this.options.defaultQemuPath()) || undefined;
+		return (cluster.config.qemuPath as string | undefined) || (isRemote(cluster) ? undefined : this.options.defaultQemuPath()) || undefined;
 	}
+}
+
+/** Remote when chosen; a cluster saved with an SSH host but before the choice existed counts as remote too. */
+function isRemote(cluster: ClusterConfig): boolean {
+	return cluster.config.connection === 'ssh' || (cluster.config.connection === undefined && !!cluster.config.sshHost);
 }
 
 class SimpleEmitter<T> {

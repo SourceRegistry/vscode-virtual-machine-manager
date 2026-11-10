@@ -28,7 +28,7 @@ Create and run QEMU virtual machines from VS Code on Windows, Linux and macOS.
 * **Host device passthrough** (experimental): hot-plug a USB device; on Linux, bind a PCI device to
   `vfio-pci` for a VM. Host-changing steps are listed and confirmed first. Not available on macOS
   and Windows.
-* **QEMU on another Linux computer over SSH.** Add a cluster, fill in **SSH host** (a name, an address or an alias of your `~/.ssh/config`) and everything above, except attach/import and passthrough, works on that computer: VMs, disks, snapshots and clones live there, and the display, serial console, control channel and guest agent are carried through the SSH connection. See [QEMU over SSH](#qemu-over-ssh).
+* **QEMU on another Linux computer over SSH.** Add a cluster, set **Connection** to **Remote (SSH)** and fill in **SSH host** (a name, an address or an alias of your `~/.ssh/config`) and everything above, except attach/import and passthrough, works on that computer: VMs, disks, snapshots and clones live there, and the display, serial console, control channel and guest agent are carried through the SSH connection. See [QEMU over SSH](#qemu-over-ssh).
 * Machines keep running in the background when VS Code closes and are re-attached on start.
 * VNC, QMP and serial endpoints listen on `127.0.0.1` only (of the host, for an SSH host).
 
@@ -41,7 +41,7 @@ or set `vmm.qemu.path`.
 
 ## QEMU over SSH
 
-Add a QEMU cluster and set **SSH host**. VM Manager runs your system `ssh`, so your agent, keys,
+Add a QEMU cluster, choose **Connection: Remote (SSH)** (the other choice is **Local**) and set **SSH host**. VM Manager runs your system `ssh`, so your agent, keys,
 `~/.ssh/config` (including `ProxyJump`) and `known_hosts` apply, and no extra software is installed
 on either side. **SSH user**, **SSH port** and **SSH key** are optional. The host needs Linux, a POSIX
 shell, `qemu-system-*` and `qemu-img`, and `sshd` must allow TCP forwarding (the default), because the
