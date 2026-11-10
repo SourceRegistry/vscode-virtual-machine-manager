@@ -1,5 +1,14 @@
 # Changelog
 
+# [0.7.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-hyperv-v0.6.0...vm-manager-hyperv-v0.7.0) (2026-11-10)
+
+
+### Features
+
+* distinct tree icon for templates, container badge and icon for Proxmox LXC ([00346a3](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/00346a3f5f9d842e122e1f3f44697badc9fb5386))
+* **hyperv:** snapshots, clone and templates (untested on Windows) ([69a54c6](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/69a54c6edb410450d878d49d6034cb797c9b68a6))
+* **proxmox:** wait 15 minutes for the OpenID sign-in ([e3910b6](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/e3910b6fa095e7e63c735661489e7c29aee4eff2))
+
 # [0.6.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-hyperv-v0.5.0...vm-manager-hyperv-v0.6.0) (2026-11-10)
 
 
