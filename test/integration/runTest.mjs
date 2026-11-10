@@ -9,7 +9,10 @@ import os from 'node:os';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const userData = mkdtempSync(path.join(os.tmpdir(), 'vmm-test-'));
 
+// Set VSCODE_EXECUTABLE_PATH to use an installed VS Code instead of downloading one, e.g.
+// "/Applications/Visual Studio Code.app/Contents/MacOS/Code". It still runs in an isolated profile.
 await runTests({
+	...(process.env.VSCODE_EXECUTABLE_PATH ? { vscodeExecutablePath: process.env.VSCODE_EXECUTABLE_PATH } : {}),
 	extensionDevelopmentPath: [root, path.join(root, 'extensions', 'hyperv'), path.join(root, 'extensions', 'qemu')],
 	extensionTestsPath: path.join(root, 'test', 'integration', 'suite.cjs'),
 	launchArgs: ['--disable-extensions', '--disable-workspace-trust', `--user-data-dir=${userData}`, '--skip-welcome']
