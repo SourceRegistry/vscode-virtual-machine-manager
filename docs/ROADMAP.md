@@ -230,6 +230,7 @@ Trust first. Close the open "manual check" items before adding features.
 - [x] Proxmox provider: verified status written down 2026-11-09 (`extensions/proxmox/README.md`): unit tests use a mocked `pve-client`, nothing has run against a live server
 - [ ] Proxmox provider: run against a real server (HTTPS token, session ticket, OIDC, VNC and serial consoles, power tasks, create). Not possible on this Mac without a Proxmox host; ask whoever has one
 - [ ] Merge or close the stacked branches (phases 1-4)
+- [x] Views of a VM that disappears are closed (details, settings, display and serial consoles), also when it vanishes outside VM Manager. Deliberately slow to conclude: needs two successful listings in a row without it, and a failed or offline node counts for nothing. Told to the user unless they powered it off, deleted it or removed the cluster from here (`src/shared/vanished.ts`, unit tested; the manager wiring and the notices are **not** exercised by automated tests, check by hand)
 - [ ] Hyper-V, VFIO, DDA, Windows `sampleProcess`: **Not local** (need a Windows / Linux IOMMU host); keep marked experimental/untested
 - [~] CI: `qemu-e2e` job added to `.github/workflows/ci.yml` (ubuntu + macos, non-blocking via `continue-on-error`); **never run on GitHub yet**. Make it blocking once green on both. Still to do: a Windows job for Hyper-V script syntax
 

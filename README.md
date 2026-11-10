@@ -85,7 +85,7 @@ QEMU only, through the QEMU provider:
 * **Attach to Running Virtual Machine…** finds `qemu-system-*` processes started outside VS Code and
   adds them, marked **external**. With a QMP socket you get full control; without one the machine is
   observe-only (stats and power off). An attached machine disappears when its process exits, and
-  deleting it only detaches it.
+  deleting it only detaches it. When an attached machine stops on its own, its tabs close and you get a notice; powering it off from here does not show one.
 * **Import Virtual Machines from Folder…** reads disk images (qcow2, raw, vmdk, vdi, vhdx and more),
   another install's `vm.json`, libvirt domain XML and the disks of UTM bundles.
 

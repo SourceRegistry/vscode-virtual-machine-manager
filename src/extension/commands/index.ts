@@ -580,6 +580,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			try {
 				const connection = await manager.connect(location.ref.clusterId);
 				await connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: false });
+				manager.forgetVm(location.ref);
 				closeViews(location.ref);
 				await manager.refresh(location.ref.clusterId);
 			} catch (error) {
@@ -601,6 +602,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 				{ location: vscode.ProgressLocation.Notification, title: `Deleting ${location.vm.name}…` },
 				() => connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: choice === 'Delete VM and Disks' })
 			);
+			manager.forgetVm(location.ref);
 			closeViews(location.ref);
 			await manager.refresh(location.ref.clusterId);
 		} catch (error) {
@@ -672,6 +674,21 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	const register = (id: string, fn: (...args: unknown[]) => unknown) => vscode.commands.registerCommand(id, fn);
 
 	return [
+		// A VM that disappears for any reason (deleted in the hypervisor's own tools, an attached process that
+		// exited, a removed cluster) takes its tabs with it, not only one deleted from here. The user is only
+		// told when they did not cause it (a power-off or delete from here explains it).
+		manager.onDidRemoveVms((gone) => {
+			for (const vm of gone) {
+				closeViews(vm.ref);
+				if (vm.expected) continue;
+				const cluster = manager.cluster(vm.ref.clusterId)?.cluster.name;
+				if (vm.adopted) {
+					void vscode.window.showWarningMessage(`"${vm.name}" was detached: the attached virtual machine is no longer running. Its tabs were closed.`);
+				} else {
+					void vscode.window.showInformationMessage(`"${vm.name}" no longer exists${cluster ? ` on ${cluster}` : ''}. Its tabs were closed.`);
+				}
+			}
+		}),
 		register('vmm.addCluster', () => addCluster()),
 		register('vmm.editCluster', (arg) => editCluster(arg)),
 		register('vmm.removeCluster', (arg) => removeCluster(arg)),
