@@ -63,7 +63,7 @@ export function escapeTelnet(chunk: Buffer): Buffer {
 }
 
 /** `socket` seen as a plain byte stream: telnet commands removed on read, 0xFF escaped on write. */
-export function telnetStream(socket: Socket): Duplex {
+export function telnetStream(socket: Duplex | Socket): Duplex {
 	const filter = new TelnetFilter();
 	const stream = new Duplex({
 		read() {

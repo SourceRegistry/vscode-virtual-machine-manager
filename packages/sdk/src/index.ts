@@ -84,6 +84,11 @@ export interface FieldSchema {
 	/** File dialog filters for `file` fields, e.g. `{ 'Disk images': ['iso', 'img'] }`. */
 	filters?: Record<string, string[]>;
 	readonly?: boolean;
+	/**
+	 * `file` / `directory` fields: the path is on another computer (an SSH host), so a file dialog here would
+	 * pick the wrong thing and is not offered. A string names another field: remote while that one has a value.
+	 */
+	remotePath?: boolean | string;
 	/** Section heading used by the webview settings editor. */
 	group?: string;
 	/**
@@ -95,6 +100,12 @@ export interface FieldSchema {
 	advanced?: boolean;
 	/** Only ask for this field while another field has one of the given values (e.g. a sign-in method). */
 	showWhen?: { key: string; equals: FieldValue | FieldValue[]; /** Assumed when the other field has no value yet (older saved configs). */ default?: FieldValue };
+}
+
+/** Whether a path field points at another computer, given the current values (no file dialog then). */
+export function isRemotePath(field: FieldSchema, values: FieldValues): boolean {
+	if (typeof field.remotePath === 'string') return !!values[field.remotePath];
+	return !!field.remotePath;
 }
 
 /** Whether a field applies given the current values. Hidden fields are neither asked nor validated. */
@@ -144,6 +155,8 @@ export interface Capabilities {
 	details?: boolean;
 	/** Implements `getVmStats` (live usage counters). */
 	stats?: boolean;
+	/** Image and disk paths are on the host (an SSH host), not on this computer: ask for them as text, no file dialog. */
+	remotePaths?: boolean;
 	/** Implements `addPortForward` / `removePortForward`. */
 	forwards?: boolean;
 	/** Implements `getPassthrough` / `planPassthrough` / `changePassthrough`. */

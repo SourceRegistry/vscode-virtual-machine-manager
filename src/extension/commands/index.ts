@@ -282,15 +282,23 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			if (!connection.insertMedia) return;
 			const drive = await pickDrive(location, connection, false);
 			if (!drive) return;
-			const picked = await vscode.window.showOpenDialog({
-				title: `Insert into ${location.vm.name}`,
-				canSelectMany: false,
-				filters: { 'Disk images': ['iso', 'img'], 'All files': ['*'] }
-			});
-			if (!picked?.[0]) return;
-			await connection.insertMedia(location.ref.nodeId, location.ref.vmId, drive.id, picked[0].fsPath);
+			let image: string | undefined;
+			if (connection.capabilities.remotePaths) {
+				// The image lies on the host: this computer's file dialog cannot show it.
+				image = (await vscode.window.showInputBox({ title: `Insert into ${location.vm.name}`, prompt: 'Path of the image on the host', placeHolder: '/var/lib/images/install.iso', ignoreFocusOut: true }))?.trim();
+			} else {
+				image = (
+					await vscode.window.showOpenDialog({
+						title: `Insert into ${location.vm.name}`,
+						canSelectMany: false,
+						filters: { 'Disk images': ['iso', 'img'], 'All files': ['*'] }
+					})
+				)?.[0]?.fsPath;
+			}
+			if (!image) return;
+			await connection.insertMedia(location.ref.nodeId, location.ref.vmId, drive.id, image);
 			await manager.refresh(location.ref.clusterId);
-			void vscode.window.setStatusBarMessage(`Inserted ${path.basename(picked[0].fsPath)} into ${location.vm.name}`, 4000);
+			void vscode.window.setStatusBarMessage(`Inserted ${path.basename(image)} into ${location.vm.name}`, 4000);
 		} catch (error) {
 			await showError(`Could not change the media of ${location.vm.name}`, error);
 		}

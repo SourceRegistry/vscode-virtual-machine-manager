@@ -110,9 +110,10 @@ QEMU only, through the QEMU provider:
 | Snapshots | | disks only (qcow2) | |
 | Clone | | ✓ | |
 | Connect with Remote-SSH | via address | via forward or address | via address |
+| Run on a remote host | | over SSH (Linux hosts) | server API |
 
 Experimental means implemented and unit tested, but not yet verified on real hardware.
-Snapshots for Hyper-V and Proxmox, remote Hyper-V and QEMU over SSH are on the [roadmap](docs/ROADMAP.md).
+Snapshots for Hyper-V and Proxmox and remote Hyper-V are on the [roadmap](docs/ROADMAP.md).
 
 ## Consoles
 

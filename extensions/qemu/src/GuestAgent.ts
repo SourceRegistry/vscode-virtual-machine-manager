@@ -1,4 +1,5 @@
 import * as net from 'node:net';
+import type { Duplex } from 'node:stream';
 
 /**
  * Minimal QEMU guest agent (QGA) client. The agent speaks JSON lines over a virtio-serial port that
@@ -20,7 +21,7 @@ export class GuestAgentClient {
 	private waiter: { id: number; resolve: () => void; reject: (e: Error) => void } | undefined;
 	private readonly replies: Array<(message: Record<string, unknown>) => void> = [];
 
-	private constructor(private readonly socket: net.Socket) {
+	private constructor(private readonly socket: Duplex) {
 		socket.setEncoding('latin1');
 		socket.on('data', (chunk: string) => this.onData(chunk));
 		socket.on('close', () => this.fail(new GuestAgentError('Guest agent connection closed')));
@@ -35,6 +36,18 @@ export class GuestAgentClient {
 			s.once('error', reject);
 		});
 		const client = new GuestAgentClient(socket);
+		try {
+			await client.sync(timeoutMs);
+		} catch (error) {
+			client.close();
+			throw error;
+		}
+		return client;
+	}
+
+	/** Same as `connect`, over a stream that is already connected (an ssh tunnel). */
+	static async over(stream: Duplex, timeoutMs = 2000): Promise<GuestAgentClient> {
+		const client = new GuestAgentClient(stream);
 		try {
 			await client.sync(timeoutMs);
 		} catch (error) {

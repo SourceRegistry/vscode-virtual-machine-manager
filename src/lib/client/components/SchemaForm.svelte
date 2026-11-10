@@ -2,7 +2,7 @@
 	import Input from '#lib/client-lib/components/form/Input.svelte';
 	import Button from '#lib/client-lib/components/actions/Button.svelte';
 	import Icon from '#lib/client-lib/components/icons/Icon.svelte';
-	import { isFieldVisible, type FieldSchema, type FieldValues } from '@vmm/sdk';
+	import { isFieldVisible, isRemotePath, type FieldSchema, type FieldValues } from '@vmm/sdk';
 	import { toasts } from '#lib/client-lib/components/toast/index.js';
 	import { request } from '../rpc/bridge';
 
@@ -100,17 +100,19 @@
 			>
 				{#snippet children()}
 					{#if !field.readonly}
-						<Button
-							type="button"
-							class="browse"
-							transparent
-							disabled={disabled}
-							title="Browse…"
-							aria-label="Browse for {field.label}"
-							onclick={() => browse(field)}
-						>
-							<Icon icon="folder2-open" />
-						</Button>
+						{#if !isRemotePath(field, values)}
+							<Button
+								type="button"
+								class="browse"
+								transparent
+								disabled={disabled}
+								title="Browse…"
+								aria-label="Browse for {field.label}"
+								onclick={() => browse(field)}
+							>
+								<Icon icon="folder2-open" />
+							</Button>
+						{/if}
 						{#if field.mediaDevice && values[field.key]}
 							<Button
 								type="button"

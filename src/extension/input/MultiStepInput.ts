@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { isFieldVisible, validateValue, type FieldSchema, type FieldValue, type FieldValues } from '@vmm/sdk';
+import { isFieldVisible, isRemotePath, validateValue, type FieldSchema, type FieldValue, type FieldValues } from '@vmm/sdk';
 
 /** Returned when the user pressed the back button on the first collected step. */
 export const BACK = Symbol('back');
@@ -128,7 +128,7 @@ export async function collectFields(
 			totalSteps: offset + steps.length + (options.trailingSteps ?? 0),
 			canGoBack: index > 0 || !!options.canGoBackFromFirst
 		};
-		const result = await fieldStep(field, values[field.key], position, options.storedSecrets?.includes(field.key) ?? false);
+		const result = await fieldStep(field, values[field.key], position, options.storedSecrets?.includes(field.key) ?? false, values);
 		if (result === undefined) return undefined;
 		if (result === BACK) {
 			if (index === 0) return BACK;
@@ -145,7 +145,8 @@ async function fieldStep(
 	field: FieldSchema,
 	current: FieldValue,
 	position: StepPosition,
-	hasStoredSecret: boolean
+	hasStoredSecret: boolean,
+	values: FieldValues = {}
 ): Promise<{ value: FieldValue } | Back | undefined> {
 	const optionalHint = field.required ? '' : ' (optional)';
 	switch (field.type) {
@@ -178,7 +179,7 @@ async function fieldStep(
 		}
 		case 'file':
 		case 'directory':
-			return pathStep(field, current, position);
+			return pathStep(field, current, position, !isRemotePath(field, values));
 		default:
 			break;
 	}
@@ -203,14 +204,15 @@ async function fieldStep(
 async function pathStep(
 	field: FieldSchema,
 	current: FieldValue,
-	position: StepPosition
+	position: StepPosition,
+	canBrowse = true
 ): Promise<{ value: FieldValue } | Back | undefined> {
 	const directory = field.type === 'directory';
 	let value = current === undefined ? undefined : String(current);
 	for (;;) {
 		const items: PickItem<'keep' | 'browse' | 'none' | 'type'>[] = [];
 		if (value) items.push({ label: `$(${directory ? 'folder' : 'file'}) ${value}`, description: 'Current', value: 'keep' });
-		items.push({ label: `$(folder-opened) Browse…`, value: 'browse' });
+		if (canBrowse) items.push({ label: `$(folder-opened) Browse…`, value: 'browse' });
 		items.push({ label: `$(edit) Enter path…`, value: 'type' });
 		if (!field.required) items.push({ label: '$(close) None', description: field.placeholder, value: 'none' });
 		const picked = await pickStep(position, items, {

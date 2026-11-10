@@ -28,8 +28,9 @@ Create and run QEMU virtual machines from VS Code on Windows, Linux and macOS.
 * **Host device passthrough** (experimental): hot-plug a USB device; on Linux, bind a PCI device to
   `vfio-pci` for a VM. Host-changing steps are listed and confirmed first. Not available on macOS
   and Windows.
+* **QEMU on another Linux computer over SSH.** Add a cluster, fill in **SSH host** (a name, an address or an alias of your `~/.ssh/config`) and everything above, except attach/import and passthrough, works on that computer: VMs, disks, snapshots and clones live there, and the display, serial console, control channel and guest agent are carried through the SSH connection. See [QEMU over SSH](#qemu-over-ssh).
 * Machines keep running in the background when VS Code closes and are re-attached on start.
-* VNC, QMP and serial endpoints listen on `127.0.0.1` only.
+* VNC, QMP and serial endpoints listen on `127.0.0.1` only (of the host, for an SSH host).
 
 ## Requirements
 
@@ -38,8 +39,23 @@ ARM64 guests (you need at least one). UEFI guests also need the edk2 firmware fi
 most QEMU packages. See [Installing QEMU](media/install.md), run **VM: Detect QEMU Installation**,
 or set `vmm.qemu.path`.
 
+## QEMU over SSH
+
+Add a QEMU cluster and set **SSH host**. VM Manager runs your system `ssh`, so your agent, keys,
+`~/.ssh/config` (including `ProxyJump`) and `known_hosts` apply, and no extra software is installed
+on either side. **SSH user**, **SSH port** and **SSH key** are optional. The host needs Linux, a POSIX
+shell, `qemu-system-*` and `qemu-img`, and `sshd` must allow TCP forwarding (the default), because the
+display, serial console and QMP are reached with `ssh -W` to the loopback ports QEMU listens on there.
+
+* VM definitions and disks live on the host, in **VM storage directory** (default `~/vmm-qemu/vms`). Image paths, such as an ISO, are paths on the host: type them, there is no file dialog.
+* It never asks for anything: a password prompt or an unknown host key would hang a background connection, so those fail with a message. Use a key (in ssh-agent if it has a passphrase) and connect once in a terminal (`ssh <host>`) to accept the host key.
+* VMs keep running on the host when VS Code closes, as they do locally.
+* Not available on an SSH host: attaching to processes started elsewhere, importing from a folder, USB/PCI passthrough. `vmm.qemu.path` only applies to this computer; set **QEMU directory** on the cluster instead.
+* SSH on Windows works through Windows' OpenSSH client but without connection sharing, so it is slower.
+
 ## Known limits
 
+* Over SSH, a user-mode (NAT) guest is not reachable from this computer even with a port forward: the forward is on the host. Use **VM: Connect with Remote-SSH…** with a host alias that jumps through the host, or a bridged network.
 * Snapshots do not include memory or the UEFI variable store, and are not available for VMs attached from outside.
 * Memory charts show the memory QEMU uses on the host, not the memory the guest uses.
 * Guest IP addresses need `qemu-guest-agent` in the guest. With user networking the guest is

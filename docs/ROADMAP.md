@@ -188,8 +188,17 @@ Details page, card **Host devices** (loaded on demand: listing USB can be slow).
 
 ## Phase 9: `feat/qemu-remote-ssh`
 
-- [ ] QEMU cluster over SSH: spawn and control `qemu-system` on a remote host
-- [ ] QMP and VNC tunneled over SSH via system `ssh` (agent and keys), no new dependency
+Status: **built** on `feat/remote-ssh-connect`; verified against real QEMU through a stand-in for `ssh` (same commands, same tunnels), not yet against a real remote machine.
+
+- [x] QEMU cluster over SSH: the provider talks to a `Host` (`host.ts`: `LocalHost`, `sshHost.ts`: `SshHost`); the local behaviour is unchanged. Spawns, controls and stops `qemu-system` on the remote host; definitions, disks, runtime files live there
+- [x] System `ssh`, no new dependency: agent, keys, `~/.ssh/config` aliases and `ProxyJump`, `known_hosts` all apply; `BatchMode` (never prompts, readable errors for host keys / permissions / DNS); connection sharing (`ControlMaster`) where the client supports it
+- [x] QMP, VNC, serial and the guest agent tunnelled with `ssh -W` to the host's loopback ports (nothing listens on this computer); a failed tunnel says why (nothing listening, forwarding forbidden)
+- [x] Cluster form: SSH host / user / port / key; the QEMU directory and VM storage directory are paths on the host; no file dialog for host paths (`FieldSchema.remotePath`, `Capabilities.remotePaths`; Insert Media asks for a path)
+- [x] Host facts for the node card (CPU, memory, platform) from /proc; Linux hosts only (the connection test says so otherwise)
+- [x] Capabilities cut to what works there: no attach, folder import or passthrough
+- [x] Tests: quoting and injection guards, argument building, error explanations, parsers, the host operations through a stand-in ssh (files, detached processes, tunnels, ports), and a real QEMU on the "remote" host: create, start, details, stats, VNC banner and serial through tunnels, media, port forward, snapshot, revert, clone, delete
+- [ ] Manual check against a real remote Linux machine (real sshd, real network latency, host key prompt, jump host)
+- [ ] Not done: password / keyboard-interactive login (needs SSH_ASKPASS plumbing); attach and import on a remote host; passthrough on a remote host; macOS and Windows remote hosts; a remote file browser for ISO paths; a cheaper way to poll many VMs (each poll is a few ssh commands, fine with connection sharing, slower without)
 
 ## Phase 10: `feat/qemu-arm64`
 
