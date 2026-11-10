@@ -141,7 +141,7 @@ describe('LibvirtProvider', () => {
 		expect(remote.connection.capabilities.remotePaths).toBe(true);
 	});
 	it('says so when the display port refuses the connection', async () => {
-		const { connection } = await connect({ domstate: 'running\n', dumpxml: XML.replace("<graphics type='vnc'", "<graphics type='vnc' port='1' ") });
+		const { connection } = await connect({ domstate: 'running\n', dumpxml: XML.replace("port='5900'", "port='1'") });
 		await expect(connection.openConsole('host', UUID, 'vnc')).rejects.toMatchObject({ code: 'unavailable' });
 	});
 });
