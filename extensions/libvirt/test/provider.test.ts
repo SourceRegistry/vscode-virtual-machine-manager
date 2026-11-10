@@ -104,10 +104,41 @@ describe('LibvirtProvider', () => {
 		await expect(connection.deleteVm('host', UUID, { deleteDisks: true })).rejects.toMatchObject({ code: 'unsupported' });
 		expect(calls.some((c) => c[0] === 'undefine')).toBe(false);
 	});
-	it('refuses what it cannot do yet', async () => {
-		const { connection } = await connect();
-		await expect(connection.createVm()).rejects.toMatchObject({ code: 'unsupported' });
-		expect(connection.capabilities).toMatchObject({ create: false, snapshots: true, media: true, details: true, stats: true });
+	it('creates a domain: a volume in the pool, then the definition', async () => {
+		const caps = fixture('domcapabilities.xml');
+		const { connection, calls } = await connect({ domcapabilities: caps, 'pool-list --type dir --name': 'default\n', 'net-list --name': '', 'list --all --name': 'other\n', 'vol-path --pool default lvprobe.qcow2': '/pool/lvprobe.qcow2\n' });
+		const progress: string[] = [];
+		const vm = await connection.createVm('host', { name: 'lvprobe', cpus: 2, memoryMB: 1024, diskGB: 10, iso: '/isos/a.iso', network: 'user', pool: 'default', diskBus: 'virtio' }, (u) => progress.push(u.message ?? ''));
+		expect(vm.name).toBe('lvprobe');
+		const commands = calls.map((c) => c.join(' '));
+		expect(commands).toContain('vol-create-as default lvprobe.qcow2 10G --format qcow2');
+		const define = calls.find((c) => c[0] === 'define')!;
+		expect(define[1]).toMatch(/domain\.xml$/);
+		expect(commands.indexOf('vol-create-as default lvprobe.qcow2 10G --format qcow2')).toBeLessThan(calls.findIndex((c) => c[0] === 'define'));
+		expect(progress.length).toBeGreaterThan(0);
+	});
+	it('removes the new disk when the definition fails', async () => {
+		const caps = fixture('domcapabilities.xml');
+		const { connection, calls } = await connect({ domcapabilities: caps, 'pool-list --type dir --name': 'default\n', 'vol-path --pool default web.qcow2': '/pool/web.qcow2\n', define: new Error('error: boom') });
+		await expect(connection.createVm('host', { name: 'web', cpus: 1, memoryMB: 512, diskGB: 5, network: 'user', pool: 'default' })).rejects.toBeTruthy();
+		expect(calls.map((c) => c.join(' '))).toContain('vol-delete --pool default web.qcow2');
+	});
+	it('rejects a bad name, an existing domain and a relative ISO before touching storage', async () => {
+		const { connection, calls } = await connect({ 'list --all --name': 'taken\n' });
+		const base = { cpus: 1, memoryMB: 512, diskGB: 5, network: 'user' };
+		await expect(connection.createVm('host', { ...base, name: '-rf' })).rejects.toMatchObject({ code: 'invalid' });
+		await expect(connection.createVm('host', { ...base, name: 'a', iso: 'rel.iso' })).rejects.toMatchObject({ code: 'invalid' });
+		await expect(connection.createVm('host', { ...base, name: 'taken' })).rejects.toMatchObject({ code: 'invalid' });
+		expect(calls.some((c) => c[0] === 'vol-create-as')).toBe(false);
+	});
+	it('offers a pool it can create on this computer, and none on another host', async () => {
+		const caps = fixture('domcapabilities.xml');
+		const local = await connect({ domcapabilities: caps, 'pool-list --type dir --name': '' });
+		expect((await local.connection.getCreateSchema()).find((f) => f.key === 'pool')!.options).toHaveLength(1);
+		expect(local.connection.capabilities.remotePaths).toBe(false);
+		const remote = await connect({ domcapabilities: caps, 'pool-list --type dir --name': '' }, { connection: 'ssh', sshHost: 'lab' });
+		expect((await remote.connection.getCreateSchema()).find((f) => f.key === 'pool')!.options).toHaveLength(0);
+		expect(remote.connection.capabilities.remotePaths).toBe(true);
 	});
 	it('says so when the display port refuses the connection', async () => {
 		const { connection } = await connect({ domstate: 'running\n', dumpxml: XML.replace("<graphics type='vnc'", "<graphics type='vnc' port='1' ") });

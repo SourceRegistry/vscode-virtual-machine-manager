@@ -143,4 +143,26 @@ describe.skipIf(!enabled)('libvirt provider against real libvirt', () => {
 			expect(existsSync(join(dir, 'disk.qcow2'))).toBe(false);
 		}
 	}, 60_000);
+
+	it('creates a domain through the provider, boots it and deletes it with its disk', async () => {
+		const name = `${NAME}-new`;
+		const schema = await connection.getCreateSchema('host');
+		expect(schema.map((f) => f.key)).toEqual(expect.arrayContaining(['name', 'cpus', 'memoryMB', 'diskGB', 'pool', 'network']));
+		try {
+			const vm = await connection.createVm('host', { name, cpus: 1, memoryMB: 512, diskGB: 1, network: 'user', pool: String(schema.find((f) => f.key === 'pool')!.default ?? ''), diskBus: 'virtio', iso: join(dir, 'empty.iso') });
+			expect(vm).toMatchObject({ name, state: 'stopped', cpus: 1, memoryMB: 512 });
+			expect(vm.consoles).toEqual(['vnc', 'serial']);
+			await connection.power('host', vm.id, 'start');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'running', 'running');
+			const details = await connection.getVmDetails('host', vm.id);
+			expect(details.disks.some((d) => d.id === 'vda')).toBe(true);
+			await connection.power('host', vm.id, 'stop');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'stopped', 'stopped');
+			await connection.deleteVm('host', vm.id, { deleteDisks: true });
+			expect(v('vol-list', '--pool', String(schema.find((f) => f.key === 'pool')!.default || 'default'))).not.toContain(`${name}.qcow2`);
+		} finally {
+			try { v('destroy', name); } catch { /* not running */ }
+			try { v('undefine', name, '--nvram', '--managed-save', '--storage', 'vda'); } catch { /* gone */ }
+		}
+	}, 120_000);
 });

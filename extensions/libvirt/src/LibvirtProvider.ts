@@ -1,11 +1,14 @@
-import { rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
 	ProviderError, type Capabilities, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions,
 	type DiskStats, type FieldSchema, type FieldValues, type HypervisorProvider, type Logger, type NodeInfo, type PowerAction, type ProviderContext,
-	type SecretBag, type Snapshot, type VmConfig, type VmDetails, type VmInfo, type VmStats
+	type CreateProgress, type SecretBag, type Snapshot, type VmConfig, type VmDetails, type VmInfo, type VmStats
 } from '@vmm/sdk';
 import { openEndpoint, openPty } from './consoles';
+import { buildDomainXml, DISK_BUSES, NAME, parseDomainCapabilities, type DiskBus } from './definition';
 import {
 	blockStats, netStats, parseDomain, parseDomifaddr, parseDomstats, parseNodeinfo, parseSnapshot, parseVersion, parseVncDisplay, stateOf, toDiskDevices, toNicDevices, UUID,
 	type DomainInfo
@@ -76,10 +79,10 @@ interface Cached { at: number; state: string; domain: DomainInfo }
 
 export class LibvirtConnection implements ClusterConnection {
 	readonly capabilities: Capabilities = {
-		create: false, edit: false, delete: true,
+		create: true, edit: false, delete: true,
 		power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[],
 		consoles: ['vnc', 'serial'] as ConsoleKind[],
-		preview: false, external: false, media: true, details: true, stats: true, snapshots: true
+		preview: false, external: false, media: true, details: true, stats: true, snapshots: true, remotePaths: false
 	};
 	private readonly local: boolean;
 	private readonly ssh;
@@ -92,6 +95,8 @@ export class LibvirtConnection implements ClusterConnection {
 	constructor(private readonly virsh: Virsh, private readonly uri: string, private readonly log: Logger, private readonly shutdownTimeoutSeconds = 30) {
 		this.local = isLocalUri(uri);
 		this.ssh = sshTarget(uri);
+		// Installer images are read by libvirt on its own host: from another computer a file dialog here would pick the wrong file.
+		this.capabilities.remotePaths = !this.local;
 	}
 
 	dispose(): void { this.domains.clear(); this.byId.clear(); this.addresses.clear(); this.cpuSamples.clear(); }
@@ -242,11 +247,116 @@ export class LibvirtConnection implements ClusterConnection {
 	// Lifecycle
 	// -----------------------------------------------------------------------------------------
 
-	async getCreateSchema(): Promise<FieldSchema[]> { throw this.noCreate(); }
-	async createVm(): Promise<VmInfo> { throw this.noCreate(); }
+	/** Names a command lists, one per line (`pool-list --name`); empty when the driver lacks the object. */
+	private async names(args: string[]): Promise<string[]> {
+		return (await this.virsh.exec(args).catch(() => '')).split(/\r?\n/).map((n) => n.trim()).filter((n) => n && !n.startsWith('-'));
+	}
+
+	async getCreateSchema(_nodeId?: string): Promise<FieldSchema[]> {
+		const [pools, networks, host, [node]] = await Promise.all([
+			this.names(['pool-list', '--type', 'dir', '--name']),
+			this.names(['net-list', '--name']),
+			this.hostCapabilities(),
+			this.listNodes()
+		]);
+		const arm = host.arch === 'aarch64';
+		const canMakePool = this.local && !pools.length;
+		const bus = (value: DiskBus, label: string, description: string) => ({ value, label, description });
+		return [
+			{ key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'my-vm', description: 'Letters, digits, "." "_" and "-"; it starts with a letter or digit.' },
+			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: node?.cpus ?? 64, default: Math.min(2, node?.cpus ?? 2), required: true },
+			{ key: 'memoryMB', label: 'Memory', type: 'number', unit: 'MB', min: 128, default: 2048, required: true },
+			{ key: 'diskGB', label: 'Disk size', type: 'number', unit: 'GB', min: 1, max: 16384, default: 32, required: true, description: 'A thin qcow2 volume: it only takes the space the guest uses.' },
+			{ key: 'iso', label: 'Installation media (ISO)', type: 'file', remotePath: !this.local, filters: { 'Disk images': ['iso', 'img'] }, description: this.local ? undefined : 'The path on the libvirt host.' },
+			{
+				key: 'pool', label: 'Storage pool', type: 'select', required: !canMakePool, default: pools.includes('default') ? 'default' : (pools[0] ?? ''),
+				options: pools.length ? pools.map((p) => ({ value: p, label: p })) : canMakePool ? [{ value: '', label: 'New pool in ~/.local/share/libvirt/images', description: 'This connection has no directory pool yet.' }] : [],
+				description: pools.length || canMakePool ? 'Where the disk is created.' : 'This libvirt has no directory storage pool: create one on the host (virsh pool-define-as) first.'
+			},
+			{
+				key: 'network', label: 'Network', type: 'select', required: true, default: networks.includes('default') ? 'default' : 'user',
+				options: [...networks.map((n) => ({ value: n, label: `Network "${n}"` })), { value: 'user', label: 'User-mode (NAT, no setup)', description: 'The guest reaches out; nothing reaches the guest.' }]
+			},
+			...(arm || !host.efi ? [] : [{ key: 'firmware', label: 'Firmware', type: 'select' as const, required: true, default: 'bios', options: [{ value: 'bios', label: 'BIOS' }, { value: 'uefi', label: 'UEFI' }] }]),
+			{
+				key: 'diskBus', label: 'Disk controller', type: 'select', required: true, default: 'virtio', advanced: true,
+				options: [
+					bus('virtio', 'VirtIO', 'Fastest; Linux has the driver, Windows needs the virtio drivers.'),
+					bus('scsi', 'VirtIO SCSI', 'Fast, and discards freed space.'),
+					...(arm ? [] : [bus('sata', 'SATA', 'Works with every installer.')])
+				]
+			}
+		];
+	}
+
+	/** What the host's default emulator offers; the first thing a new domain is built from. */
+	private async hostCapabilities() {
+		return parseDomainCapabilities(await this.virsh.exec(['domcapabilities']));
+	}
+
+	/** The directory pool to create volumes in; on this computer one is made when there is none. */
+	private async ensurePool(requested: string): Promise<string> {
+		const pools = await this.names(['pool-list', '--type', 'dir', '--name']);
+		if (requested) {
+			if (!pools.includes(requested)) throw new ProviderError(`The storage pool "${requested}" is not active.`, 'invalid');
+			return requested;
+		}
+		if (pools.length) return pools.includes('default') ? 'default' : pools[0]!;
+		if (!this.local) throw new ProviderError('This libvirt has no directory storage pool. Create one on the host (virsh pool-define-as) first.', 'unavailable');
+		const known = await this.names(['pool-list', '--all', '--name']);
+		const name = known.includes('default') ? 'vmm' : 'default';
+		if (!known.includes(name)) {
+			await this.virsh.exec(['pool-define-as', name, 'dir', '--target', join(homedir(), '.local', 'share', 'libvirt', 'images')]);
+			await this.virsh.exec(['pool-build', name]);
+			await this.virsh.exec(['pool-autostart', name]);
+		}
+		await this.virsh.exec(['pool-start', name]);
+		return name;
+	}
+
+	async createVm(_nodeId: string, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo> {
+		const name = String(values.name ?? '').trim();
+		if (!NAME.test(name)) throw new ProviderError('Use 1–64 letters, digits, "." "_" or "-" for the name, starting with a letter or digit.', 'invalid');
+		const cpus = Number(values.cpus), memoryMB = Number(values.memoryMB), diskGB = Number(values.diskGB);
+		if (!Number.isInteger(cpus) || cpus < 1) throw new ProviderError('Give at least one processor.', 'invalid');
+		if (!Number.isFinite(memoryMB) || memoryMB < 128) throw new ProviderError('Give at least 128 MB of memory.', 'invalid');
+		if (!Number.isFinite(diskGB) || diskGB < 1) throw new ProviderError('Give a disk of at least 1 GB.', 'invalid');
+		const diskBus = DISK_BUSES.find((b) => b === values.diskBus) ?? 'virtio';
+		const iso = String(values.iso ?? '').trim();
+		if (iso && !/^(\/|[A-Za-z]:[\\/])/.test(iso)) throw new ProviderError('Give the installation image as an absolute path on the libvirt host.', 'invalid');
+		const network = String(values.network ?? 'user');
+		if (network !== 'user' && !(await this.names(['net-list', '--name'])).includes(network)) throw new ProviderError(`The network "${network}" is not active.`, 'invalid');
+		if ((await this.names(['list', '--all', '--name'])).includes(name)) throw new ProviderError(`A domain named "${name}" already exists.`, 'invalid');
+
+		progress?.({ message: 'Reading what the host supports…' });
+		const host = await this.hostCapabilities();
+		progress?.({ message: 'Creating the disk…' });
+		const pool = await this.ensurePool(String(values.pool ?? ''));
+		const volume = `${name}.qcow2`;
+		await this.virsh.exec(['vol-create-as', pool, volume, `${diskGB}G`, '--format', 'qcow2'], 120_000);
+		let dir: string | undefined;
+		try {
+			const diskPath = (await this.virsh.exec(['vol-path', '--pool', pool, volume])).trim();
+			const xml = buildDomainXml({ name, cpus, memoryMB, diskPath, diskBus, iso: iso || undefined, uefi: values.firmware === 'uefi', network, host });
+			// virsh reads the definition on this computer, whichever host the domain lives on.
+			dir = await mkdtemp(join(tmpdir(), 'vmm-libvirt-'));
+			const file = join(dir, 'domain.xml');
+			await writeFile(file, xml, { mode: 0o600 });
+			progress?.({ message: 'Defining the domain…' });
+			await this.virsh.exec(['define', file]);
+		} catch (error) {
+			await this.virsh.exec(['vol-delete', '--pool', pool, volume]).catch((e: Error) => this.log.warn(`Could not remove the new disk ${volume}: ${e.message}`));
+			throw error;
+		} finally {
+			if (dir) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+		}
+		this.domains.clear();
+		const vm = (await this.listVms(NODE_ID)).find((v) => v.name === name);
+		if (!vm) throw new ProviderError('The domain was defined but libvirt does not list it.', 'failed');
+		return vm;
+	}
 	async getVmConfig(): Promise<VmConfig> { throw new ProviderError('Domains are edited with virsh edit, virt-manager or Cockpit.', 'unsupported'); }
 	async updateVm(): Promise<void> { throw new ProviderError('Domains are edited with virsh edit, virt-manager or Cockpit.', 'unsupported'); }
-	private noCreate(): ProviderError { return new ProviderError('Creating domains is not available yet: define one with virt-install, virt-manager or `virsh define`, and it appears here.', 'unsupported'); }
 
 	async power(_nodeId: string, vmId: string, action: PowerAction): Promise<void> {
 		const id = assertId(vmId);

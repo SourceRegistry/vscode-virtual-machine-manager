@@ -106,7 +106,7 @@ QEMU only, through the QEMU provider:
 | **Runs on** | Windows | Windows, Linux, macOS | any (server API) | Linux, macOS (needs `virsh`) |
 | **Where the machines run** | this computer | this computer, or a Linux host over SSH | a Proxmox server | this computer, or a host over SSH (`qemu+ssh://`) |
 | **Machines** | | | | |
-| Create | ✓ | ✓ | ✓ | – *(define with `virt-install` or `virsh`; it appears here)* |
+| Create | ✓ | ✓ | ✓ | ✓ *(from an ISO; no cloud images yet)* |
 | Edit settings | ✓ | ✓ | ✓ | – |
 | Delete (and its disks) | ✓ | ✓ | ✓ *(disks always go too)* | ✓ |
 | Power: start, shut down, reboot, force stop | ✓ | ✓ | ✓ | ✓ |
@@ -143,7 +143,7 @@ Experimental means implemented and unit tested, but not yet verified on real har
 | Proxmox VE | Unit tests against a mocked API client; not yet a real Proxmox server. |
 | libvirt | Real libvirt 12.9 with QEMU 11.1 on macOS (`qemu:///session`, HVF). Not yet Linux `qemu:///system`, a KVM host, or `qemu+ssh://`. |
 
-Remote Hyper-V and more libvirt features (create, clone, storage pools) are on the [roadmap](docs/ROADMAP.md).
+Remote Hyper-V and more libvirt features (clone, edit, storage pools) are on the [roadmap](docs/ROADMAP.md).
 
 ## Consoles
 

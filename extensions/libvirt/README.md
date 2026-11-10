@@ -31,7 +31,7 @@ For SSH, `ControlMaster auto` (with `ControlPersist`) in `~/.ssh/config` makes i
 
 ## Not included yet
 
-* Creating, editing and cloning domains: use `virt-install`, `virt-manager`, Cockpit or `virsh define`, and the domain shows up here.
+* Editing and cloning domains: use `virt-install`, `virt-manager`, Cockpit or `virsh edit`, and the change shows up here.
 * Templates, port forwards, passthrough, SPICE displays.
 * Uptime and CPU on macOS come from the QEMU process (libvirt has no cgroups there).
 

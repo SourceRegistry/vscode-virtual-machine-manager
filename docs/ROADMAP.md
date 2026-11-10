@@ -329,7 +329,8 @@ Finishes phase 5's deferred item.
 
 One provider that covers most Linux KVM users.
 - [x] New `extensions/libvirt` (first slice): `qemu:///session`, `qemu:///system`, `qemu+ssh://` and custom URIs through `virsh` (no native binding); list, power, details, stats, VNC and serial consoles, media, snapshots, delete. Verified against real libvirt 12.9 on this Mac (`VMM_E2E_LIBVIRT=1`); not yet on Linux `qemu:///system` or over SSH
-- [ ] Create-VM (XML builder), edit, clone, templates, storage pools and networks, port forwards, one long-lived `virsh` shell instead of a process per call (faster over SSH)
+- [x] Create-VM from an ISO (domain XML builder, qcow2 volume in a directory pool, a pool is made in `~/.local/share/libvirt/images` when a local connection has none); verified on real libvirt 12.9 (HVF, `qemu:///session`). Needs `<controller type='usb' model='qemu-xhci'/>` on ARM `virt` or libvirt refuses the USB input devices
+- [ ] Cloud-image create, edit, clone, templates, storage pools and networks, port forwards, one long-lived `virsh` shell instead of a process per call (faster over SSH)
 - [~] Map domains and snapshots onto the SDK (done); storage pools and networks (open)
 - [x] Local check (2026-11-10): Homebrew `libvirt` 12.9.0 + QEMU 11.1.2 on Apple Silicon runs an arm64 guest under `qemu:///session` with `<domain type='hvf'>`. Needs `<features><gic version='3'/></features>` (libvirt's default GICv2 fails: "HVF does not support GICv2 emulation") and `<os firmware='efi'>`. `virsh domstats --cpu-total` reports 0 on macOS (no cgroups), so CPU% must come from the QEMU process instead. The session daemon starts on demand; no `brew services` needed
 - [x] Remote hosts through `qemu+ssh://`: libvirt's own ssh transport (`no_tty=1`, key or agent), VNC/serial TCP through `ssh -W`. Untested against a real host
