@@ -342,3 +342,18 @@ describe('the cluster form asks only what the ssh config does not answer', () =>
 		expect(asked({ connection: 'ssh', sshHost: 'lab' })).toEqual(expect.arrayContaining(['sshUser', 'sshPort', 'sshAuth']));
 	});
 });
+
+describe('remote label for the tree', () => {
+	const provider = new QemuProvider({ defaultQemuPath: () => undefined });
+	const cluster = (config: Record<string, string | number | boolean | undefined>) => ({ id: 'c', name: 'c', providerId: 'qemu', config });
+	it('is empty for a local cluster', () => {
+		expect(provider.remoteLabel(cluster({ connection: 'local' }))).toBeUndefined();
+		expect(provider.remoteLabel(cluster({}))).toBeUndefined();
+	});
+	it('names the host, with the user when there is one', () => {
+		expect(provider.remoteLabel(cluster({ connection: 'ssh', sshHost: 'lab' }))).toBe('ssh lab');
+		expect(provider.remoteLabel(cluster({ connection: 'ssh', sshHost: 'lab', sshUser: 'me' }))).toBe('ssh me@lab');
+		expect(provider.remoteLabel(cluster({ connection: 'ssh', sshHost: 'me@lab', sshUser: 'me' }))).toBe('ssh me@lab');
+		expect(provider.remoteLabel(cluster({ sshHost: 'old' }))).toBe('ssh old');
+	});
+});

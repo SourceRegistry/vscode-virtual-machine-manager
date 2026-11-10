@@ -243,6 +243,13 @@ export class QemuProvider implements HypervisorProvider {
 		return 'Local (QEMU)';
 	}
 
+	remoteLabel(cluster: ClusterConfig): string | undefined {
+		if (!isRemote(cluster)) return undefined;
+		const name = String(cluster.config.sshHost ?? '').trim();
+		const user = String(cluster.config.sshUser ?? '').trim();
+		return `ssh ${user && !name.includes('@') ? `${user}@` : ''}${name || '…'}`;
+	}
+
 	async testConnection(cluster: ClusterConfig, secrets: SecretBag = {}): Promise<void> {
 		const host = this.hostFor(cluster, secrets);
 		try {

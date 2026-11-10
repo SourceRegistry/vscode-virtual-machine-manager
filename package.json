@@ -248,6 +248,12 @@
         "icon": "$(trash)"
       },
       {
+        "command": "vmm.detachVm",
+        "title": "Detach",
+        "category": "VM",
+        "icon": "$(debug-disconnect)"
+      },
+      {
         "command": "vmm.start",
         "title": "Start",
         "category": "VM",
@@ -440,6 +446,10 @@
         },
         {
           "command": "vmm.deleteVm",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.detachVm",
           "when": "vmm.hasVms"
         },
         {
@@ -726,6 +736,11 @@
           "group": "3_manage@3"
         },
         {
+          "command": "vmm.detachVm",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdetach;/",
+          "group": "3_manage@3"
+        },
+        {
           "command": "vmm.copyId",
           "when": "view == vmm.clusters && viewItem =~ /^vm;/",
           "group": "9_copy@1"
@@ -907,6 +922,11 @@
         {
           "command": "vmm.deleteVm",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bdelete;/",
+          "group": "3_manage@3"
+        },
+        {
+          "command": "vmm.detachVm",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bdetach;/",
           "group": "3_manage@3"
         },
         {

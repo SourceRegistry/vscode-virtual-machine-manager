@@ -17,6 +17,7 @@ import { errorMessage, log, showError } from '../util/log';
 import * as snapshotFlow from '../snapshots/flow';
 import { addSshForward, addToSshConfig, connectSsh, removeFromSshConfig } from '../ssh/connect';
 import { deleteVmDetail } from '../../shared/deleteDetail';
+import { withDelayedProgress } from '../util/progress';
 import { matchesQuery } from '../../shared/vmSearch';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
 
@@ -146,7 +147,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	async function resolveNode(arg: Arg, capability: 'create' | 'adopt' | 'importFolder' = 'create'): Promise<{ clusterId: string; nodeId: string } | undefined> {
 		const ref = asNodeRef(arg);
 		if (ref) return ref;
-		await loadAll();
+		await withDelayedProgress('Connecting to clusters…', () => loadAll());
 		const clusterFilter = asClusterId(arg);
 		const nodes = manager
 			.clusters()
@@ -536,9 +537,10 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		const nodeRef = await resolveNode(arg, 'adopt');
 		if (!nodeRef) return;
 		try {
-			const connection = await manager.connect(nodeRef.clusterId);
+			const clusterName = manager.clusters().find((c) => c.cluster.id === nodeRef.clusterId)?.cluster.name ?? 'the cluster';
+			const connection = await withDelayedProgress(`Connecting to ${clusterName}…`, () => manager.connect(nodeRef.clusterId));
 			if (!connection.scanExternalVms || !connection.adoptExternalVm) return;
-			const found = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Looking for running virtual machines…' }, () =>
+			const found = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Looking for running virtual machines on ${clusterName}…` }, () =>
 				connection.scanExternalVms!(nodeRef.nodeId)
 			);
 			if (!found.length) {
@@ -558,13 +560,18 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			if (!picked?.length) return;
 			const warnings: string[] = [];
 			let last: VmInfo | undefined;
-			for (const item of picked) {
-				const result = await connection.adoptExternalVm(nodeRef.nodeId, item.id);
-				last = result.vm;
-				if (result.warning) warnings.push(result.warning);
-			}
-			await manager.refresh(nodeRef.clusterId);
-			if (last) await tree.reveal({ kind: 'vm', ...nodeRef, vmId: last.id }).then(undefined, () => undefined);
+			// Attaching talks to each machine's control channel (over ssh on a remote host): say so while it runs.
+			await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: picked.length === 1 ? `Attaching to ${picked[0]!.label}…` : `Attaching to ${picked.length} virtual machines…` }, async (progress) => {
+				for (const [index, item] of picked.entries()) {
+					if (picked.length > 1) progress.report({ message: `${item.label} (${index + 1} of ${picked.length})`, increment: 100 / picked.length });
+					const result = await connection.adoptExternalVm!(nodeRef.nodeId, item.id);
+					last = result.vm;
+					if (result.warning) warnings.push(result.warning);
+				}
+				progress.report({ message: 'Updating the list…' });
+				await manager.refresh(nodeRef.clusterId);
+			});
+			if (last) await tree.reveal({ kind: 'vm', ...nodeRef, vmId: (last as VmInfo).id }).then(undefined, () => undefined);
 			const summary = picked.length === 1 && last ? `Attached to ${last.name}.` : `Attached to ${picked.length} virtual machines.`;
 			// One VM: offer its display / serial console right away, when the process exposes them.
 			const offered = picked.length === 1 && last ? (last.consoles ?? []) : [];
@@ -626,24 +633,31 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		consoles.closeFor(ref);
 	}
 
+	/** Stops tracking an attached VM. The process and its disks are not touched. */
+	async function detachFrom(location: VmLocation): Promise<void> {
+		const detach = await vscode.window.showWarningMessage(`Detach from "${location.vm.name}"?`, { modal: true, detail: 'The virtual machine keeps running; it is only removed from this list. You can attach to it again.' }, 'Detach');
+		if (!detach) return;
+		try {
+			const connection = await manager.connect(location.ref.clusterId);
+			await connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: false });
+			manager.forgetVm(location.ref);
+			closeViews(location.ref);
+			await manager.refresh(location.ref.clusterId);
+			void vscode.window.setStatusBarMessage(`Detached from ${location.vm.name}`, 4000);
+		} catch (error) {
+			await showError(`Could not detach from ${location.vm.name}`, error);
+		}
+	}
+
+	async function detachVm(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select the attached virtual machine to detach from', (l) => l.vm.origin === 'adopted');
+		if (location) await detachFrom(location);
+	}
+
 	async function deleteVm(arg: Arg): Promise<void> {
 		const location = await resolveVm(arg, 'Select the virtual machine to delete');
 		if (!location) return;
-		if (location.vm.origin === 'adopted') {
-			// Detaching never touches the process or its disks.
-			const detach = await vscode.window.showWarningMessage(`Stop tracking "${location.vm.name}"?`, { modal: true, detail: 'The virtual machine keeps running; it is only removed from this list. You can attach to it again.' }, 'Detach');
-			if (!detach) return;
-			try {
-				const connection = await manager.connect(location.ref.clusterId);
-				await connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: false });
-				manager.forgetVm(location.ref);
-				closeViews(location.ref);
-				await manager.refresh(location.ref.clusterId);
-			} catch (error) {
-				await showError(`Could not detach from ${location.vm.name}`, error);
-			}
-			return;
-		}
+		if (location.vm.origin === 'adopted') return detachFrom(location);
 		const snapshots = location.cluster.connection?.capabilities.snapshots ? await snapshotFlow.listSnapshots(manager, location).then((list) => list.length, () => undefined) : undefined;
 		const choice = await vscode.window.showWarningMessage(
 			`Delete virtual machine "${location.vm.name}"?`,
@@ -798,6 +812,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register('vmm.revertSnapshot', (arg) => revertSnapshot(arg)),
 		register('vmm.deleteSnapshot', (arg) => deleteSnapshot(arg)),
 		register('vmm.deleteVm', (arg) => deleteVm(arg)),
+		register('vmm.detachVm', (arg) => detachVm(arg)),
 		register('vmm.start', (arg) => power(arg, 'start')),
 		register('vmm.shutdown', (arg) => power(arg, 'shutdown')),
 		register('vmm.reboot', (arg) => power(arg, 'reboot')),

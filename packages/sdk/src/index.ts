@@ -552,6 +552,12 @@ export interface HypervisorProvider {
 	readonly icon?: string;
 	readonly connectionSchema: FieldSchema[];
 	defaultClusterName?(): string;
+	/**
+	 * Where the machines of this cluster run when that is another computer reached over ssh or the like (`ssh me@lab`),
+	 * from the saved configuration alone, so it can be shown while the cluster is still connecting. `undefined` for
+	 * a provider that is always remote (a server API) or a cluster that is local.
+	 */
+	remoteLabel?(cluster: ClusterConfig): string | undefined;
 	testConnection?(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<void>;
 	connect(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<ClusterConnection>;
 }

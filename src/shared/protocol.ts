@@ -42,6 +42,8 @@ export interface ClusterSnapshot {
 	name: string;
 	providerId: string;
 	providerName: string;
+	/** `ssh me@lab` when the machines run on another computer. */
+	remote?: string;
 	status: ClusterStatus;
 	error?: string;
 	capabilities?: Capabilities;
@@ -103,6 +105,7 @@ export type OverviewCommand =
 	| 'vmm.revertSnapshot'
 	| 'vmm.deleteSnapshot'
 	| 'vmm.deleteVm'
+	| 'vmm.detachVm'
 	| 'vmm.createVm'
 	| 'vmm.attachRunningVm'
 	| 'vmm.importFromFolder'

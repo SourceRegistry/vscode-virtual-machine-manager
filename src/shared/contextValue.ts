@@ -47,7 +47,9 @@ export function vmContextValue(vm: VmInfo & { operation?: PowerAction }, caps: C
 		if (caps.snapshots) flags.push('snapshots');
 		if (caps.clone) flags.push('clone');
 		if (caps.edit) flags.push('edit');
-		if (caps.delete) flags.push('delete');
+		// An attached VM is not ours to delete: it can only be let go.
+		if (vm.origin === 'adopted') flags.push('detach');
+		else if (caps.delete) flags.push('delete');
 	}
 	return `vm;state=${vm.state};${flags.map((f) => `${f};`).join('')}`;
 }

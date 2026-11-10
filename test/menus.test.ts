@@ -90,6 +90,14 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 		expect(commandsFor(menu, vmContextValue(poweringOff, caps))).not.toContain('vmm.stop');
 	});
 
+	it('offers Detach, never Delete, for an attached VM', () => {
+		const attached: VmInfo = { ...vm('running'), origin: 'adopted' };
+		const commands = commandsFor(menu, vmContextValue(attached, caps));
+		expect(commands).toContain('vmm.detachVm');
+		expect(commands).not.toContain('vmm.deleteVm');
+		expect(commandsFor(menu, vmContextValue(vm('running'), caps))).not.toContain('vmm.detachVm');
+	});
+
 	it('only offers actions the provider supports', () => {
 		const limited: Capabilities = { ...caps, power: ['start', 'stop'], consoles: [], preview: false, external: false, edit: false, delete: false };
 		expect(commandsFor(menu, vmContextValue(vm('running'), limited))).toEqual(['vmm.stop', 'vmm.copyId']);

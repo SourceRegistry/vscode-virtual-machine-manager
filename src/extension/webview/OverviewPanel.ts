@@ -20,6 +20,7 @@ const ALLOWED_COMMANDS = new Set<OverviewCommand>([
 	'vmm.ejectMedia',
 	'vmm.changeMedia',
 	'vmm.deleteVm',
+	'vmm.detachVm',
 	'vmm.createVm',
 	'vmm.attachRunningVm',
 	'vmm.importFromFolder',
