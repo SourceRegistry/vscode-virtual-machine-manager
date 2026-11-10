@@ -2,7 +2,7 @@
   "name": "vm-manager-libvirt",
   "displayName": "VM Manager – libvirt",
   "description": "Manage libvirt (KVM/QEMU) domains on this computer or over SSH from VS Code: power, details, consoles and snapshots.",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "publisher": "sourceregistry",
   "icon": "media/icon.png",
   "license": "Apache-2.0",
