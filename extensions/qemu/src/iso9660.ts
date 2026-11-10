@@ -46,7 +46,7 @@ function volumeDate(date: Date): Buffer {
 
 function pad(text: string, length: number, ucs2: boolean): Buffer {
 	if (!ucs2) return Buffer.from(text.slice(0, length).padEnd(length, ' '), 'latin1');
-	const chars = length / 2;
+	const chars = Math.floor(length / 2); // a 37-byte field (file identifiers) ends in one unused byte
 	const b = Buffer.alloc(length);
 	const value = text.slice(0, chars).padEnd(chars, ' ');
 	for (let i = 0; i < chars; i++) b.writeUInt16BE(value.charCodeAt(i), i * 2);

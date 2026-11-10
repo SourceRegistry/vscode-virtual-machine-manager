@@ -202,3 +202,14 @@ describe('ensureImage', () => {
 		}
 	}, 60_000);
 });
+
+// The real catalog against the real mirrors. Opt-in (needs the internet):  VMM_E2E_CATALOG=1
+describe.skipIf(!process.env.VMM_E2E_CATALOG)('the catalog against the real mirrors', () => {
+	it.each(CLOUD_IMAGES.map((i) => [i.id, i] as const))('%s is downloadable and listed in its checksum file', async (_id, image) => {
+		const head = await fetch(image.url, { method: 'HEAD', redirect: 'follow' });
+		expect(head.status, image.url).toBe(200);
+		expect(Number(head.headers.get('content-length'))).toBeGreaterThan(100_000_000);
+		const sums = await (await fetch(image.checksumUrl)).text();
+		expect(parseChecksums(sums, imageFileName(image)), image.checksumUrl).toMatch(image.algorithm === 'sha256' ? /^[0-9a-f]{64}$/ : /^[0-9a-f]{128}$/);
+	}, 60_000);
+});

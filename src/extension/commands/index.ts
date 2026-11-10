@@ -517,7 +517,15 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			if (invalid) throw new Error(invalid.message);
 			const vm = await vscode.window.withProgress(
 				{ location: vscode.ProgressLocation.Notification, title: `Creating ${String(values.name ?? 'virtual machine')}…` },
-				() => connection.createVm(nodeRef.nodeId, values)
+				(progress) => {
+					let shown = 0;
+					return connection.createVm(nodeRef.nodeId, values, (update) => {
+						// The notification wants increments, the provider reports how far along it is.
+						const target = update.fraction === undefined ? shown : Math.max(shown, Math.min(1, update.fraction));
+						progress.report({ message: update.message, increment: (target - shown) * 100 });
+						shown = target;
+					});
+				}
 			);
 			await manager.refresh(nodeRef.clusterId);
 			const ref: VmRef = { ...nodeRef, vmId: vm.id };

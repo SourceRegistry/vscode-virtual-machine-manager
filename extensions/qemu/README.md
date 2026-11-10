@@ -7,6 +7,7 @@ Create and run QEMU virtual machines from VS Code on Windows, Linux and macOS.
 
 * **Create** VMs with a qcow2 disk, ISO, UEFI or BIOS firmware, SATA or VirtIO disks and several
   network and display adapters.
+* **Create from a cloud image** (cloud-init): pick Debian 13 / 12 or Ubuntu 24.04 / 22.04 LTS for x86-64 or ARM64 (or a disk image file of your own), choose a user, an SSH key (filled from `~/.ssh`) and/or a password, and the machine sets itself up on first boot: no installer. The image is downloaded once, verified against the distribution's published SHA-256 / SHA-512 checksum, resumed if interrupted and kept in the image directory (on the host, for an SSH host). The user gets passwordless sudo, the disk is grown to the size you chose, and the guest agent is installed so the IP address and clean shutdown work. A password is stored only as a hash. The cloud-init disk is built by the extension itself (no `genisoimage` or similar) and stays attached as the CD drive.
 * **x86-64 and ARM64 guests.** New VMs default to your computer's architecture, so an Apple Silicon
   Mac or an ARM64 Linux machine runs ARM64 guests at native speed. The other architecture is
   emulated, which is typically 10 to 50 times slower; the create form and the VM list say so.

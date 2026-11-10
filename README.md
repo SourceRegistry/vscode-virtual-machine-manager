@@ -109,6 +109,7 @@ QEMU only, through the QEMU provider:
 | Host device passthrough | PCI (DDA), experimental | USB; PCI (VFIO, Linux), experimental | |
 | Snapshots | | disks only (qcow2) | |
 | Clone | | ✓ | |
+| Create from a cloud image (cloud-init) | | ✓ | |
 | Connect with Remote-SSH | via address | via forward or address | via address |
 | Run on a remote host | | over SSH (Linux hosts) | server API |
 

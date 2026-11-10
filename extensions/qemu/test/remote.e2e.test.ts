@@ -102,6 +102,25 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider on an SSH host', () =>
 		expect(fs.existsSync(path.join(dir, 'remote vms', clone.id))).toBe(false);
 	}, 90_000);
 
+	it('creates a machine from a cloud image file on the host, with the seed disk written there', async () => {
+		const base = path.join(dir, 'base-image.qcow2');
+		execFileSync('qemu-img', ['create', '-f', 'qcow2', base, '64M']);
+		const progress: string[] = [];
+		const vm = await connection.createVm('local', { name: 'remote-cloud', source: 'cloud', cloudImage: 'custom', cloudImageFile: base, cpus: 1, memoryMB: 256, diskGB: 1, ciUser: 'tester', ciPassword: 'pw', ciSshKey: '', serial: false }, (u) => u.message && progress.push(u.message));
+		const vmDir = path.join(dir, 'remote vms', vm.id);
+		expect(fs.existsSync(path.join(vmDir, 'disk0.qcow2'))).toBe(true);
+		const seed = path.join(vmDir, 'seed.iso');
+		// The bytes crossed a text channel as base64: they must still be an ISO that names the volume cidata.
+		const iso = fs.readFileSync(seed);
+		expect(iso.subarray(16 * 2048 + 1, 16 * 2048 + 6).toString()).toBe('CD001');
+		expect(iso.subarray(16 * 2048 + 40, 16 * 2048 + 46).toString()).toBe('cidata');
+		expect(iso.toString('latin1')).toContain('instance-id');
+		expect(progress.at(-1)).toBe('Done');
+		const details = await connection.getVmDetails!('local', vm.id);
+		expect(details.disks.find((d) => d.kind === 'cdrom')?.path).toBe(seed);
+		await connection.deleteVm('local', vm.id, { deleteDisks: true });
+	}, 60_000);
+
 	describe.skipIf(process.platform === 'win32')('QEMU started outside the extension, on the host', () => {
 		const children: Array<ReturnType<typeof spawn>> = [];
 		afterAll(() => children.forEach((c) => c.kill('SIGKILL')));

@@ -59,6 +59,13 @@ export type FieldType =
 	/** A host to reach with ssh: picked from the user's ssh config, or typed as `user@host`. */
 	| 'sshHost';
 
+/** What a provider says while it creates a VM. */
+export interface CreateProgress {
+	message?: string;
+	/** 0..1 of the whole creation, when known. */
+	fraction?: number;
+}
+
 export type FieldValue = string | number | boolean | undefined;
 export type FieldValues = Record<string, FieldValue>;
 
@@ -491,7 +498,8 @@ export interface ClusterConnection extends Disposable {
 	listNodes(): Promise<NodeInfo[]>;
 	listVms(nodeId: string): Promise<VmInfo[]>;
 	getCreateSchema(nodeId: string): Promise<FieldSchema[]>;
-	createVm(nodeId: string, values: FieldValues): Promise<VmInfo>;
+	/** `progress` reports long steps (a download): a message and how far along, 0..1, when known. */
+	createVm(nodeId: string, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo>;
 	getVmConfig(nodeId: string, vmId: string): Promise<VmConfig>;
 	updateVm(nodeId: string, vmId: string, values: FieldValues): Promise<void>;
 	deleteVm(nodeId: string, vmId: string, options: DeleteOptions): Promise<void>;

@@ -34,6 +34,8 @@ export interface VmDefinition {
 	serial: boolean;
 	extraArgs?: string;
 	notes?: string;
+	/** Set up by cloud-init from a seed disk (`cdrom`) when it was created: who to sign in as, for the user's reference. */
+	cloudInit?: { user: string; hostname: string; image?: string };
 	/** Set when the VM was not created here: see `VmInfo.origin`. */
 	origin?: 'adopted' | 'imported';
 	createdAt: number;

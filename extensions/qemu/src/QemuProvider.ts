@@ -15,6 +15,7 @@ import {
 	type ClusterConnection,
 	type ConsoleKind,
 	type ConsoleStream,
+	type CreateProgress,
 	type DeleteOptions,
 	type DiskStats,
 	type Disposable,
@@ -48,6 +49,10 @@ import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
 import { freeLocalPort, LocalHost, type Host } from './host';
 import { SshHost, validateSshTarget } from './sshHost';
+import { buildIso } from './iso9660';
+import { cloudInitProblem, hostnameFor, metaData, sha512Crypt, userData } from './cloudInit';
+import { ensureImage, findImage, imageFileName } from './images';
+import { cloudFields, parseKeys, SOURCE_ISO } from './provision';
 import { cloneDefinition } from './clone';
 import { commonSnapshots, qmpSnapshots, snapshotNameProblem, type QemuSnapshotInfo, type QmpSnapshotBlock } from './snapshots';
 import { walkFiles } from './hostProcess';
@@ -175,6 +180,14 @@ const CONNECTION_SCHEMA: FieldSchema[] = [
 		placeholder: 'Default'
 	},
 	{
+		key: 'imageDirectory',
+		label: 'Image directory',
+		type: 'directory',
+		remotePath: SSH_ONLY,
+		description: 'Where downloaded cloud images are kept (on the SSH host when one is set). Leave empty to keep them next to the VM storage directory.',
+		placeholder: 'Default'
+	},
+	{
 		key: 'shutdownTimeout',
 		label: 'Shutdown timeout',
 		type: 'number',
@@ -279,7 +292,8 @@ export class QemuProvider implements HypervisorProvider {
 			const timeout = Number(cluster.config.shutdownTimeout);
 			const shutdownTimeoutMs = (Number.isFinite(timeout) && timeout >= 5 ? Math.min(timeout, 600) : 30) * 1000;
 			const info = await host.info();
-			return new QemuConnection(installation, vmDirectory, String(cluster.config.accelerator ?? 'auto'), context.log, shutdownTimeoutMs, host, info.cpus);
+			const imageDirectory = (cluster.config.imageDirectory as string | undefined) || host.path.join(host.path.dirname(vmDirectory), 'images');
+			return new QemuConnection(installation, vmDirectory, String(cluster.config.accelerator ?? 'auto'), context.log, shutdownTimeoutMs, host, info.cpus, imageDirectory);
 		} catch (error) {
 			host.dispose();
 			throw error;
@@ -369,7 +383,8 @@ export class QemuConnection implements ClusterConnection {
 		private readonly log: Logger,
 		private readonly shutdownTimeoutMs = 30_000,
 		private readonly host: Host = new LocalHost(),
-		private readonly cpuCount = os.cpus().length
+		private readonly cpuCount = os.cpus().length,
+		private readonly imageDirectory = host.path.join(host.path.dirname(vmDirectory), 'images')
 	) {
 		// Importing from a folder and PCI/USB passthrough read this computer's own files and devices.
 		this.capabilities = host.remote ? { ...this.baseCapabilities, passthrough: false, importFolder: false, remotePaths: true } : this.baseCapabilities;
@@ -581,6 +596,7 @@ export class QemuConnection implements ClusterConnection {
 
 	async getCreateSchema(): Promise<FieldSchema[]> {
 		const installed = this.installedArchs();
+		const cached = new Set((await this.host.readdir(this.imageDirectory).catch(() => [])).filter((e) => e.name.endsWith('.verified')).map((e) => e.name.slice(0, -'.verified'.length)));
 		const defaultArch = installed.find((a) => this.native(a)) ?? installed[0]!;
 		const archField: FieldSchema[] =
 			installed.length > 1
@@ -590,6 +606,7 @@ export class QemuConnection implements ClusterConnection {
 							label: 'Architecture',
 							type: 'select',
 							required: true,
+							showWhen: SOURCE_ISO,
 							default: defaultArch,
 							options: installed.map((a) => ({ value: a, label: `${ARCH_LABEL[a]}${this.native(a) ? ' — native, full speed' : ' — emulated, much slower'}` })),
 							description: 'A guest of the same architecture as this computer runs with hardware acceleration. Any other is emulated in software, typically 10 to 50 times slower.'
@@ -598,11 +615,23 @@ export class QemuConnection implements ClusterConnection {
 				: [];
 		return [
 			{ key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'my-vm', description: 'Letters, digits, spaces and . _ ( ) -' },
+			{
+				key: 'source',
+				label: 'Set up from',
+				type: 'select',
+				required: true,
+				default: 'iso',
+				options: [
+					{ value: 'iso', label: 'An installer ISO', description: 'Install the operating system yourself' },
+					{ value: 'cloud', label: 'A cloud image (cloud-init)', description: 'Debian or Ubuntu, ready in a minute: no installer' }
+				]
+			},
 			...archField,
 			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: this.cpuCount, default: Math.min(2, this.cpuCount), required: true },
 			{ key: 'memoryMB', label: 'Memory', type: 'number', unit: 'MB', min: 128, default: 2048, required: true },
 			{ key: 'diskGB', label: 'Disk size', type: 'number', unit: 'GB', min: 1, max: 16384, default: 32, required: true },
-			{ key: 'cdrom', label: 'Installation media (ISO)', type: 'file', remotePath: this.host.remote, filters: { 'Disk images': ['iso', 'img'] } },
+			{ key: 'cdrom', label: 'Installation media (ISO)', type: 'file', remotePath: this.host.remote, showWhen: SOURCE_ISO, filters: { 'Disk images': ['iso', 'img'] } },
+			...cloudFields({ installed, remote: this.host.remote, cached }),
 			{
 				key: 'firmware',
 				label: 'Firmware',
@@ -620,12 +649,13 @@ export class QemuConnection implements ClusterConnection {
 		];
 	}
 
-	async createVm(_nodeId: string, values: FieldValues): Promise<VmInfo> {
+	async createVm(_nodeId: string, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo> {
 		const name = String(values.name ?? '').trim();
 		if (!VM_NAME.test(name)) throw new ProviderError('Use 1–64 letters, digits, spaces or . _ ( ) - for the name', 'invalid');
 		if ((await this.definitions()).some((d) => d.name.toLowerCase() === name.toLowerCase())) {
 			throw new ProviderError(`A virtual machine named "${name}" already exists`, 'invalid');
 		}
+		if (values.source === 'cloud') return this.createFromCloudImage(name, values, progress);
 		const installed = this.installedArchs();
 		const arch = (values.arch as Arch | undefined) ?? installed.find((a) => this.native(a)) ?? installed[0]!;
 		const firmwareCode = this.install(arch).firmwareCode;
@@ -666,6 +696,109 @@ export class QemuConnection implements ClusterConnection {
 			if (def.firmware === 'uefi') await this.ensureVars(def);
 			await this.saveDefinition(def);
 			this.log.info(`Created ${name} in ${dir}`);
+			return { id, name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB };
+		} catch (error) {
+			await this.host.rm(dir, { recursive: true });
+			throw error;
+		}
+	}
+
+	/**
+	 * A machine from a cloud image: the image is downloaded (verified, cached) or taken from a file, copied to
+	 * the machine's own qcow2 disk, enlarged, and a cloud-init seed disk with the user, key and host name is
+	 * attached as its CD drive. Nothing is installed by hand: the first boot sets everything up.
+	 */
+	private async createFromCloudImage(name: string, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo> {
+		const choice = String(values.cloudImage ?? '');
+		const image = choice === 'custom' ? undefined : findImage(choice);
+		if (choice !== 'custom' && !image) throw new ProviderError('Choose a cloud image.', 'invalid');
+		const installed = this.installedArchs();
+		const arch: Arch = image?.arch ?? installed.find((a) => this.native(a)) ?? installed[0]!;
+		const firmwareCode = this.install(arch).firmwareCode;
+
+		// Everything that can be wrong is checked before anything is downloaded.
+		const user = String(values.ciUser ?? '').trim();
+		const hostname = String(values.ciHostname ?? '').trim() || hostnameFor(name);
+		const sshKeys = parseKeys(values.ciSshKey as string | undefined);
+		const password = String(values.ciPassword ?? '');
+		const custom = String(values.ciUserData ?? '');
+		const passwordHash = password ? sha512Crypt(password) : undefined;
+		if (!custom.trim()) {
+			const problem = cloudInitProblem({ hostname, user, sshKeys, passwordHash });
+			if (problem) throw new ProviderError(problem, 'invalid');
+		}
+		const customFile = String(values.cloudImageFile ?? '').trim();
+		if (!image) {
+			if (!customFile) throw new ProviderError('Enter the path of the disk image.', 'invalid');
+			if (!(await this.host.exists(customFile))) throw new ProviderError(`Image not found: ${customFile}`, 'invalid');
+		}
+		const hardware = normalizeHardware(arch, { firmware: firmwareCode ? 'uefi' : 'bios', diskBus: 'virtio', nic: 'virtio-net-pci', vga: 'std' });
+		if (hardware.firmware === 'uefi' && !firmwareCode) throw new ProviderError(`UEFI firmware for ${ARCH_LABEL[arch]} was not found next to QEMU.`, 'unavailable');
+
+		const phase = (from: number, to: number) => (p: { phase: string; done?: number; total?: number }) => {
+			const fraction = p.done !== undefined && p.total ? from + ((to - from) * p.done) / p.total : undefined;
+			const text = p.phase === 'download' ? `Downloading ${image!.label}${p.total && p.done !== undefined ? ` — ${Math.round((100 * p.done) / p.total)}%` : ''}` : p.phase === 'verify' ? 'Verifying the checksum' : p.phase === 'checksum' ? 'Checking for the latest image' : 'Using the downloaded image';
+			progress?.({ message: text, fraction });
+		};
+		const source = image ? await ensureImage(this.host, image, this.imageDirectory, { onProgress: phase(0.05, 0.85) }) : customFile;
+
+		const id = randomUUID();
+		const dir = this.dir(id);
+		await this.host.mkdir(dir);
+		try {
+			progress?.({ message: 'Preparing the disk', fraction: 0.88 });
+			const disk = this.host.path.join(dir, 'disk0.qcow2');
+			try {
+				await this.host.exec(this.qemu.img, ['convert', '-O', 'qcow2', source, disk], { timeout: 30 * 60_000 });
+			} catch (error) {
+				const detail = String((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
+				throw new ProviderError(`Could not read the image ${this.host.path.basename(source)}: ${detail}`, 'failed');
+			}
+			// Never shrink an image: the requested size only applies when it is larger.
+			const wanted = Math.max(1, Math.round(Number(values.diskGB ?? 32)));
+			const info = await this.imageInfo(disk);
+			if (!info?.['virtual-size'] || info['virtual-size'] < wanted * 1024 ** 3) {
+				await this.host.exec(this.qemu.img, ['resize', disk, `${wanted}G`], { timeout: 120_000 });
+			}
+
+			progress?.({ message: 'Writing the cloud-init disk', fraction: 0.94 });
+			const seed = this.host.path.join(dir, 'seed.iso');
+			const instanceId = `vmm-${id}`;
+			const options = { hostname, user, sshKeys, passwordHash, installAgent: values.ciAgent !== false, customUserData: custom, instanceId };
+			await this.host.writeBytes(
+				seed,
+				buildIso(
+					[
+						{ name: 'user-data', data: Buffer.from(userData(options), 'utf8') },
+						{ name: 'meta-data', data: Buffer.from(metaData(options), 'utf8') }
+					],
+					{ volumeId: 'cidata' }
+				)
+			);
+
+			const def: VmDefinition = {
+				id,
+				name,
+				arch,
+				cpus: Number(values.cpus ?? 2),
+				memoryMB: Number(values.memoryMB ?? 2048),
+				cpuModel: 'max',
+				firmware: hardware.firmware,
+				disks: [disk],
+				diskBus: hardware.diskBus,
+				cdrom: seed,
+				nic: hardware.nic,
+				mac: randomMac(),
+				vga: hardware.vga,
+				serial: values.serial !== false,
+				notes: `Set up by cloud-init from ${image ? image.label : this.host.path.basename(source)}. ${custom.trim() ? 'Custom user-data.' : `Sign in as ${user}.`}`,
+				cloudInit: { user: custom.trim() ? '' : user, hostname, image: image?.id },
+				createdAt: Date.now()
+			};
+			if (def.firmware === 'uefi') await this.ensureVars(def);
+			await this.saveDefinition(def);
+			progress?.({ message: 'Done', fraction: 1 });
+			this.log.info(`Created ${name} from ${image ? imageFileName(image) : source} in ${dir}`);
 			return { id, name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB };
 		} catch (error) {
 			await this.host.rm(dir, { recursive: true });
