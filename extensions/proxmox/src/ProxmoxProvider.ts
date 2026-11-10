@@ -7,7 +7,7 @@ import { tokenTerminal } from './terminal';
 import { agentAddresses, allAddresses, containerAddresses, diskDevices, hostDevices, mergeAddresses, nicDevices } from './inventory';
 import { openIdLogin, qualifiedUser, type SessionStore, type SessionUi } from './session';
 
-import { ProviderError, validateValues, type Capabilities, type ClusterConfig, type ProviderContext, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type VmDetails, type SecretBag, type VmInfo } from '@vmm/sdk';
+import { ProviderError, validateValues, type Capabilities, type ClusterConfig, type ProviderContext, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions, type FieldSchema, type FieldValues, type HypervisorProvider, type PowerAction, type Snapshot, type VmDetails, type SecretBag, type VmInfo } from '@vmm/sdk';
 
 /** Whether the VM has a graphical display: `vga` is `serialN` (terminal as display) or `none` otherwise absent. */
 export function hasDisplay(config: object): boolean {
@@ -181,7 +181,7 @@ export function consoleUrl(baseUrl: string, node: string, id: string, container:
 }
 
 export class ProxmoxConnection implements ClusterConnection {
-	readonly capabilities: Capabilities = { details: true, create: true, edit: true, delete: true, power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[], consoles: ['vnc', 'serial'] as ConsoleKind[], preview: false, external: true, stats: true };
+	readonly capabilities: Capabilities = { details: true, create: true, edit: true, delete: true, power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[], consoles: ['vnc', 'serial'] as ConsoleKind[], preview: false, external: true, stats: true, snapshots: true, clone: true, templates: true };
 	private readonly abort = new AbortController();
 	private readonly consoles = new Set<ConsoleStream>();
 	private readonly containers = new Set<string>();
@@ -194,8 +194,8 @@ export class ProxmoxConnection implements ClusterConnection {
 		if (!/^\d+$/.test(id) || Number(id) < 100) throw new ProviderError('Invalid Proxmox VM ID.', 'invalid');
 		return this.client.api.nodes.get(node).qemu.vmid(Number(id));
 	}
-	private async task(node: string, upid: string): Promise<void> {
-		const deadline = Date.now() + 120_000;
+	private async task(node: string, upid: string, timeoutMs = 120_000): Promise<void> {
+		const deadline = Date.now() + timeoutMs;
 		while (Date.now() < deadline) {
 			this.abort.signal.throwIfAborted();
 			const status = await this.client.request('/nodes/{node}/tasks/{upid}/status', 'GET', { $path: { node, upid } }, { signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(30_000)]) });
@@ -236,12 +236,12 @@ export class ProxmoxConnection implements ClusterConnection {
 		for (const key of this.containers) if (key.startsWith(`${node}/`)) this.containers.delete(key);
 		for (const guest of containers) this.containers.add(`${node}/${guest.vmid}`);
 		return Promise.all([...vms.map((v) => ({ ...v, container: false })), ...containers.map((v) => ({ ...v, container: true }))]
-			.filter((v) => !v.template).map(async (v): Promise<VmInfo> => {
+			.map(async (v): Promise<VmInfo> => {
 				const config = v.container ? undefined : await api.qemu.vmid(v.vmid).config.get().then((c) => c as object, () => undefined);
 				const guestConfig = v.container ? await api.lxc.id(v.vmid).config.get().then((c) => c as object, () => undefined) : config;
 				const macs = macAddresses(guestConfig);
 				const addresses = v.status === 'running' ? allAddresses(await this.guestAddresses(node, String(v.vmid), v.container, guestConfig)) : [];
-				return ({ id: String(v.vmid), displayId: String(v.vmid), ...(macs.length ? { macAddresses: macs } : {}), ...(addresses.length ? { ipAddresses: addresses } : {}), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
+				return ({ id: String(v.vmid), displayId: String(v.vmid), ...(macs.length ? { macAddresses: macs } : {}), ...(addresses.length ? { ipAddresses: addresses } : {}), name: v.name || `Guest ${v.vmid}`, state: v.status === 'running' ? 'running' : v.status === 'stopped' ? 'stopped' : 'unknown', ...(v.template ? { template: true } : {}), cpus: v.cpus, memoryMB: v.maxmem === undefined ? undefined : v.maxmem / 1048576, uptimeSeconds: v.uptime, consoles: proxmoxConsoles(v.container, config), ...(v.container ? { description: 'LXC container' } : {}) });
 			}));
 	}
 	async getVmDetails(node: string, id: string): Promise<VmDetails> {
@@ -292,6 +292,51 @@ export class ProxmoxConnection implements ClusterConnection {
 		this.vm(node, id);
 		const upid = this.isContainer(node, id) ? await this.container(node, id).destroy() : await this.client.request('/nodes/{node}/qemu/{vmid}', 'DELETE', { $path: { node, vmid: Number(id) } });
 		await this.task(node, upid);
+	}
+	/** `/nodes/{node}/qemu/{vmid}` or `/lxc/{vmid}`: snapshots, clone and template work the same way on both. */
+	private guestPath(node: string, id: string): { kind: 'qemu' | 'lxc'; node: string; vmid: number } {
+		this.vm(node, id);
+		return { kind: this.isContainer(node, id) ? 'lxc' : 'qemu', node, vmid: Number(id) };
+	}
+	private call<T>(path: string, method: 'GET' | 'POST' | 'DELETE', guest: { kind: string; node: string; vmid: number }, body?: object, extra: Record<string, string> = {}): Promise<T> {
+		const request = this.client.request as unknown as (path: string, method: string, args: object, options?: object) => Promise<T>;
+		return request.call(this.client, `/nodes/{node}/${guest.kind}/{vmid}${path}`, method, { $path: { node: guest.node, vmid: guest.vmid, ...extra }, ...(body ? { $body: body } : {}) });
+	}
+	async listSnapshots(node: string, id: string): Promise<Snapshot[]> {
+		const guest = this.guestPath(node, id);
+		const list = await this.call<{ name: string; description?: string; snaptime?: number; vmstate?: boolean | number }[]>('/snapshot', 'GET', guest);
+		// Proxmox lists the running state as a pseudo snapshot called `current`.
+		return list.filter((s) => s.name !== 'current').sort((a, b) => (a.snaptime ?? 0) - (b.snaptime ?? 0))
+			.map((s) => ({ id: s.name, name: s.name, ...(s.snaptime ? { createdAt: s.snaptime * 1000 } : {}), includesMemory: !!s.vmstate }));
+	}
+	async createSnapshot(node: string, id: string, name: string): Promise<Snapshot> {
+		if (!/^[A-Za-z][\w-]{1,39}$/.test(name)) throw new ProviderError('A snapshot name starts with a letter, has 2 to 40 letters, digits, "-" or "_" and no spaces.', 'invalid');
+		const guest = this.guestPath(node, id);
+		await this.task(node, await this.call<string>('/snapshot', 'POST', guest, { snapname: name }), 600_000);
+		return (await this.listSnapshots(node, id)).find((s) => s.id === name) ?? { id: name, name, includesMemory: false };
+	}
+	async revertSnapshot(node: string, id: string, snapshotId: string): Promise<void> {
+		const guest = this.guestPath(node, id);
+		await this.task(node, await this.call<string>('/snapshot/{snapname}/rollback', 'POST', guest, undefined, { snapname: snapshotId }), 600_000);
+	}
+	async deleteSnapshot(node: string, id: string, snapshotId: string): Promise<void> {
+		const guest = this.guestPath(node, id);
+		await this.task(node, await this.call<string>('/snapshot/{snapname}', 'DELETE', guest, undefined, { snapname: snapshotId }), 600_000);
+	}
+	async cloneVm(node: string, id: string, name: string): Promise<VmInfo> {
+		if (!/^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(name)) throw new ProviderError('A machine name uses letters, digits, "-" and "." only (a DNS name).', 'invalid');
+		const guest = this.guestPath(node, id);
+		const newid = Number(await this.client.api.cluster.nextid());
+		// A full clone has its own disks, as `cloneVm` promises; Proxmox would otherwise link to the template.
+		await this.task(node, await this.call<string>('/clone', 'POST', guest, { newid, full: 1, ...(guest.kind === 'lxc' ? { hostname: name } : { name }) }), 3_600_000);
+		const vm = (await this.listVms(node)).find((v) => v.id === String(newid));
+		if (!vm) throw new ProviderError(`VM ${newid} was cloned but could not be read. Refresh the cluster.`);
+		return vm;
+	}
+	async setTemplate(node: string, id: string, template: boolean): Promise<void> {
+		if (!template) throw new ProviderError('Proxmox cannot turn a template back into a VM. Clone it into a new machine instead.', 'unsupported');
+		const guest = this.guestPath(node, id);
+		await this.task(node, await this.call<string>('/template', 'POST', guest, {}), 600_000);
 	}
 	async power(node: string, id: string, action: PowerAction): Promise<void> {
 		if (this.isContainer(node, id)) {

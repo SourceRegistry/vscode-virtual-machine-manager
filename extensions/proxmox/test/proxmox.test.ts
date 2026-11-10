@@ -42,6 +42,54 @@ describe('Proxmox console choice', () => {
 	});
 });
 
+describe('Proxmox snapshots, clone and templates', () => {
+	it('declares the capabilities', () => {
+		expect(fixture().connection.capabilities).toMatchObject({ snapshots: true, clone: true, templates: true });
+	});
+	it('lists snapshots oldest first without the current pseudo snapshot', async () => {
+		const { connection, request } = fixture();
+		request.mockResolvedValueOnce([{ name: 'b', snaptime: 200, vmstate: 1 }, { name: 'current' }, { name: 'a', snaptime: 100 }]);
+		expect(await connection.listSnapshots('pve', '100')).toEqual([{ id: 'a', name: 'a', createdAt: 100_000, includesMemory: false }, { id: 'b', name: 'b', createdAt: 200_000, includesMemory: true }]);
+		expect(request).toHaveBeenCalledWith('/nodes/{node}/qemu/{vmid}/snapshot', 'GET', { $path: { node: 'pve', vmid: 100 } });
+	});
+	it('creates, reverts and deletes through the task queue', async () => {
+		const { connection, request } = fixture();
+		request.mockResolvedValueOnce('UPID:snap').mockResolvedValueOnce({ status: 'stopped', exitstatus: 'OK' }).mockResolvedValueOnce([{ name: 'before', snaptime: 5 }]);
+		expect(await connection.createSnapshot('pve', '100', 'before')).toMatchObject({ id: 'before', createdAt: 5000 });
+		expect(request).toHaveBeenCalledWith('/nodes/{node}/qemu/{vmid}/snapshot', 'POST', { $path: { node: 'pve', vmid: 100 }, $body: { snapname: 'before' } });
+		request.mockClear();
+		request.mockResolvedValueOnce('UPID:rb');
+		await connection.revertSnapshot('pve', '100', 'before');
+		expect(request).toHaveBeenCalledWith('/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback', 'POST', { $path: { node: 'pve', vmid: 100, snapname: 'before' } });
+		request.mockClear();
+		request.mockResolvedValueOnce('UPID:del');
+		await connection.deleteSnapshot('pve', '100', 'before');
+		expect(request).toHaveBeenCalledWith('/nodes/{node}/qemu/{vmid}/snapshot/{snapname}', 'DELETE', { $path: { node: 'pve', vmid: 100, snapname: 'before' } });
+	});
+	it('rejects names Proxmox would refuse, before calling it', async () => {
+		const { connection, request } = fixture();
+		for (const name of ['1abc', 'a b', 'a', 'x'.repeat(41), 'a/b']) await expect(connection.createSnapshot('pve', '100', name)).rejects.toThrow(/snapshot name/);
+		expect(request).not.toHaveBeenCalled();
+	});
+	it('clones as a full copy under a new id', async () => {
+		const { connection, request, client } = fixture();
+		client.api.cluster.nextid.mockResolvedValue('102');
+		request.mockResolvedValueOnce('UPID:clone').mockResolvedValueOnce({ status: 'stopped', exitstatus: 'OK' });
+		const qemu = client.api.nodes.get().qemu;
+		qemu.list.mockResolvedValue([{ vmid: 102, name: 'copy', status: 'stopped' }]);
+		expect(await connection.cloneVm('pve', '100', 'copy')).toMatchObject({ id: '102', name: 'copy' });
+		expect(request).toHaveBeenCalledWith('/nodes/{node}/qemu/{vmid}/clone', 'POST', { $path: { node: 'pve', vmid: 100 }, $body: { newid: 102, full: 1, name: 'copy' } });
+		await expect(connection.cloneVm('pve', '100', 'bad name')).rejects.toThrow(/machine name/);
+	});
+	it('converts to a template, but not back', async () => {
+		const { connection, request } = fixture();
+		request.mockResolvedValueOnce('UPID:tpl');
+		await connection.setTemplate('pve', '100', true);
+		expect(request).toHaveBeenCalledWith('/nodes/{node}/qemu/{vmid}/template', 'POST', { $path: { node: 'pve', vmid: 100 }, $body: {} });
+		await expect(connection.setTemplate('pve', '100', false)).rejects.toThrow(/back into a VM/);
+	});
+});
+
 describe('Proxmox provider', () => {
 	it('validates HTTPS origins and API credentials', () => {
 		expect(connectionOptions(cluster, { tokenSecret: 'secret' })).toMatchObject({ verifyTls: true, apiToken: 'user@pve!vscode=secret' });
@@ -49,10 +97,10 @@ describe('Proxmox provider', () => {
 		for (const endpoint of ['http://pve.test', 'https://user:pass@pve.test', 'https://pve.test/api2/json', 'invalid']) expect(() => connectionOptions({ ...cluster, config: { ...cluster.config, endpoint } }, { tokenSecret: 'secret' })).toThrow();
 		expect(() => connectionOptions(cluster, {})).toThrow();
 	});
-	it('maps nodes and VMs, excluding templates', async () => {
+	it('maps nodes and VMs, marking templates', async () => {
 		const { connection } = fixture();
 		expect(await connection.listNodes()).toMatchObject([{ id: 'pve', status: 'online', memoryMB: 4096, memoryUsedMB: 1 }]);
-		expect(await connection.listVms('pve')).toEqual([{ id: '100', displayId: '100', name: 'test', state: 'running', cpus: undefined, memoryMB: 2048, uptimeSeconds: undefined, consoles: ['vnc'] }]);
+		expect(await connection.listVms('pve')).toEqual([{ id: '100', displayId: '100', name: 'test', state: 'running', cpus: undefined, memoryMB: 2048, uptimeSeconds: undefined, consoles: ['vnc'] }, { id: '101', displayId: '101', name: 'Guest 101', state: 'unknown', template: true, cpus: undefined, memoryMB: undefined, uptimeSeconds: undefined, consoles: ['vnc'] }]);
 	});
 	it('offers the terminal of a QEMU VM only without a display and with a serial socket', async () => {
 		const { connection, config } = fixture();
