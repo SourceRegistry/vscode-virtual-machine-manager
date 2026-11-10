@@ -55,7 +55,9 @@ export type FieldType =
 	| 'checkbox'
 	| 'file'
 	| 'directory'
-	| 'textarea';
+	| 'textarea'
+	/** A host to reach with ssh: picked from the user's ssh config, or typed as `user@host`. */
+	| 'sshHost';
 
 export type FieldValue = string | number | boolean | undefined;
 export type FieldValues = Record<string, FieldValue>;

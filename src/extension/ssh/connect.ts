@@ -45,12 +45,12 @@ function describeProbe(probe: Extract<SshProbe, { ok: false }>, target: SshTarge
 	}
 }
 
-function readSshConfig(file: string): string {
+export function readSshConfig(file: string): string {
 	return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
 }
 
 /** Writes the ssh config. The previous content is kept once as `<file>.vmm.bak`, and a new file is private to the user. */
-function writeSshConfig(file: string, previous: string, next: string): void {
+export function writeSshConfig(file: string, previous: string, next: string): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 	if (previous && !fs.existsSync(`${file}.vmm.bak`)) fs.writeFileSync(`${file}.vmm.bak`, previous, { mode: 0o600 });
 	fs.writeFileSync(file, next, { mode: 0o600 });

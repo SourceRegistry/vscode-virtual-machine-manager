@@ -41,7 +41,7 @@ or set `vmm.qemu.path`.
 
 ## QEMU over SSH
 
-Add a QEMU cluster, choose **Connection: Remote (SSH)** (the other choice is **Local**) and set **SSH host**. VM Manager runs your system `ssh`, so your agent, keys,
+Add a QEMU cluster, choose **Connection: Remote (SSH)** (the other choice is **Local**) and set **SSH host**: a searchable list of the hosts in your `~/.ssh/config` (and files it includes), or type `user@host`. **Add New SSH Host…** at the bottom takes `ssh user@host -p 22` and, after showing the entry, appends it to the config; **Configure SSH Hosts…** opens the file. VM Manager runs your system `ssh`, so your agent, keys,
 `~/.ssh/config` (including `ProxyJump`) and `known_hosts` apply, and no extra software is installed
 on either side. **SSH user**, **SSH port** and **SSH key** are optional. The host needs Linux, a POSIX
 shell, `qemu-system-*` and `qemu-img`, and `sshd` must allow TCP forwarding (the default), because the

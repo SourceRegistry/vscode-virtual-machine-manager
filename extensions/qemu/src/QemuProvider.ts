@@ -107,7 +107,7 @@ const CONNECTION_SCHEMA: FieldSchema[] = [
 	{
 		key: 'sshHost',
 		label: 'SSH host',
-		type: 'text',
+		type: 'sshHost',
 		required: true,
 		showWhen: SSH_ONLY,
 		group: 'Remote host',
@@ -251,9 +251,11 @@ export class QemuProvider implements HypervisorProvider {
 		const name = String(cluster.config.sshHost ?? '').trim();
 		if (!name) throw new ProviderError('Enter the SSH host to connect to.', 'invalid');
 		const port = Number(cluster.config.sshPort);
+		// `user@host` as typed in the picker; an explicit SSH user wins.
+		const at = name.lastIndexOf('@');
 		const target = {
-			host: name,
-			user: String(cluster.config.sshUser ?? '').trim() || undefined,
+			host: at > 0 ? name.slice(at + 1) : name,
+			user: String(cluster.config.sshUser ?? '').trim() || (at > 0 ? name.slice(0, at) : undefined),
 			port: Number.isFinite(port) && port > 0 ? port : undefined,
 			identityFile: String(cluster.config.sshIdentityFile ?? '').trim() || undefined
 		};

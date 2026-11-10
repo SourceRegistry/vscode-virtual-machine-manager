@@ -1,4 +1,7 @@
 import * as vscode from 'vscode';
+import { describeConfigHost, parseUserAtHost, type ConfigHost } from '../../shared/sshConfigHosts';
+import { addSshHost, loadSshConfigHosts, openSshConfig } from '../ssh/hosts';
+import { sshConfigPath } from '../ssh/connect';
 import { isFieldVisible, isRemotePath, validateValue, type FieldSchema, type FieldValue, type FieldValues } from '@vmm/sdk';
 
 /** Returned when the user pressed the back button on the first collected step. */
@@ -180,6 +183,8 @@ async function fieldStep(
 		case 'file':
 		case 'directory':
 			return pathStep(field, current, position, !isRemotePath(field, values));
+		case 'sshHost':
+			return sshHostStep(field, current, position);
 		default:
 			break;
 	}
@@ -199,6 +204,83 @@ async function fieldStep(
 	if (text === undefined || text === BACK) return text;
 	if (field.type === 'number') return { value: text === '' ? undefined : Number(text) };
 	return { value: text === '' ? undefined : text };
+}
+
+type HostChoice = { kind: 'host'; value: string } | { kind: 'add' } | { kind: 'configure' };
+
+/**
+ * Pick a host from the ssh config (searchable), or type `user@host`; "Add New SSH Host…" and "Configure SSH
+ * Hosts…" are at the bottom, as in Remote - SSH. The list reloads when the config is saved.
+ */
+function sshHostStep(field: FieldSchema, current: FieldValue, position: StepPosition): Promise<{ value: FieldValue } | Back | undefined> {
+	return new Promise((resolve) => {
+		const pick = vscode.window.createQuickPick<PickItem<HostChoice>>();
+		pick.title = position.title;
+		pick.step = position.step;
+		pick.totalSteps = position.totalSteps;
+		pick.placeholder = `Select configured SSH host or enter user@host${field.required ? '' : ' (optional)'}`;
+		pick.ignoreFocusOut = true;
+		pick.buttons = position.canGoBack ? [vscode.QuickInputButtons.Back] : [];
+		let hosts: ConfigHost[] = loadSshConfigHosts();
+		let busy = false;
+		let done = false;
+		const disposables: vscode.Disposable[] = [];
+
+		const render = () => {
+			const typed = pick.value.trim();
+			const items: PickItem<HostChoice>[] = [];
+			if (typed && !hosts.some((h) => h.alias === typed) && parseUserAtHost(typed)) {
+				items.push({ label: `$(plug) ${typed}`, description: 'Use as typed', alwaysShow: true, value: { kind: 'host', value: typed } });
+			}
+			for (const host of hosts) items.push({ label: host.alias, description: describeConfigHost(host), value: { kind: 'host', value: host.alias } });
+			items.push({ label: '', kind: vscode.QuickPickItemKind.Separator, value: { kind: 'add' } });
+			items.push({ label: '$(add) Add New SSH Host…', alwaysShow: true, value: { kind: 'add' } });
+			items.push({ label: '$(gear) Configure SSH Hosts…', description: sshConfigPath(), alwaysShow: true, value: { kind: 'configure' } });
+			pick.items = items;
+			const active = current === undefined ? undefined : items.find((i) => i.value.kind === 'host' && i.value.value === String(current));
+			if (active) pick.activeItems = [active];
+		};
+		const finish = (value: { value: FieldValue } | Back | undefined) => {
+			if (done) return;
+			done = true;
+			for (const d of disposables) d.dispose();
+			resolve(value);
+			pick.dispose();
+		};
+		const reload = () => {
+			hosts = loadSshConfigHosts();
+			render();
+		};
+
+		disposables.push(
+			pick.onDidChangeValue(render),
+			pick.onDidTriggerButton((b) => b === vscode.QuickInputButtons.Back && finish(BACK)),
+			pick.onDidHide(() => !busy && finish(undefined)),
+			vscode.workspace.onDidSaveTextDocument(reload),
+			pick.onDidAccept(async () => {
+				const choice = pick.selectedItems[0]?.value;
+				if (!choice) return;
+				if (choice.kind === 'host') return finish({ value: choice.value });
+				if (choice.kind === 'configure') {
+					await openSshConfig().then(undefined, () => undefined);
+					return;
+				}
+				busy = true;
+				try {
+					const added = await addSshHost().catch(() => undefined);
+					if (added) return finish({ value: added });
+				} finally {
+					busy = false;
+				}
+				if (!done) {
+					reload();
+					pick.show();
+				}
+			})
+		);
+		render();
+		pick.show();
+	});
 }
 
 async function pathStep(
