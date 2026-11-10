@@ -136,6 +136,10 @@ export interface Capabilities {
 	snapshots?: boolean;
 	/** `revertSnapshot` needs the VM stopped: the core asks the user to power it off first. */
 	snapshotRevertNeedsStopped?: boolean;
+	/** Implements `cloneVm`. */
+	clone?: boolean;
+	/** `cloneVm` needs the VM stopped: the core tells the user to shut it down first instead of trying. */
+	cloneNeedsStopped?: boolean;
 	/** Implements `getVmDetails` (hardware inventory). */
 	details?: boolean;
 	/** Implements `getVmStats` (live usage counters). */
@@ -486,6 +490,12 @@ export interface ClusterConnection extends Disposable {
 	ejectMedia?(nodeId: string, vmId: string, deviceId: string): Promise<void>;
 	/** Inserts an image into a CD/DVD drive, replacing the current one. */
 	insertMedia?(nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void>;
+	/**
+	 * Makes an independent copy of a VM under a new name (`createVm`'s name rules apply): its own disks, its own
+	 * identity (MAC address), nothing shared with the original. Snapshots, port forwards and passed-through
+	 * host devices are not carried over. Can take minutes for a large disk.
+	 */
+	cloneVm?(nodeId: string, vmId: string, name: string): Promise<VmInfo>;
 	/** Snapshots of a VM, oldest first. */
 	listSnapshots?(nodeId: string, vmId: string): Promise<Snapshot[]>;
 	/**

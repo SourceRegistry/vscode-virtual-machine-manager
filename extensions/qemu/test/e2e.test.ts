@@ -107,6 +107,52 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 		}
 	}, 60_000);
 
+	it('clones a stopped VM into an independent copy, and refuses a running one or a name in use', async () => {
+		const original = await connection.createVm('local', { name: 'e2e-orig', arch: 'x86_64', cpus: 2, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'e1000', serial: false });
+		let copyId: string | undefined;
+		try {
+			const diskOf = async (id: string) => (await connection.getVmDetails!('local', id)).disks.find((d) => d.kind === 'disk')!.path!;
+			const originalDisk = await diskOf(original.id);
+			execFileSync('qemu-io', ['-c', 'write -P 0x5a 0 4k', originalDisk]);
+			await connection.createSnapshot!('local', original.id, 'base');
+			await connection.addPortForward!('local', original.id, { protocol: 'tcp', hostPort: 2299, guestPort: 22 });
+
+			await expect(connection.cloneVm!('local', original.id, 'E2E-ORIG')).rejects.toMatchObject({ code: 'invalid' }); // name in use
+			await expect(connection.cloneVm!('local', original.id, 'bad/name')).rejects.toMatchObject({ code: 'invalid' });
+
+			const copy = await connection.cloneVm!('local', original.id, 'e2e-copy');
+			copyId = copy.id;
+			expect(copy).toMatchObject({ name: 'e2e-copy', state: 'stopped', cpus: 2, memoryMB: 256 });
+			expect((await connection.listVms('local')).map((v) => v.name)).toEqual(expect.arrayContaining(['e2e-orig', 'e2e-copy']));
+
+			// Its own disk, with the original's data but not its snapshots.
+			const copyDisk = await diskOf(copy.id);
+			expect(copyDisk).not.toBe(originalDisk);
+			execFileSync('qemu-io', ['-r', '-c', 'read -P 0x5a 0 4k', copyDisk]);
+			expect(await connection.listSnapshots!('local', copy.id)).toEqual([]);
+			expect((await connection.listSnapshots!('local', original.id)).map((s) => s.name)).toEqual(['base']);
+
+			// Its own identity: new MAC, and no port forwards (the host port would clash).
+			const macOf = async (id: string) => (await connection.getVmDetails!('local', id)).nics[0]?.mac;
+			expect(await macOf(copy.id)).toBeTruthy();
+			expect(await macOf(copy.id)).not.toBe(await macOf(original.id));
+			expect((await connection.getVmDetails!('local', copy.id)).forwards).toEqual([]);
+			expect((await connection.getVmDetails!('local', original.id)).forwards).toHaveLength(1);
+
+			// Independent: writing to the copy leaves the original alone.
+			execFileSync('qemu-io', ['-c', 'write -P 0x77 0 4k', copyDisk]);
+			execFileSync('qemu-io', ['-r', '-c', 'read -P 0x5a 0 4k', originalDisk]);
+
+			// A running VM cannot be cloned.
+			await connection.power('local', original.id, 'start');
+			await new Promise((r) => setTimeout(r, 1500));
+			await expect(connection.cloneVm!('local', original.id, 'e2e-copy-2')).rejects.toMatchObject({ code: 'invalid' });
+			expect((await connection.listVms('local')).map((v) => v.name)).not.toContain('e2e-copy-2');
+		} finally {
+			await connection.power('local', original.id, 'stop').catch(() => undefined);
+		}
+	}, 120_000);
+
 	it('snapshots a stopped and a running VM, refuses to revert a running one, and reverts a stopped one', async () => {
 		const snapVm = await connection.createVm('local', { name: 'e2e-snap', arch: 'x86_64', cpus: 1, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'none', serial: false });
 		const names = async () => (await connection.listSnapshots!('local', snapVm.id)).map((s) => s.name);

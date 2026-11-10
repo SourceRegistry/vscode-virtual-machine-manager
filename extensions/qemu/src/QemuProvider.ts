@@ -44,6 +44,7 @@ import { buildArgs, usableAccelerators, type DiskBus, type Firmware, type NicMod
 import { detectQemu, type ArchInstallation, type QemuInstallation } from './detect';
 import { GuestAgentClient } from './GuestAgent';
 import { QmpClient, type QmpEvent } from './QmpClient';
+import { cloneDefinition } from './clone';
 import { commonSnapshots, qmpSnapshots, snapshotNameProblem, type QemuSnapshotInfo, type QmpSnapshotBlock } from './snapshots';
 import { availableMemoryMB, CpuLoadSampler } from './hostInfo';
 import { listProcesses, processStartedAt, sampleProcess, walkFiles } from './hostProcess';
@@ -214,6 +215,8 @@ export class QemuConnection implements ClusterConnection {
 		media: true,
 		snapshots: true,
 		snapshotRevertNeedsStopped: true,
+		clone: true,
+		cloneNeedsStopped: true,
 		details: true,
 		forwards: true,
 		adopt: true,
@@ -731,6 +734,52 @@ export class QemuConnection implements ClusterConnection {
 	async insertMedia(_nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void> {
 		if (!fs.existsSync(imagePath)) throw new ProviderError(`Image not found: ${imagePath}`, 'invalid');
 		await this.changeMedia(vmId, deviceId, imagePath);
+	}
+
+	async cloneVm(_nodeId: string, vmId: string, name: string): Promise<VmInfo> {
+		name = name.trim();
+		if (!VM_NAME.test(name)) throw new ProviderError('Use 1–64 letters, digits, spaces or . _ ( ) - for the name', 'invalid');
+		if ((await this.definitions()).some((d) => d.name.toLowerCase() === name.toLowerCase())) {
+			throw new ProviderError(`A virtual machine named "${name}" already exists`, 'invalid');
+		}
+		const source = await this.definition(vmId);
+		if (source.origin === 'adopted') {
+			throw new ProviderError('A VM that was attached from outside cannot be cloned. Import it or recreate it here first.', 'unsupported');
+		}
+		// A running guest keeps writing: a copy taken now would be torn.
+		if (await this.runtime(vmId)) throw new ProviderError(`Shut down "${source.name}" before cloning it`, 'invalid');
+		for (const disk of source.disks) {
+			if (!fs.existsSync(disk)) throw new ProviderError(`The disk ${disk} of "${source.name}" was not found`, 'notFound');
+		}
+		const id = randomUUID();
+		const dir = this.dir(id);
+		await fs.promises.mkdir(dir, { recursive: true });
+		try {
+			// `convert` writes a compact qcow2 and leaves the source's internal snapshots behind.
+			const disks: string[] = [];
+			for (let index = 0; index < source.disks.length; index++) {
+				const target = path.join(dir, `disk${index}.qcow2`);
+				try {
+					await execFileAsync(this.qemu.img, ['convert', '-O', 'qcow2', source.disks[index]!, target], { windowsHide: true, timeout: 60 * 60_000 });
+				} catch (error) {
+					const detail = String((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
+					throw new ProviderError(`Could not copy ${path.basename(source.disks[index]!)}: ${detail}`, 'failed');
+				}
+				disks.push(target);
+			}
+			// The UEFI variables (boot entries) travel with the machine.
+			const vars = path.join(this.dir(vmId), 'efivars.fd');
+			if (source.firmware === 'uefi' && fs.existsSync(vars)) await fs.promises.copyFile(vars, path.join(dir, 'efivars.fd'));
+			const def = cloneDefinition(source, { id, name, disks, mac: randomMac(), now: Date.now() });
+			if (def.firmware === 'uefi') await this.ensureVars(def);
+			await this.saveDefinition(def);
+			this.log.info(`Cloned ${source.name} to ${name} in ${dir}`);
+			this.changes.fire({ nodeId: NODE_ID, vmId: id });
+			return { id, name, state: 'stopped', cpus: def.cpus, memoryMB: def.memoryMB };
+		} catch (error) {
+			await fs.promises.rm(dir, { recursive: true, force: true });
+			throw error;
+		}
 	}
 
 	// -----------------------------------------------------------------------------------------
