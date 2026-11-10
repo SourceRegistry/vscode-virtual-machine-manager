@@ -199,7 +199,8 @@ Status: **built** on `feat/remote-ssh-connect`; verified against real QEMU throu
 - [x] Capabilities cut to what works there: no attach, folder import or passthrough
 - [x] Tests: quoting and injection guards, argument building, error explanations, parsers, the host operations through a stand-in ssh (files, detached processes, tunnels, ports), and a real QEMU on the "remote" host: create, start, details, stats, VNC banner and serial through tunnels, media, port forward, snapshot, revert, clone, delete
 - [ ] Manual check against a real remote Linux machine (real sshd, real network latency, host key prompt, jump host)
-- [ ] Not done: password / keyboard-interactive login (needs SSH_ASKPASS plumbing); attach and import on a remote host; passthrough on a remote host; macOS and Windows remote hosts; a remote file browser for ISO paths; a cheaper way to poll many VMs (each poll is a few ssh commands, fine with connection sharing, slower without)
+- [x] The form only asks what the ssh config does not answer (user, port, key); sign-in is agent / key file / password, a key skips the password question and the other way round; a password sits in the keychain and reaches ssh through an `SSH_ASKPASS` helper that answers password prompts only. Verified: question logic, the helper's behaviour; **not** against a real sshd with password login
+- [ ] Not done: key passphrase prompts; attach and import on a remote host; passthrough on a remote host; macOS and Windows remote hosts; a remote file browser for ISO paths; a cheaper way to poll many VMs (each poll is a few ssh commands, fine with connection sharing, slower without)
 
 ## Phase 10: `feat/qemu-arm64`
 

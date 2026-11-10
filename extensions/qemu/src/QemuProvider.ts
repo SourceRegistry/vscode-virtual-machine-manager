@@ -31,6 +31,7 @@ import {
 	type Logger,
 	type NodeInfo,
 	type PortForward,
+	type SecretBag,
 	type Snapshot,
 	type PowerAction,
 	type ProviderContext,
@@ -91,6 +92,10 @@ const VM_NAME = /^[\w .()-]{1,64}$/;
 
 /** Shown only for a remote connection. `default` covers clusters saved before the choice existed. */
 const SSH_ONLY = { key: 'connection', equals: 'ssh', default: 'local' } as const;
+/** The questions the host picker leaves open; clusters saved before it existed ask them all. */
+const ASK_USER = { key: 'sshAskUser', equals: true, default: true } as const;
+const ASK_PORT = { key: 'sshAskPort', equals: true, default: true } as const;
+const ASK_AUTH = { key: 'sshAskAuth', equals: true, default: true } as const;
 
 const CONNECTION_SCHEMA: FieldSchema[] = [
 	{
@@ -114,16 +119,44 @@ const CONNECTION_SCHEMA: FieldSchema[] = [
 		description: 'A host name, an address or an alias of your ~/.ssh/config (jump hosts and keys from there apply).',
 		placeholder: 'lab.example.com'
 	},
-	{ key: 'sshUser', label: 'SSH user', type: 'text', showWhen: SSH_ONLY, group: 'Remote host', description: 'Empty: what your ssh config says, else your user name here.' },
-	{ key: 'sshPort', label: 'SSH port', type: 'number', min: 1, max: 65535, showWhen: SSH_ONLY, group: 'Remote host', description: 'Empty: 22, or what your ssh config says.' },
+	// Set by the host picker: what the ssh config (or user@host) already answers is not asked again.
+	{ key: 'sshAskUser', label: 'Ask for the SSH user', type: 'checkbox', readonly: true, showWhen: SSH_ONLY },
+	{ key: 'sshAskPort', label: 'Ask for the SSH port', type: 'checkbox', readonly: true, showWhen: SSH_ONLY },
+	{ key: 'sshAskAuth', label: 'Ask how to sign in', type: 'checkbox', readonly: true, showWhen: SSH_ONLY },
+	{ key: 'sshUser', label: 'SSH user', type: 'text', showWhen: ASK_USER, group: 'Remote host', description: 'Empty: your user name on this computer.' },
+	{ key: 'sshPort', label: 'SSH port', type: 'number', min: 1, max: 65535, showWhen: ASK_PORT, group: 'Remote host', description: 'Empty: 22.' },
+	{
+		key: 'sshAuth',
+		label: 'Sign in with',
+		type: 'select',
+		default: 'agent',
+		required: true,
+		showWhen: ASK_AUTH,
+		group: 'Remote host',
+		options: [
+			{ value: 'agent', label: 'ssh-agent or default keys', description: 'What ssh finds itself' },
+			{ value: 'key', label: 'A key file', description: 'A private key on this computer' },
+			{ value: 'password', label: 'A password', description: 'Kept in the system keychain' }
+		]
+	},
 	{
 		key: 'sshIdentityFile',
 		label: 'SSH key',
 		type: 'text',
-		showWhen: SSH_ONLY,
+		required: true,
+		showWhen: { key: 'sshAuth', equals: 'key' },
 		group: 'Remote host',
-		description: 'Path of a private key on this computer. Empty: ssh-agent and the keys ssh finds itself. Passwords cannot be typed: use a key.',
-		placeholder: 'Agent or default keys'
+		description: 'Path of a private key on this computer (a key with a passphrase must be in ssh-agent).',
+		placeholder: '~/.ssh/id_ed25519'
+	},
+	{
+		key: 'sshPassword',
+		label: 'SSH password',
+		type: 'password',
+		secret: true,
+		required: true,
+		showWhen: { key: 'sshAuth', equals: 'password' },
+		group: 'Remote host'
 	},
 	{
 		key: 'qemuPath',
@@ -210,8 +243,8 @@ export class QemuProvider implements HypervisorProvider {
 		return 'Local (QEMU)';
 	}
 
-	async testConnection(cluster: ClusterConfig): Promise<void> {
-		const host = this.hostFor(cluster);
+	async testConnection(cluster: ClusterConfig, secrets: SecretBag = {}): Promise<void> {
+		const host = this.hostFor(cluster, secrets);
 		try {
 			await host.ping();
 			await detectQemu(this.qemuPath(cluster), host);
@@ -220,8 +253,8 @@ export class QemuProvider implements HypervisorProvider {
 		}
 	}
 
-	async connect(cluster: ClusterConfig, _secrets: unknown, context: ProviderContext): Promise<ClusterConnection> {
-		const host = this.hostFor(cluster);
+	async connect(cluster: ClusterConfig, secrets: SecretBag, context: ProviderContext): Promise<ClusterConnection> {
+		const host = this.hostFor(cluster, secrets);
 		try {
 			await host.ping();
 			const installation = await detectQemu(this.qemuPath(cluster), host);
@@ -246,22 +279,27 @@ export class QemuProvider implements HypervisorProvider {
 		}
 	}
 
-	private hostFor(cluster: ClusterConfig): Host {
+	private hostFor(cluster: ClusterConfig, secrets: SecretBag): Host {
 		if (!isRemote(cluster)) return new LocalHost();
 		const name = String(cluster.config.sshHost ?? '').trim();
 		if (!name) throw new ProviderError('Enter the SSH host to connect to.', 'invalid');
 		const port = Number(cluster.config.sshPort);
 		// `user@host` as typed in the picker; an explicit SSH user wins.
 		const at = name.lastIndexOf('@');
+		const method = String(cluster.config.sshAuth ?? '');
+		const password = method === 'password' ? secrets.sshPassword : undefined;
+		if (method === 'password' && !password) throw new ProviderError('Enter the SSH password.', 'invalid');
 		const target = {
 			host: at > 0 ? name.slice(at + 1) : name,
 			user: String(cluster.config.sshUser ?? '').trim() || (at > 0 ? name.slice(0, at) : undefined),
 			port: Number.isFinite(port) && port > 0 ? port : undefined,
-			identityFile: String(cluster.config.sshIdentityFile ?? '').trim() || undefined
+			// The key only applies when that is how to sign in (older clusters have a key and no choice).
+			identityFile: method === 'key' || method === '' ? String(cluster.config.sshIdentityFile ?? '').trim() || undefined : undefined,
+			viaPassword: !!password
 		};
 		const problem = validateSshTarget(target);
 		if (problem) throw new ProviderError(problem, 'invalid');
-		return new SshHost(target, this.options.sshCommand ? { command: this.options.sshCommand, anyPlatform: true } : {});
+		return new SshHost(target, { password, ...(this.options.sshCommand ? { command: this.options.sshCommand, anyPlatform: true } : {}) });
 	}
 
 	private qemuPath(cluster: ClusterConfig): string | undefined {

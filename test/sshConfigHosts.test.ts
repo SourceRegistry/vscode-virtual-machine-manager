@@ -42,6 +42,13 @@ Host *
 		expect(parseSshConfig('garbage\n===\n').hosts).toEqual([]);
 	});
 
+	it('reads the key of an entry', () => {
+		expect(parseSshConfig('Host a\n  IdentityFile ~/.ssh/a\n  IdentityFile ~/.ssh/b\nHost b\n  identityfile "/k"\n').hosts).toEqual([
+			{ alias: 'a', identityFile: '~/.ssh/a' },
+			{ alias: 'b', identityFile: '/k' }
+		]);
+	});
+
 	it('finds the VM Manager entries too (they are ordinary hosts)', () => {
 		const { hosts } = parseSshConfig('# BEGIN VM Manager: c/n/v\nHost vmm-web-1a2b\n  HostName 127.0.0.1\n  Port 2222\n  User debian\n# END VM Manager: c/n/v\n');
 		expect(hosts).toEqual([{ alias: 'vmm-web-1a2b', hostName: '127.0.0.1', port: 2222, user: 'debian' }]);

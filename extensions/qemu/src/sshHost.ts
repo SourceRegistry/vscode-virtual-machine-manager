@@ -22,6 +22,8 @@ export interface SshTarget {
 	port?: number;
 	/** Private key file; empty = what the agent and ssh config offer. */
 	identityFile?: string;
+	/** Signed in with a password (given to `SshHost`, never stored here): the messages say so. */
+	viaPassword?: boolean;
 }
 
 const MARKER = '@@VMM@@';
@@ -52,6 +54,8 @@ export function sshLabel(target: SshTarget): string {
 export interface SshArgOptions {
 	/** Directory for the multiplexing socket; undefined = no multiplexing (Windows). */
 	controlDir?: string;
+	/** Sign in with a password handed over through `SSH_ASKPASS`. */
+	password?: boolean;
 }
 
 /**
@@ -59,7 +63,9 @@ export interface SshArgOptions {
  * would hang a background connection, so those fail with a message instead.
  */
 export function sshBaseArgs(target: SshTarget, options: SshArgOptions = {}): string[] {
-	const args = ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3'];
+	// A password needs ssh to ask (for the askpass program, which answers); otherwise nothing may ask.
+	const auth = options.password ? ['-o', 'BatchMode=no', '-o', 'PreferredAuthentications=password,keyboard-interactive', '-o', 'NumberOfPasswordPrompts=1'] : ['-o', 'BatchMode=yes'];
+	const args = ['-T', ...auth, '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3'];
 	if (options.controlDir) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${options.controlDir}/%C`, '-o', 'ControlPersist=300');
 	if (target.port) args.push('-p', String(target.port));
 	if (target.user) args.push('-l', target.user);
@@ -76,6 +82,7 @@ export function explainSshError(stderr: string, target: SshTarget): string {
 			? `The host key of ${where} changed. If that is expected, remove the old key with: ssh-keygen -R ${target.host}`
 			: `${where} is not in your known_hosts. Connect once in a terminal (ssh ${target.host}) to check and accept its host key.`;
 	}
+	if (/Permission denied/i.test(text) && target.viaPassword) return `${where} refused the password (or does not allow password login).`;
 	if (/Permission denied/i.test(text)) return `${where} refused the login (${text.match(/\(([^)]*)\)/)?.[1] ?? 'permission denied'}). VM Manager cannot type a password: use a key, added to ssh-agent if it has a passphrase.`;
 	if (/Could not resolve hostname|Name or service not known|nodename nor servname/i.test(text)) return `The host name ${target.host} could not be resolved.`;
 	if (/Connection refused/i.test(text)) return `${where} refused the connection: is sshd running there?`;
@@ -223,6 +230,8 @@ export interface SshHostOptions {
 	extraArgs?: string[];
 	/** Skip the Linux check (tests run the "remote" commands on the development machine). */
 	anyPlatform?: boolean;
+	/** Sign in with this password. It goes to ssh through the environment of the ssh process only. */
+	password?: string;
 }
 
 export class SshHost implements Host {
@@ -236,6 +245,7 @@ export class SshHost implements Host {
 	private readonly controlDir: string | undefined;
 	private cpuBefore: CpuTimes | undefined;
 	private readonly anyPlatform: boolean;
+	private readonly env: NodeJS.ProcessEnv | undefined;
 
 	constructor(
 		private readonly target: SshTarget,
@@ -247,7 +257,8 @@ export class SshHost implements Host {
 		this.command = options.command ?? 'ssh';
 		this.anyPlatform = !!options.anyPlatform;
 		this.controlDir = process.platform === 'win32' ? undefined : controlDirectory();
-		this.base = [...sshBaseArgs(target, { controlDir: this.controlDir }), ...(options.extraArgs ?? [])];
+		this.base = [...sshBaseArgs(target, { controlDir: this.controlDir, password: !!options.password }), ...(options.extraArgs ?? [])];
+		this.env = options.password ? { ...process.env, SSH_ASKPASS: askpassProgram(), SSH_ASKPASS_REQUIRE: 'force', DISPLAY: process.env.DISPLAY || ':0', VMM_SSH_PASSWORD: options.password } : undefined;
 	}
 
 	/** Connects, checks that this is a Linux host and learns its architecture. */
@@ -261,7 +272,7 @@ export class SshHost implements Host {
 
 	private run(command: string, options: ExecOptions = {}): Promise<RunResult> {
 		return new Promise((resolve, reject) => {
-			const child = spawn(this.command, [...this.base, this.target.host, command], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+			const child = spawn(this.command, [...this.base, this.target.host, command], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env });
 			let stdout = '';
 			let stderr = '';
 			const timer = options.timeout
@@ -361,7 +372,7 @@ export class SshHost implements Host {
 	}
 
 	async connect(port: number, address = '127.0.0.1'): Promise<Duplex> {
-		const child = spawn(this.command, [...this.base, '-W', `${address}:${port}`, this.target.host], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+		const child = spawn(this.command, [...this.base, '-W', `${address}:${port}`, this.target.host], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env });
 		const stream = new SshStream(child, this.target);
 		// `-W` has no "connected" signal: it either dies within moments or stays. Wait for the first
 		// byte (VNC and QMP greet), a failure, or a short quiet period (a serial port says nothing).
@@ -431,7 +442,7 @@ export class SshHost implements Host {
 	dispose(): void {
 		if (!this.controlDir) return;
 		// Close the shared connection now instead of after ControlPersist.
-		spawn(this.command, [...this.base, '-O', 'exit', this.target.host], { stdio: 'ignore', windowsHide: true }).once('error', () => undefined);
+		spawn(this.command, [...this.base, '-O', 'exit', this.target.host], { stdio: 'ignore', windowsHide: true, env: this.env }).once('error', () => undefined);
 	}
 }
 
@@ -454,3 +465,24 @@ function controlDirectory(): string | undefined {
 }
 
 export { sleepMs };
+
+/**
+ * The program ssh runs to get the password (`SSH_ASKPASS`). It answers password prompts from the
+ * environment and refuses anything else (a host key question), so a surprise never gets the password
+ * as an answer. Written once to the private directory, with no secret in it.
+ */
+export function askpassProgram(): string {
+	const windows = process.platform === 'win32';
+	const dir = controlDirectory() ?? os.tmpdir();
+	const file = path.join(dir, windows ? 'vmm-askpass.cmd' : 'vmm-askpass.sh');
+	const content = windows
+		? '@echo off\r\necho %VMM_SSH_PASSWORD%\r\n'
+		: '#!/bin/sh\ncase "$1" in\n  *[Pp]assword*|*[Pp]assphrase*) printf \'%s\\n\' "$VMM_SSH_PASSWORD" ;;\n  *) exit 1 ;;\nesac\n';
+	try {
+		if (fs.readFileSync(file, 'utf8') === content) return file;
+	} catch {
+		// not written yet
+	}
+	fs.writeFileSync(file, content, { mode: 0o700 });
+	return file;
+}

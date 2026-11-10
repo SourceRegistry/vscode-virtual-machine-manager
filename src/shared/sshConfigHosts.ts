@@ -5,6 +5,7 @@ export interface ConfigHost {
 	hostName?: string;
 	user?: string;
 	port?: number;
+	identityFile?: string;
 }
 
 export interface ParsedSshConfig {
@@ -51,6 +52,8 @@ export function parseSshConfig(text: string): ParsedSshConfig {
 			for (const host of current) host.hostName ??= tokens(args)[0];
 		} else if (keyword === 'user') {
 			for (const host of current) host.user ??= tokens(args)[0];
+		} else if (keyword === 'identityfile') {
+			for (const host of current) host.identityFile ??= tokens(args)[0];
 		} else if (keyword === 'port') {
 			const port = Number(tokens(args)[0]);
 			if (Number.isInteger(port) && port > 0) for (const host of current) host.port ??= port;
@@ -143,4 +146,22 @@ export function renderNewHostBlock(entry: SshCommand): string {
 export function appendBlock(text: string, block: string): string {
 	const base = text.replace(/\s+$/, '');
 	return `${base ? `${base}\n\n` : ''}${block}\n`;
+}
+
+/**
+ * What the cluster form still has to ask after a host was chosen: whatever the ssh config (or `user@host`)
+ * already says is not asked again, and values left from an earlier choice are cleared so they cannot
+ * override the entry. The `sshAsk*` flags drive which fields the form shows.
+ */
+export function sshQuestionsFor(host: ConfigHost | undefined, typedUser?: string): Record<string, string | number | boolean | undefined> {
+	const user = host?.user ?? typedUser;
+	return {
+		sshAskUser: !user,
+		sshAskPort: !host?.port,
+		sshAskAuth: !host?.identityFile,
+		sshUser: typedUser && !host ? typedUser : undefined,
+		sshPort: undefined,
+		sshAuth: undefined,
+		sshIdentityFile: undefined
+	};
 }

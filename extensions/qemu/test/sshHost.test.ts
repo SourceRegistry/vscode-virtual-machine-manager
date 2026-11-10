@@ -2,7 +2,10 @@ import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { isRemotePath } from '@vmm/sdk';
+import { execFileSync } from 'node:child_process';
+import { isFieldVisible, isRemotePath, type FieldValues } from '@vmm/sdk';
+import { QemuProvider } from '../src/QemuProvider';
+import { sshQuestionsFor } from '../../../src/shared/sshConfigHosts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { LocalHost } from '../src/host';
 import {
@@ -16,6 +19,7 @@ import {
 	shellCommand,
 	shq,
 	sshBaseArgs,
+	askpassProgram,
 	SshHost,
 	validateSshTarget
 } from '../src/sshHost';
@@ -256,5 +260,67 @@ describe('LocalHost', () => {
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe('password sign-in', () => {
+	it('lets ssh ask, but only for a password', () => {
+		const args = sshBaseArgs({ host: 'h' }, { password: true }).join(' ');
+		expect(args).toContain('BatchMode=no');
+		expect(args).toContain('PreferredAuthentications=password,keyboard-interactive');
+		expect(args).toContain('NumberOfPasswordPrompts=1');
+		expect(sshBaseArgs({ host: 'h' }).join(' ')).toContain('BatchMode=yes');
+	});
+	it('answers password prompts from the environment, and nothing else', () => {
+		const program = askpassProgram();
+		if (process.platform === 'win32') return;
+		const run = (prompt: string) => execFileSync(program, [prompt], { env: { VMM_SSH_PASSWORD: 'p@ss w0rd$x' }, encoding: 'utf8' });
+		expect(run("me@lab's password: ")).toBe('p@ss w0rd$x\n');
+		expect(run('Enter passphrase for key /k:')).toBe('p@ss w0rd$x\n');
+		expect(() => run('Are you sure you want to continue connecting (yes/no/[fingerprint])?')).toThrow();
+		expect(fs.statSync(program).mode & 0o077).toBe(0); // private to the user
+		expect(fs.readFileSync(program, 'utf8')).not.toContain('p@ss');
+	});
+	it('says the password was refused', () => {
+		expect(explainSshError('me@lab: Permission denied (password).', { host: 'lab', user: 'me', viaPassword: true })).toMatch(/refused the password/);
+	});
+});
+
+describe('the cluster form asks only what the ssh config does not answer', () => {
+	const schema = new QemuProvider({ defaultQemuPath: () => undefined }).connectionSchema;
+	const asked = (values: FieldValues) => schema.filter((f) => !f.readonly && isFieldVisible(f, values, schema)).map((f) => f.key);
+
+	it('asks nothing about ssh for a local cluster', () => {
+		expect(asked({ connection: 'local' }).filter((k) => k.startsWith('ssh'))).toEqual([]);
+	});
+	it('asks everything for a host that is typed', () => {
+		const values = { connection: 'ssh', sshHost: 'lab', ...sshQuestionsFor(undefined) };
+		expect(asked(values)).toEqual(expect.arrayContaining(['sshHost', 'sshUser', 'sshPort', 'sshAuth']));
+		expect(asked(values)).not.toContain('sshIdentityFile');
+		expect(asked(values)).not.toContain('sshPassword');
+	});
+	it('does not ask for the user typed as user@host', () => {
+		const values = { connection: 'ssh', sshHost: 'me@lab', ...sshQuestionsFor(undefined, 'me') };
+		expect(asked(values)).not.toContain('sshUser');
+		expect(asked(values)).toContain('sshPort');
+	});
+	it('does not ask for what the config entry has', () => {
+		const full = { connection: 'ssh', sshHost: 'web', ...sshQuestionsFor({ alias: 'web', user: 'deploy', port: 2222, identityFile: '~/.ssh/k' }) };
+		expect(asked(full).filter((k) => k.startsWith('ssh'))).toEqual(['sshHost']);
+		const noKey = { connection: 'ssh', sshHost: 'web', ...sshQuestionsFor({ alias: 'web', user: 'deploy' }) };
+		expect(asked(noKey)).toEqual(expect.arrayContaining(['sshPort', 'sshAuth']));
+		expect(asked(noKey)).not.toContain('sshUser');
+	});
+	it('asks for the key or the password, never both', () => {
+		const base = { connection: 'ssh', sshHost: 'lab', ...sshQuestionsFor(undefined) };
+		expect(asked({ ...base, sshAuth: 'key' })).toContain('sshIdentityFile');
+		expect(asked({ ...base, sshAuth: 'key' })).not.toContain('sshPassword');
+		expect(asked({ ...base, sshAuth: 'password' })).toContain('sshPassword');
+		expect(asked({ ...base, sshAuth: 'password' })).not.toContain('sshIdentityFile');
+		expect(asked({ ...base, sshAuth: 'agent' })).not.toContain('sshIdentityFile');
+		expect(asked({ ...base, sshAuth: 'agent' })).not.toContain('sshPassword');
+	});
+	it('still asks everything for a cluster saved before the picker existed', () => {
+		expect(asked({ connection: 'ssh', sshHost: 'lab' })).toEqual(expect.arrayContaining(['sshUser', 'sshPort', 'sshAuth']));
 	});
 });

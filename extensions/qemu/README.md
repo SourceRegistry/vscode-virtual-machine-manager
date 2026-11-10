@@ -43,12 +43,12 @@ or set `vmm.qemu.path`.
 
 Add a QEMU cluster, choose **Connection: Remote (SSH)** (the other choice is **Local**) and set **SSH host**: a searchable list of the hosts in your `~/.ssh/config` (and files it includes), or type `user@host`. **Add New SSH Host…** at the bottom takes `ssh user@host -p 22` and, after showing the entry, appends it to the config; **Configure SSH Hosts…** opens the file. VM Manager runs your system `ssh`, so your agent, keys,
 `~/.ssh/config` (including `ProxyJump`) and `known_hosts` apply, and no extra software is installed
-on either side. **SSH user**, **SSH port** and **SSH key** are optional. The host needs Linux, a POSIX
+on either side. What the chosen host's ssh config entry (or `user@host`) already says is not asked again: a `User` skips the user question, a `Port` the port, an `IdentityFile` the sign-in question. Otherwise you are asked for **SSH user** and **SSH port** (both optional) and how to **sign in**: ssh-agent or default keys, a key file, or a password. A key skips the password question and the other way round. A password is kept in the system keychain and given to ssh through an `SSH_ASKPASS` helper that answers password prompts only (never a host key question). It sits in the environment of the ssh process while it runs. The host needs Linux, a POSIX
 shell, `qemu-system-*` and `qemu-img`, and `sshd` must allow TCP forwarding (the default), because the
 display, serial console and QMP are reached with `ssh -W` to the loopback ports QEMU listens on there.
 
 * VM definitions and disks live on the host, in **VM storage directory** (default `~/vmm-qemu/vms`). Image paths, such as an ISO, are paths on the host: type them, there is no file dialog.
-* It never asks for anything: a password prompt or an unknown host key would hang a background connection, so those fail with a message. Use a key (in ssh-agent if it has a passphrase) and connect once in a terminal (`ssh <host>`) to accept the host key.
+* A background connection cannot ask you anything, so an unknown host key fails with a message: connect once in a terminal (`ssh <host>`) to accept it. A key with a passphrase must be in ssh-agent.
 * VMs keep running on the host when VS Code closes, as they do locally.
 * Not available on an SSH host: attaching to processes started elsewhere, importing from a folder, USB/PCI passthrough. `vmm.qemu.path` only applies to this computer; set **QEMU directory** on the cluster instead.
 * SSH on Windows works through Windows' OpenSSH client but without connection sharing, so it is slower.

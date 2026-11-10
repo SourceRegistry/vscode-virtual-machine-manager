@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { describeConfigHost, parseUserAtHost, type ConfigHost } from '../../shared/sshConfigHosts';
+import { describeConfigHost, parseUserAtHost, sshQuestionsFor, type ConfigHost } from '../../shared/sshConfigHosts';
 import { addSshHost, loadSshConfigHosts, openSshConfig } from '../ssh/hosts';
 import { sshConfigPath } from '../ssh/connect';
 import { isFieldVisible, isRemotePath, validateValue, type FieldSchema, type FieldValue, type FieldValues } from '@vmm/sdk';
@@ -139,10 +139,13 @@ export async function collectFields(
 			continue;
 		}
 		values[field.key] = result.value;
+		Object.assign(values, result.set);
 		index++;
 	}
 	return values;
 }
+
+type StepResult = { value: FieldValue; /** Other fields this answer settles (an ssh host brings its own user, port and key). */ set?: FieldValues };
 
 async function fieldStep(
 	field: FieldSchema,
@@ -150,7 +153,7 @@ async function fieldStep(
 	position: StepPosition,
 	hasStoredSecret: boolean,
 	values: FieldValues = {}
-): Promise<{ value: FieldValue } | Back | undefined> {
+): Promise<StepResult | Back | undefined> {
 	const optionalHint = field.required ? '' : ' (optional)';
 	switch (field.type) {
 		case 'select': {
@@ -212,7 +215,7 @@ type HostChoice = { kind: 'host'; value: string } | { kind: 'add' } | { kind: 'c
  * Pick a host from the ssh config (searchable), or type `user@host`; "Add New SSH Host…" and "Configure SSH
  * Hosts…" are at the bottom, as in Remote - SSH. The list reloads when the config is saved.
  */
-function sshHostStep(field: FieldSchema, current: FieldValue, position: StepPosition): Promise<{ value: FieldValue } | Back | undefined> {
+function sshHostStep(field: FieldSchema, current: FieldValue, position: StepPosition): Promise<StepResult | Back | undefined> {
 	return new Promise((resolve) => {
 		const pick = vscode.window.createQuickPick<PickItem<HostChoice>>();
 		pick.title = position.title;
@@ -240,7 +243,11 @@ function sshHostStep(field: FieldSchema, current: FieldValue, position: StepPosi
 			const active = current === undefined ? undefined : items.find((i) => i.value.kind === 'host' && i.value.value === String(current));
 			if (active) pick.activeItems = [active];
 		};
-		const finish = (value: { value: FieldValue } | Back | undefined) => {
+		const chosen = (alias: string): StepResult => {
+			const known = loadSshConfigHosts().find((h) => h.alias === alias);
+			return { value: alias, set: sshQuestionsFor(known, known ? undefined : parseUserAtHost(alias)?.user) };
+		};
+		const finish = (value: StepResult | Back | undefined) => {
 			if (done) return;
 			done = true;
 			for (const d of disposables) d.dispose();
@@ -260,7 +267,7 @@ function sshHostStep(field: FieldSchema, current: FieldValue, position: StepPosi
 			pick.onDidAccept(async () => {
 				const choice = pick.selectedItems[0]?.value;
 				if (!choice) return;
-				if (choice.kind === 'host') return finish({ value: choice.value });
+				if (choice.kind === 'host') return finish(chosen(choice.value));
 				if (choice.kind === 'configure') {
 					await openSshConfig().then(undefined, () => undefined);
 					return;
@@ -268,7 +275,7 @@ function sshHostStep(field: FieldSchema, current: FieldValue, position: StepPosi
 				busy = true;
 				try {
 					const added = await addSshHost().catch(() => undefined);
-					if (added) return finish({ value: added });
+					if (added) return finish(chosen(added));
 				} finally {
 					busy = false;
 				}
