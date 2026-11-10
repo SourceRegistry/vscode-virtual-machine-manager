@@ -1,0 +1,113 @@
+<domain type='hvf' id='1'>
+  <name>lvprobe</name>
+  <uuid>e78e029e-2c82-4d70-b2cb-35aea0a4ac51</uuid>
+  <memory unit='KiB'>1048576</memory>
+  <currentMemory unit='KiB'>1048576</currentMemory>
+  <vcpu placement='static'>2</vcpu>
+  <os firmware='efi'>
+    <type arch='aarch64' machine='virt-11.1'>hvm</type>
+    <firmware>
+      <feature enabled='no' name='enrolled-keys'/>
+      <feature enabled='no' name='secure-boot'/>
+    </firmware>
+    <loader readonly='yes' type='pflash' format='raw'>/opt/homebrew/Cellar/qemu/11.1.2/share/qemu/edk2-aarch64-code.fd</loader>
+    <nvram template='/opt/homebrew/Cellar/qemu/11.1.2/share/qemu/edk2-arm-vars.fd' templateFormat='raw' format='raw'>/Users/alexanderslaa/.config/libvirt/qemu/nvram/lvprobe_VARS.fd</nvram>
+    <boot dev='hd'/>
+  </os>
+  <features>
+    <gic version='3'/>
+  </features>
+  <cpu mode='host-passthrough' check='none'/>
+  <clock offset='utc'/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <emulator>/opt/homebrew/bin/qemu-system-aarch64</emulator>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='/tmp/scratch/lv/ov.qcow2' index='2'/>
+      <backingStore type='file' index='3'>
+        <format type='qcow2'/>
+        <source file='/tmp/scratch/img/debian-12-genericcloud-arm64.qcow2'/>
+        <backingStore/>
+      </backingStore>
+      <target dev='vda' bus='virtio'/>
+      <alias name='virtio-disk0'/>
+      <address type='pci' domain='0x0000' bus='0x03' slot='0x00' function='0x0'/>
+    </disk>
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source index='1'/>
+      <target dev='sda' bus='scsi'/>
+      <readonly/>
+      <alias name='scsi0-0-0-0'/>
+      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+    </disk>
+    <controller type='scsi' index='0' model='virtio-scsi'>
+      <alias name='scsi0'/>
+      <address type='pci' domain='0x0000' bus='0x02' slot='0x00' function='0x0'/>
+    </controller>
+    <controller type='pci' index='0' model='pcie-root'>
+      <alias name='pcie.0'/>
+    </controller>
+    <controller type='pci' index='1' model='pcie-root-port'>
+      <model name='pcie-root-port'/>
+      <target chassis='1' port='0x8'/>
+      <alias name='pci.1'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x0' multifunction='on'/>
+    </controller>
+    <controller type='pci' index='2' model='pcie-root-port'>
+      <model name='pcie-root-port'/>
+      <target chassis='2' port='0x9'/>
+      <alias name='pci.2'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
+    </controller>
+    <controller type='pci' index='3' model='pcie-root-port'>
+      <model name='pcie-root-port'/>
+      <target chassis='3' port='0xa'/>
+      <alias name='pci.3'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
+    </controller>
+    <controller type='pci' index='4' model='pcie-root-port'>
+      <model name='pcie-root-port'/>
+      <target chassis='4' port='0xb'/>
+      <alias name='pci.4'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x3'/>
+    </controller>
+    <controller type='pci' index='5' model='pcie-root-port'>
+      <model name='pcie-root-port'/>
+      <target chassis='5' port='0xc'/>
+      <alias name='pci.5'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x4'/>
+    </controller>
+    <interface type='user'>
+      <mac address='52:54:00:8e:8c:84'/>
+      <model type='virtio'/>
+      <alias name='net0'/>
+      <address type='pci' domain='0x0000' bus='0x01' slot='0x00' function='0x0'/>
+    </interface>
+    <serial type='pty'>
+      <source path='/dev/ttys003'/>
+      <target type='system-serial' port='0'>
+        <model name='pl011'/>
+      </target>
+      <alias name='serial0'/>
+    </serial>
+    <console type='pty' tty='/dev/ttys003'>
+      <source path='/dev/ttys003'/>
+      <target type='serial' port='0'/>
+      <alias name='serial0'/>
+    </console>
+    <graphics type='vnc' port='5900' autoport='yes' listen='127.0.0.1'>
+      <listen type='address' address='127.0.0.1'/>
+    </graphics>
+    <audio id='1' type='none'/>
+    <video>
+      <model type='virtio' heads='1' primary='yes' device='virtio-gpu'/>
+      <alias name='video0'/>
+      <address type='pci' domain='0x0000' bus='0x04' slot='0x00' function='0x0'/>
+    </video>
+  </devices>
+</domain>
+
