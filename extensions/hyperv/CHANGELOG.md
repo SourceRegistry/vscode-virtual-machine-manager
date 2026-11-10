@@ -1,5 +1,13 @@
 # Changelog
 
+# [0.5.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-hyperv-v0.4.0...vm-manager-hyperv-v0.5.0) (2026-11-10)
+
+
+### Features
+
+* **qemu:** clone a stopped VM into an independent copy ([e5b70ce](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/e5b70ced090620106a1c28f7db67e7985b7b6247))
+* **qemu:** snapshots of a VM's disks ([bf52865](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/bf52865cec9bcde6a399639c950e39f5e819ae82))
+
 # [0.4.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-hyperv-v0.3.0...vm-manager-hyperv-v0.4.0) (2026-11-05)
 
 
