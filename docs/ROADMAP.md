@@ -281,11 +281,15 @@ Status: **built** on `feat/remote-ssh-connect` (stacked on `feat/snapshots`); au
 
 ### Phase 14: `feat/provisioning`  (Local: yes)
 
-- [ ] ISO / cloud image downloader: curated list (Ubuntu, Debian, Fedora, Alpine, arm64 and x86_64), checksum verified, progress, cached in a configured folder
-- [ ] cloud-init seed ISO builder (user-data, meta-data: user, ssh key, hostname); create form option "cloud-init"
-- [ ] Templates: save a VM as template, create from it (builds on phase 12 clone)
-- [ ] Create form: "from cloud image" path that skips the installer
-- [ ] Tests: seed ISO contents, checksum failure, resume. Manual: boot a cloud image on the Mac
+Status: **cloud images and templates done**; installer ISO downloads open.
+
+- [x] Cloud image downloader (`images.ts`): curated catalog (Debian 13 / 12, Ubuntu 24.04 / 22.04 LTS; x86-64 and ARM64; every URL and checksum list checked against the live mirrors), checksum verified (SHA-256 / SHA-512 from the published list), resumable (`Range`), cached with a verified marker (reused while the published checksum is unchanged, also offline), progress; on an SSH host the transfer runs on the host with `curl`
+- [x] cloud-init seed disk (`iso9660.ts`, `cloudInit.ts`): our own ISO 9660 + Joliet writer (no external tool; read back by an independent reader, by libarchive and mounted by macOS as `cidata`), `user-data` / `meta-data` with the user, passwordless sudo, SSH keys, host name, guest agent; passwords as SHA-512 crypt (checked against the published test vectors), never as text
+- [x] Create form: **Set up from** an installer ISO or a cloud image; image choice, user, key (default from `~/.ssh`), password, advanced: guest agent, host name, custom `user-data`; everything is validated before anything is downloaded; progress notification with the download percentage (`createVm` now takes a progress callback)
+- [x] Tests: seed disk bytes, checksum failure, resume, cached / offline, remote host transfer through a stand-in ssh, form visibility; **real guest** (Debian 12 arm64, HVF): created from the image file, cloud-init read our seed disk, user + key + host name + sudo + grown disk + guest agent verified, signed in over SSH
+- [x] Templates: Convert to Template (stopped VM; cannot be started), New Machine from Template (a clone without the flag), Convert to Virtual Machine; clones of cloud-init machines get a fresh seed disk (new instance id and host name). Known limit: clones keep the guest's machine-id. Linked clones still open
+- [ ] Not done: installer ISO downloads (Alpine, Debian netinst, Fedora…), Fedora and other cloud images, a `network-config`, key injection into an existing machine (phase 16)
+- [ ] Manual check in the create form with a real download (the form itself is covered by schema tests only)
 
 ### Phase 15: `feat/disk-management`  (Local: yes)
 

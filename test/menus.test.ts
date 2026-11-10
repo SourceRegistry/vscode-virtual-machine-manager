@@ -194,6 +194,29 @@ describe.each(['view/item/context', 'webview/context'])('%s clone action', (menu
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s template actions', (menu) => {
+	const templating: Capabilities = { ...caps, clone: true, templates: true };
+
+	it('offers Convert to Template on a machine and nothing to create from', () => {
+		const commands = commandsFor(menu, vmContextValue(vm('stopped'), templating));
+		expect(commands).toContain('vmm.convertToTemplate');
+		expect(commands).not.toContain('vmm.createFromTemplate');
+		expect(commands).not.toContain('vmm.convertToVm');
+	});
+
+	it('on a template: create from it or convert back, and no power actions', () => {
+		const template = { ...vm('stopped'), template: true };
+		const commands = commandsFor(menu, vmContextValue(template, templating));
+		expect(commands).toEqual(expect.arrayContaining(['vmm.createFromTemplate', 'vmm.convertToVm']));
+		expect(commands).not.toContain('vmm.convertToTemplate');
+		expect(commands).not.toContain('vmm.start');
+	});
+
+	it('is hidden for providers without templates', () => {
+		expect(commandsFor(menu, vmContextValue(vm('stopped'), caps))).not.toContain('vmm.convertToTemplate');
+	});
+});
+
 describe.each(['view/item/context', 'webview/context'])('%s details action', (menu) => {
 	it('offers Show Details first in the manage group when the provider reports details or stats', () => {
 		const detailed: Capabilities = { ...caps, details: true };

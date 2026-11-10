@@ -54,6 +54,8 @@ export interface Host {
 	exec(file: string, args: string[], options?: ExecOptions): Promise<{ stdout: string }>;
 	readFile(file: string): Promise<string>;
 	writeFile(file: string, data: string): Promise<void>;
+	/** Binary content (a seed ISO). */
+	writeBytes(file: string, data: Buffer): Promise<void>;
 	mkdir(dir: string): Promise<void>;
 	rm(target: string, options?: { recursive?: boolean }): Promise<void>;
 	exists(file: string): Promise<boolean>;
@@ -138,6 +140,10 @@ export class LocalHost implements Host {
 	}
 
 	async writeFile(file: string, data: string): Promise<void> {
+		await fs.promises.writeFile(file, data);
+	}
+
+	async writeBytes(file: string, data: Buffer): Promise<void> {
 		await fs.promises.writeFile(file, data);
 	}
 

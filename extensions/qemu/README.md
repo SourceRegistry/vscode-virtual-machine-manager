@@ -7,6 +7,7 @@ Create and run QEMU virtual machines from VS Code on Windows, Linux and macOS.
 
 * **Create** VMs with a qcow2 disk, ISO, UEFI or BIOS firmware, SATA or VirtIO disks and several
   network and display adapters.
+* **Create from a cloud image** (cloud-init): pick Debian 13 / 12 or Ubuntu 24.04 / 22.04 LTS for x86-64 or ARM64 (or a disk image file of your own), choose a user, an SSH key (filled from `~/.ssh`) and/or a password, and the machine sets itself up on first boot: no installer. The image is downloaded once, verified against the distribution's published SHA-256 / SHA-512 checksum, resumed if interrupted and kept in the image directory (on the host, for an SSH host). The user gets passwordless sudo, the disk is grown to the size you chose, and the guest agent is installed so the IP address and clean shutdown work. A password is stored only as a hash. The cloud-init disk is built by the extension itself (no `genisoimage` or similar) and stays attached as the CD drive.
 * **x86-64 and ARM64 guests.** New VMs default to your computer's architecture, so an Apple Silicon
   Mac or an ARM64 Linux machine runs ARM64 guests at native speed. The other architecture is
   emulated, which is typically 10 to 50 times slower; the create form and the VM list say so.
@@ -22,6 +23,7 @@ Create and run QEMU virtual machines from VS Code on Windows, Linux and macOS.
 * **Media**: eject or change the ISO of a running VM.
 * **Snapshots**: take, revert and delete snapshots of the disks, from the VM menu or the details page. They are qcow2 internal snapshots, so every disk of the VM must be qcow2 (raw disks are refused with the reason). They save **disk state only**: taken while the VM runs, a snapshot is crash-consistent, like a power cut, and memory is not saved. Reverting needs the VM stopped. The UEFI variable store (`efivars.fd`) is not part of a snapshot.
 * **Clone**: a full, independent copy of a stopped VM (`qemu-img convert`, so it is compact and leaves the snapshots behind), with a new MAC address and a copy of the UEFI variables. Port forwards and passed-through devices are not copied; the VM must be stopped.
+* **Templates**: *Convert to Template* turns a stopped VM into a template that cannot be started; *New Machine from Template* clones it into a normal VM. A machine made from a cloud image gets its own cloud-init seed (new instance id and host name). The guest's machine-id is copied as is.
 * **Port forwards**: add and remove host-to-guest forwards while the VM runs. They are saved with the VM.
 * **Attach and import**: attach to `qemu-system-*` processes started elsewhere (marked
   **external**), or import disks, `vm.json`, libvirt XML and UTM bundles from a folder.

@@ -324,6 +324,12 @@ export class SshHost implements Host {
 		await this.sh(`cat > ${shq(file)}`, { input: data, timeout: 60_000 });
 	}
 
+	async writeBytes(file: string, data: Buffer): Promise<void> {
+		// Over a text channel: base64 in, decoded on the host (GNU and busybox say -d, old BSDs -D).
+		const target = shq(file);
+		await this.sh(`base64 -d > ${target} || base64 -D > ${target}`, { input: data.toString('base64'), timeout: 120_000 });
+	}
+
 	async mkdir(dir: string): Promise<void> {
 		await this.sh(shellCommand('mkdir', ['-p', '--', dir]));
 	}

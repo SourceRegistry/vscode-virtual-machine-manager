@@ -323,8 +323,8 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	// Clone
 	// -----------------------------------------------------------------------------------------
 
-	async function cloneVm(arg: Arg): Promise<void> {
-		const location = await resolveVm(arg, 'Select a virtual machine to clone', (l) => !!l.cluster.connection?.capabilities.clone);
+	async function cloneVm(arg: Arg, fromTemplate = false): Promise<void> {
+		const location = await resolveVm(arg, fromTemplate ? 'Select a template' : 'Select a virtual machine to clone', (l) => !!l.cluster.connection?.capabilities.clone && (!fromTemplate || !!l.vm.template));
 		if (!location) return;
 		const caps = location.cluster.connection?.capabilities;
 		if (caps?.cloneNeedsStopped && location.vm.state !== 'stopped') {
@@ -332,9 +332,9 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			return;
 		}
 		const name = await vscode.window.showInputBox({
-			title: `Clone ${location.vm.name}`,
+			title: fromTemplate ? `New machine from ${location.vm.name}` : `Clone ${location.vm.name}`,
 			prompt: 'Name of the copy. It gets its own disks and network address; snapshots, port forwards and passed-through devices are not copied.',
-			value: `${location.vm.name} (clone)`
+			value: fromTemplate ? location.vm.name.replace(/\s*template\s*$/i, '').trim() || `${location.vm.name} (new)` : `${location.vm.name} (clone)`
 		});
 		if (name === undefined) return;
 		try {
@@ -349,6 +349,26 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			if (choice === 'Start') await power({ ...location.ref, vmId: copy.id }, 'start');
 		} catch (error) {
 			await showError(`Could not clone ${location.vm.name}`, error);
+		}
+	}
+
+	async function setTemplate(arg: Arg, template: boolean): Promise<void> {
+		const location = await resolveVm(arg, template ? 'Select a virtual machine to turn into a template' : 'Select a template to turn back into a VM', (l) => !!l.cluster.connection?.capabilities.templates && !!l.vm.template === !template);
+		if (!location) return;
+		if (location.vm.state !== 'stopped') {
+			void vscode.window.showInformationMessage(`Shut down "${location.vm.name}" first.`);
+			return;
+		}
+		if (template) {
+			const choice = await vscode.window.showWarningMessage(`Turn "${location.vm.name}" into a template? It can no longer be started; new machines are created from it.`, { modal: true }, 'Convert');
+			if (choice !== 'Convert') return;
+		}
+		try {
+			const connection = await manager.connect(location.ref.clusterId);
+			await connection.setTemplate?.(location.ref.nodeId, location.ref.vmId, template);
+			await manager.refresh(location.ref.clusterId);
+		} catch (error) {
+			await showError(`Could not change ${location.vm.name}`, error);
 		}
 	}
 
@@ -517,7 +537,15 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			if (invalid) throw new Error(invalid.message);
 			const vm = await vscode.window.withProgress(
 				{ location: vscode.ProgressLocation.Notification, title: `Creating ${String(values.name ?? 'virtual machine')}…` },
-				() => connection.createVm(nodeRef.nodeId, values)
+				(progress) => {
+					let shown = 0;
+					return connection.createVm(nodeRef.nodeId, values, (update) => {
+						// The notification wants increments, the provider reports how far along it is.
+						const target = update.fraction === undefined ? shown : Math.max(shown, Math.min(1, update.fraction));
+						progress.report({ message: update.message, increment: (target - shown) * 100 });
+						shown = target;
+					});
+				}
 			);
 			await manager.refresh(nodeRef.clusterId);
 			const ref: VmRef = { ...nodeRef, vmId: vm.id };
@@ -808,6 +836,9 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register('vmm.addSshConfigEntries', () => addToSshConfig(manager, context.globalState)),
 		register('vmm.removeSshConfigEntries', () => removeFromSshConfig()),
 		register('vmm.cloneVm', (arg) => cloneVm(arg)),
+		register('vmm.convertToTemplate', (arg) => setTemplate(arg, true)),
+		register('vmm.convertToVm', (arg) => setTemplate(arg, false)),
+		register('vmm.createFromTemplate', (arg) => cloneVm(arg, true)),
 		register('vmm.takeSnapshot', (arg) => takeSnapshot(arg)),
 		register('vmm.revertSnapshot', (arg) => revertSnapshot(arg)),
 		register('vmm.deleteSnapshot', (arg) => deleteSnapshot(arg)),

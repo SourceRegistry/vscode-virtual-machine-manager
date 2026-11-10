@@ -457,7 +457,7 @@
 											{:else}
 												<strong>{vm.name}</strong>
 											{/if}
-											{#if originLabel(vm)}<span class="badge" title="Not created by VM Manager">{originLabel(vm)}</span>{/if}
+											{#if originLabel(vm)}<span class="badge" title={vm.template ? 'A template: it cannot be started, only copied.' : 'Not created by VM Manager'}>{originLabel(vm)}</span>{/if}
 										</td>
 										<td class="muted">{row.cluster.name} › {row.node.name}</td>
 										<td>{vm.cpus ?? '–'}</td>
