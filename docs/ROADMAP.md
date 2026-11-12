@@ -301,8 +301,8 @@ Status: **cloud images and templates done**; installer ISO downloads open.
 
 ### Phase 16: `feat/guest-integration`  (Local: partly)
 
-- [ ] Guest memory from the balloon driver or guest agent (`guest-get-memory-blocks`/`virtio-balloon` stats) so the memory chart shows guest usage, not host RSS
-- [ ] Run command in guest and copy files host to guest and back through the guest agent (`guest-exec`, `guest-file-*`)
+- [x] Guest memory from the virtio balloon statistics (QEMU: `qom-get … guest-stats` after setting the polling interval, a `virtio-balloon-pci` device on every VM; libvirt: `domstats --balloon` available − usable, `<stats period='5'/>` on new domains and `dommemstat --period` for others). `VmStats.memorySource` says `guest` or `host`; the chart says which. The agent has no memory-usage command, so the balloon is the source
+- [x] Run command in guest and copy files host to guest and back through the guest agent (`guest-exec`, `guest-file-*`), shared in `@vmm/sdk/guest` (QEMU agent socket with 1 MiB pieces; libvirt `virsh qemu-agent-command` writes in 4 KiB pieces, about 80 KB/s, because libvirt 12.9 cuts agent requests of ~8 KB short: a faster path for libvirt is open). `VM: Run Command in Guest…` (output channel), `Copy File to Guest…`, `Copy File from Guest…`; also on the Fake provider. Verified on real Debian 13 guests (QEMU and libvirt). Not done: a terminal with live output, stopping a running command (the agent cannot), Windows guests untested
 - [ ] Clipboard: bidirectional through the agent or SPICE agent; keyboard layout choice for **Type Clipboard Text** (US only today)
 - [ ] Audio: `-audiodev coreaudio` on macOS, `pa`/`pipewire` on Linux, `dsound` on Windows, with a VM setting; no browser playback path yet (decide: host audio only)
 - [ ] SPICE console (clipboard, resize, USB redirection): **check first** whether the QEMU build on the Mac has SPICE (Homebrew's usually does not); likely Linux only
