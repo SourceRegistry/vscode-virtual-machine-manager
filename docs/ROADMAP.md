@@ -404,4 +404,7 @@ Versions are core first, then the provider extensions that were released with it
 2026-11-10  phase 19        docs/libvirt-logo-feature-table (PR #8)  core 0.9.0; libvirt 1.1.0
 2026-11-12  phase 19        feat/libvirt-create-vm (PR #9)     core 0.10.0; libvirt 1.2.0; qemu 0.8.1; hyperv, proxmox 0.7.1   create from ISO / cloud image, port forwards
 2026-11-12  phase 16        feat/guest-integration (PR #10)    core 0.11.0; libvirt 1.3.0; qemu 0.9.0; hyperv, proxmox 0.8.0   run command, file copies, guest memory
+2026-11-12  fix             fix/libvirt-serial-console (PR #15)  libvirt 1.3.1   serial console no longer echoes guest output back; no leaked threads
+2026-11-12  phase 20        feat/nutanix-provider (PR #13)     nutanix 1.0.0   Prism Central v3: inventory, create, edit, power, recovery points, clone, stats, VNC (experimental); fake Prism for tests
+2026-11-12  —               feat/hide-unavailable-commands (PR #14)  core 0.12.0   Connect with Remote-SSH only when installed; palette commands only when a connected provider supports them
 ```
