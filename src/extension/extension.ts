@@ -33,6 +33,7 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 	const marks = new VmMarksStore(context.globalState);
 	manager.setMarks(marks);
 	const tree = new VmTreeProvider(manager, registry, marks);
+	const groupsTree = new VmTreeProvider(manager, registry, marks, 'groups');
 	const activity = new VmActivity(context, manager);
 	const control = new VmControl(manager, marks);
 	const credentials = new RdpCredentialStore(context.secrets);
@@ -45,6 +46,7 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 		store,
 		manager,
 		tree,
+		groupsTree,
 		consoles,
 		statusBar,
 		marks,
@@ -52,7 +54,7 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 		control,
 		new VmTaskProvider(manager, control),
 		OverviewPanel.registerSerializer(context.extensionUri, manager),
-		...registerCommands({ context, store, registry, manager, tree, consoles, credentials, activity, marks, control })
+		...registerCommands({ context, store, registry, manager, tree, groupsTree, consoles, credentials, activity, marks, control })
 	);
 
 	const updateProviderContext = () =>

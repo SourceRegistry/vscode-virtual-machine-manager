@@ -675,7 +675,10 @@ export interface VmSummary {
 	node: string;
 	state: VmState;
 	ipAddresses: string[];
-	tags: string[];
+	/** Marked as a favorite in VM Manager. */
+	favorite: boolean;
+	/** The VM Manager groups the user put it in. */
+	groups: string[];
 }
 
 export interface VmStateChangeEvent {

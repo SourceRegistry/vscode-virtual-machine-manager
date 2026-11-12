@@ -33,7 +33,8 @@ export interface VmSnapshot extends VmInfo {
 	operation?: PowerAction;
 	/** Marked by the user in VM Manager (not on the hypervisor). */
 	favorite?: boolean;
-	tags?: string[];
+	/** The user's groups it is in. */
+	groups?: string[];
 }
 
 export interface NodeSnapshot extends NodeInfo {

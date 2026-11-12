@@ -3,7 +3,7 @@ import { StateTracker, causeOf, describeChange, shouldNotify, type StateChange }
 import { formatSeconds, operationText } from '../src/shared/countdown';
 import { appendEntry, formatEntry, formatLogDocument, tail, type ActivityEntry } from '../src/shared/activity';
 import { lookupVm, vmHandle } from '../src/shared/vmLookup';
-import { allTags, groupVms, parseTags } from '../src/shared/treeGroups';
+import { cleanName, groupNameProblem, groupVms, uniqueNames } from '../src/shared/treeGroups';
 
 describe('state changes', () => {
 	it('records the first listing, then reports settled changes only', () => {
@@ -105,25 +105,34 @@ describe('finding a machine by name', () => {
 	});
 });
 
-describe('favorites, tags and groups', () => {
-	it('cleans up typed tags', () => {
-		expect(parseTags(' web, Lab ,web,  ,WEB , two  words ')).toEqual(['web', 'Lab', 'two words']);
-		expect(parseTags('x'.repeat(50))[0]).toHaveLength(40);
-		expect(allTags([{ tags: ['b', 'a'] }, { tags: ['A'] }, {}])).toEqual(['a', 'b']);
+describe('favorites and groups', () => {
+	it('cleans up typed group names', () => {
+		expect(cleanName('  two   words ')).toBe('two words');
+		expect(cleanName('x'.repeat(50))).toHaveLength(40);
+		expect(uniqueNames([' web', 'Lab', 'WEB', '', 'lab '])).toEqual(['web', 'Lab']);
 	});
-	it('groups by tag, with untagged last, a machine in each of its tags', () => {
+	it('explains what is wrong with a group name', () => {
+		expect(groupNameProblem('  ', [])).toMatch(/name/);
+		expect(groupNameProblem('favorites', [])).toMatch(/taken/);
+		expect(groupNameProblem('Web', ['web'])).toMatch(/already/);
+		expect(groupNameProblem('WEB', ['web'], 'web')).toBeUndefined();
+		expect(groupNameProblem('db', ['web'])).toBeUndefined();
+	});
+	it("groups by the user's groups in their order, empty ones kept, the rest last, a machine in each of its groups", () => {
 		const groups = groupVms(
 			[
-				{ key: '1', name: 'web', state: 'running', tags: ['prod', 'web'] },
-				{ key: '2', name: 'db', state: 'stopped', tags: ['Prod'] },
+				{ key: '1', name: 'web', state: 'running', groups: ['prod', 'web'] },
+				{ key: '2', name: 'db', state: 'stopped', groups: ['Prod'] },
 				{ key: '3', name: 'scratch', state: 'stopped' }
 			],
-			'tag'
+			'group',
+			['web', 'Prod', 'empty']
 		);
 		expect(groups).toEqual([
-			{ id: 'tag:prod', label: 'Prod', keys: ['2', '1'] },
-			{ id: 'tag:web', label: 'web', keys: ['1'] },
-			{ id: 'untagged', label: 'Untagged', keys: ['3'] }
+			{ id: 'group:web', label: 'web', keys: ['1'] },
+			{ id: 'group:prod', label: 'Prod', keys: ['2', '1'] },
+			{ id: 'group:empty', label: 'empty', keys: [] },
+			{ id: 'ungrouped', label: 'Not in a group', keys: ['3'] }
 		]);
 	});
 	it('groups by state, running first, empty groups left out', () => {

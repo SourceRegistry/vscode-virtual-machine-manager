@@ -163,10 +163,10 @@ export class ConnectionManager implements vscode.Disposable {
 		return this.allVms().filter((l) => l.vm.state === 'running').length;
 	}
 
-	/** Favorites and tags, added to the snapshots the Overview gets. */
-	private marks: { get(ref: VmRef): { favorite?: boolean; tags?: string[] } } | undefined;
+	/** Favorites and the user's groups, added to the snapshots the Overview gets. */
+	private marks: { get(ref: VmRef): { favorite?: boolean; groups?: string[] } } | undefined;
 
-	setMarks(marks: { get(ref: VmRef): { favorite?: boolean; tags?: string[] }; onDidChange: vscode.Event<void> }): void {
+	setMarks(marks: { get(ref: VmRef): { favorite?: boolean; groups?: string[] }; onDidChange: vscode.Event<void> }): void {
 		this.marks = marks;
 		this.disposables.push(marks.onDidChange(() => this.emitter.fire(undefined)));
 	}

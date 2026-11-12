@@ -7,12 +7,12 @@ import type { ConnectionManager, ClusterRuntime } from '../clusters/ConnectionMa
 import type { ProviderRegistry } from '../registry/ProviderRegistry';
 import { originLabel } from '../../shared/origin';
 import { operationText } from '../../shared/countdown';
-import { groupVms, type GroupBy } from '../../shared/treeGroups';
+import { FAVORITES_LABEL, groupId, groupVms, type GroupBy } from '../../shared/treeGroups';
 import type { VmMarksStore } from './VmMarksStore';
 
 /**
- * `parent` on a VM: the group it is listed under when that is not its node (favorites, a tag, a state), which
- * also keeps its tree id unique when it is listed twice.
+ * `parent` on a VM: the group it is listed under when that is not its node (Favorites, one of the user's groups,
+ * a state), which also keeps its tree id unique when it is listed twice.
  */
 export type TreeNode =
 	| { kind: 'cluster'; clusterId: string }
@@ -21,11 +21,14 @@ export type TreeNode =
 	| { kind: 'group'; id: string; label: string }
 	| { kind: 'message'; clusterId: string; id: string };
 
-const FAVORITES = 'favorites';
+/** The id of the Favorites group in the Groups view. */
+export const FAVORITES = 'favorites';
+
+const DRAG_MIME = ['application/vnd.code.tree.vmm.clusters', 'application/vnd.code.tree.vmm.groups'];
 
 export function groupBySetting(): GroupBy {
 	const value = vscode.workspace.getConfiguration('vmm').get<string>('tree.groupBy', 'cluster');
-	return value === 'tag' || value === 'state' ? value : 'cluster';
+	return value === 'group' || value === 'state' ? value : 'cluster';
 }
 
 /** The state a grouping files a machine under: a running operation counts as where it is heading. */
@@ -67,7 +70,9 @@ export function stateLabel(state: VmState): string {
 	return STATE_LABEL[state];
 }
 
-export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable {
+export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode.TreeDragAndDropController<TreeNode>, vscode.Disposable {
+	readonly dragMimeTypes: string[];
+	readonly dropMimeTypes = DRAG_MIME;
 	private readonly emitter = new vscode.EventEmitter<TreeNode | undefined>();
 	readonly onDidChangeTreeData = this.emitter.event;
 	private readonly view: vscode.TreeView<TreeNode>;
@@ -79,15 +84,21 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 	constructor(
 		private readonly manager: ConnectionManager,
 		private readonly registry: ProviderRegistry,
-		private readonly marks: VmMarksStore
+		private readonly marks: VmMarksStore,
+		/** `groups`: the Groups view under the main one: Favorites, then the user's own groups. */
+		private readonly mode: 'clusters' | 'groups' = 'clusters'
 	) {
-		this.view = vscode.window.createTreeView('vmm.clusters', {
+		this.dragMimeTypes = [mode === 'groups' ? DRAG_MIME[1] : DRAG_MIME[0]];
+		this.view = vscode.window.createTreeView(mode === 'groups' ? 'vmm.groups' : 'vmm.clusters', {
 			treeDataProvider: this,
+			dragAndDropController: this,
+			canSelectMany: true,
 			showCollapseAll: true
 		});
+		const visibility = mode === 'groups' ? 'groups' : 'tree';
 		this.disposables.push(
 			this.view,
-			this.view.onDidChangeVisibility((e) => manager.setVisible('tree', e.visible)),
+			this.view.onDidChangeVisibility((e) => manager.setVisible(visibility, e.visible)),
 			manager.onDidChange((clusterId) => {
 				this.emitter.fire(clusterId && this.narrow() ? this.clusterNodes.get(clusterId) : undefined);
 				this.updateBadge();
@@ -104,15 +115,16 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 			})
 		);
 		void vscode.commands.executeCommand('setContext', 'vmm.groupBy', groupBySetting());
-		manager.setVisible('tree', this.view.visible);
+		manager.setVisible(visibility, this.view.visible);
 	}
 
-	/** A cluster's change only touches that cluster's rows: the tree is by cluster and lists no favorites. */
+	/** A cluster's change only touches that cluster's rows: the main view, grouped by cluster. */
 	private narrow(): boolean {
-		return groupBySetting() === 'cluster' && !this.marks.hasFavorites();
+		return this.mode === 'clusters' && groupBySetting() === 'cluster';
 	}
 
 	private updateBadge(): void {
+		if (this.mode !== 'clusters') return;
 		const running = this.manager.runningCount();
 		this.view.badge = running ? { value: running, tooltip: `${running} running virtual machine${running === 1 ? '' : 's'}` } : undefined;
 	}
@@ -148,14 +160,19 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		return node;
 	}
 
+	/** Groups for the main view grouped by group or state, or (`groups` mode) the user's groups only. */
 	private groups(by: Exclude<GroupBy, 'cluster'>) {
 		const all = this.manager.allVms();
 		const byKey = new Map(all.map((l) => [`${l.ref.clusterId}/${l.ref.nodeId}/${l.ref.vmId}`, l]));
-		const groups = groupVms([...byKey].map(([key, l]) => ({ key, name: l.vm.name, state: shownState(l.vm), tags: this.marks.tags(l.ref) })), by);
-		return { groups, byKey };
+		const groups = groupVms(
+			[...byKey].map(([key, l]) => ({ key, name: l.vm.name, state: shownState(l.vm), groups: this.marks.groupsOf(l.ref) })),
+			by,
+			this.marks.groups()
+		);
+		return { groups: this.mode === 'groups' ? groups.filter((g) => g.id !== 'ungrouped') : groups, byKey };
 	}
 
-	/** Machines under a group id: favorites, a tag or a state. */
+	/** Machines under a group id: Favorites, one of the user's groups, or a state. */
 	private groupMembers(id: string): TreeNode[] {
 		if (id === FAVORITES) {
 			return this.manager
@@ -164,10 +181,15 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 				.sort((a, b) => a.vm.name.localeCompare(b.vm.name))
 				.map((l) => ({ kind: 'vm', ...l.ref, parent: id }));
 		}
-		const by = groupBySetting();
+		const by = this.mode === 'groups' ? 'group' : groupBySetting();
 		if (by === 'cluster') return [];
 		const { groups, byKey } = this.groups(by);
 		return (groups.find((g) => g.id === id)?.keys ?? []).map((key) => ({ kind: 'vm', ...byKey.get(key)!.ref, parent: id }));
+	}
+
+	/** The user's group a group id stands for. */
+	groupName(id: string): string | undefined {
+		return this.marks.groups().find((g) => groupId(g) === id);
 	}
 
 	async getChildren(element?: TreeNode): Promise<TreeNode[]> {
@@ -175,10 +197,15 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 			const by = groupBySetting();
 			const clusters = this.manager.clusters();
 			// Favorites and groups span clusters: load them all (never prompts; a cluster that needs the user says so).
-			if (by !== 'cluster' || this.marks.hasFavorites()) await Promise.all(clusters.map((rt) => this.manager.ensureLoaded(rt.cluster.id)));
+			if (this.mode === 'groups' || by !== 'cluster') await Promise.all(clusters.map((rt) => this.manager.ensureLoaded(rt.cluster.id)));
+			if (this.mode === 'groups') {
+				return [
+					...(this.marks.hasFavorites() ? [this.groupNode(FAVORITES, FAVORITES_LABEL)] : []),
+					...this.groups('group').groups.map((g) => this.groupNode(g.id, g.label))
+				];
+			}
 			const roots: TreeNode[] = [];
-			if (this.groupMembers(FAVORITES).length) roots.push(this.groupNode(FAVORITES, 'Favorites'));
-			if (by === 'cluster') return [...roots, ...clusters.map((rt) => this.clusterNode(rt.cluster.id))];
+			if (by === 'cluster') return clusters.map((rt) => this.clusterNode(rt.cluster.id));
 			roots.push(...this.groups(by).groups.map((g) => this.groupNode(g.id, g.label)));
 			// Clusters that list nothing (signed out, failing, provider missing) stay visible so they can be fixed.
 			roots.push(...clusters.filter((rt) => rt.signedOut || rt.status !== 'connected').map((rt) => this.clusterNode(rt.cluster.id)));
@@ -271,11 +298,16 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 	}
 
 	private groupItem(group: { id: string; label: string }): vscode.TreeItem {
-		const item = new vscode.TreeItem(group.label, vscode.TreeItemCollapsibleState.Expanded);
+		const count = this.groupMembers(group.id).length;
+		const item = new vscode.TreeItem(group.label, count ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
 		item.id = `group:${group.id}`;
-		item.description = String(this.groupMembers(group.id).length);
-		item.iconPath = new vscode.ThemeIcon(group.id === FAVORITES ? 'star-full' : group.id.startsWith('state:') ? 'pulse' : group.id === 'untagged' ? 'circle-slash' : 'tag');
-		item.contextValue = `group;${group.id === FAVORITES ? 'favorites' : group.id.startsWith('tag:') ? 'tag' : 'other'};`;
+		const custom = group.id.startsWith('group:');
+		item.description = count ? String(count) : custom ? 'empty' : '0';
+		item.iconPath = new vscode.ThemeIcon(
+			group.id === FAVORITES ? 'star-full' : group.id.startsWith('state:') ? 'pulse' : group.id === 'ungrouped' ? 'circle-slash' : 'folder'
+		);
+		item.contextValue = `group;${group.id === FAVORITES ? 'favorites' : custom ? 'custom' : 'other'};`;
+		if (custom && !count && this.mode === 'groups') item.tooltip = 'Drag machines here, or use Add to Group… on a machine.';
 		return item;
 	}
 
@@ -316,7 +348,7 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 				(vm.ipAddresses?.length ? `| IP | ${vm.ipAddresses.join(', ')} |\n` : '') +
 				(vm.os ? `| OS | ${escapeMd(vm.os)} |\n` : '') +
 				(ref.parent ? `| Where | ${escapeMd(location.cluster.cluster.name)} › ${escapeMd(location.node.name)} |\n` : '') +
-				(marks.tags?.length ? `| Tags | ${marks.tags.map(escapeMd).join(', ')} |\n` : '') +
+				(marks.groups?.length ? `| Groups | ${marks.groups.map(escapeMd).join(', ')} |\n` : '') +
 				(vm.origin ? `| Origin | ${vm.origin === 'adopted' ? 'Attached to a process started outside VM Manager' : 'Imported from existing files'}${vm.controllable === false ? ' (observe only: no control socket)' : ''} |\n` : '') +
 				(vm.description ? `\n${escapeMd(vm.description)}` : '')
 		);
@@ -363,6 +395,31 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		if (!group || !byKey.has(key)) return;
 		this.groupNode(group.id, group.label);
 		await this.reveal({ kind: 'vm', ...ref, parent: group.id });
+	}
+
+	/** Dragging machines: from Clusters into a group adds them; from one group to another moves them. */
+	handleDrag(source: readonly TreeNode[], dataTransfer: vscode.DataTransfer): void {
+		const vms = source.filter((n) => n.kind === 'vm');
+		if (!vms.length) return;
+		dataTransfer.set(this.dragMimeTypes[0], new vscode.DataTransferItem(vms));
+	}
+
+	async handleDrop(target: TreeNode | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
+		const into = target?.kind === 'group' ? target.id : target?.kind === 'vm' ? target.parent : undefined;
+		if (!into || (into !== FAVORITES && !this.groupName(into))) return;
+		for (const mime of DRAG_MIME) {
+			const value = dataTransfer.get(mime)?.value as TreeNode[] | undefined;
+			const vms = (value ?? []).filter((n): n is TreeNode & { kind: 'vm' } => n.kind === 'vm' && n.parent !== into);
+			if (!vms.length) continue;
+			const refs = vms.map(({ clusterId, nodeId, vmId }) => ({ clusterId, nodeId, vmId }));
+			if (into === FAVORITES) await this.marks.setFavorite(refs, true);
+			else await this.marks.addToGroup(refs, this.groupName(into)!);
+			// Out of one of the user's groups into another: a move.
+			for (const vm of vms) {
+				const from = vm.parent && into !== FAVORITES ? this.groupName(vm.parent) : undefined;
+				if (from) await this.marks.removeFromGroup([{ clusterId: vm.clusterId, nodeId: vm.nodeId, vmId: vm.vmId }], from);
+			}
+		}
 	}
 
 	dispose(): void {

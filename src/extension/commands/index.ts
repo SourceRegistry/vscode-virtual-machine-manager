@@ -22,8 +22,8 @@ import { withDelayedProgress } from '../util/progress';
 import { matchesQuery } from '../../shared/vmSearch';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
 import { operationText } from '../../shared/countdown';
-import { parseTags, type GroupBy } from '../../shared/treeGroups';
-import { groupBySetting } from '../tree/VmTreeProvider';
+import { FAVORITES_LABEL, groupNameProblem, sameName, type GroupBy } from '../../shared/treeGroups';
+import { FAVORITES, groupBySetting } from '../tree/VmTreeProvider';
 import type { VmActivity } from '../activity/VmActivity';
 import type { VmMarksStore } from '../tree/VmMarksStore';
 import type { VmControl } from '../api/VmControl';
@@ -36,6 +36,8 @@ export interface CommandDeps {
 	registry: ProviderRegistry;
 	manager: ConnectionManager;
 	tree: VmTreeProvider;
+	/** The Groups view under the main one. */
+	groupsTree: VmTreeProvider;
 	consoles: ConsoleManager;
 	credentials: RdpCredentialStore;
 	activity: VmActivity;
@@ -74,7 +76,7 @@ function asClusterId(arg: Arg): string | undefined {
 }
 
 export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
-	const { context, store, registry, manager, tree, consoles, credentials, activity, marks, control } = deps;
+	const { context, store, registry, manager, tree, groupsTree, consoles, credentials, activity, marks, control } = deps;
 
 	/** A name (or `cluster/name`, or an API id) given as the argument: `"web-01"` or `{ "vm": "web-01" }`. */
 	function namedVm(arg: Arg): string | undefined {
@@ -456,43 +458,117 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	}
 
 	// -----------------------------------------------------------------------------------------
-	// Log, favorites, tags, grouping
+	// Log, favorites, groups, grouping
 	// -----------------------------------------------------------------------------------------
+
+	/** The machines a tree command acts on: every selected one when the clicked row is part of the selection. */
+	function selectedRefs(location: VmLocation, selected: unknown): VmRef[] {
+		const refs = Array.isArray(selected) ? selected.map(asVmRef).filter((r): r is VmRef => !!r) : [];
+		const same = (a: VmRef, b: VmRef) => a.clusterId === b.clusterId && a.nodeId === b.nodeId && a.vmId === b.vmId;
+		if (!refs.some((r) => same(r, location.ref))) return [location.ref];
+		return refs.filter((r, i) => refs.findIndex((o) => same(o, r)) === i);
+	}
+
+	/** A group named by the argument: a group row, `"web"` or `{ "group": "web" }`; asks when there is none. */
+	async function resolveGroup(arg: Arg, placeholder: string): Promise<string | undefined> {
+		const a = asRecord(arg);
+		const named = typeof arg === 'string' ? arg : typeof a?.group === 'string' ? a.group : a?.kind === 'group' && typeof a.id === 'string' ? groupsTree.groupName(a.id) : undefined;
+		const groups = marks.groups();
+		if (named !== undefined) {
+			const found = groups.find((g) => sameName(g, named));
+			if (!found) void vscode.window.showErrorMessage(`There is no group called "${named}".`);
+			return found;
+		}
+		if (!groups.length) {
+			void vscode.window.showInformationMessage('There are no groups yet.');
+			return undefined;
+		}
+		return vscode.window.showQuickPick(groups, { placeHolder: placeholder });
+	}
+
+	async function askGroupName(title: string, value = '', renaming?: string): Promise<string | undefined> {
+		const name = await vscode.window.showInputBox({
+			title,
+			value,
+			placeHolder: 'web servers',
+			validateInput: (input) => groupNameProblem(input, marks.groups(), renaming)
+		});
+		return name?.trim() ? name : undefined;
+	}
+
+	async function newGroup(): Promise<void> {
+		const name = await askGroupName('New Group');
+		if (!name) return;
+		const created = await marks.createGroup(name);
+		void vscode.window.setStatusBarMessage(`Group "${created}" made: drag machines into it, or use Add to Group… on a machine.`, 5000);
+	}
+
+	async function addToGroup(arg: Arg, selected: unknown): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to add to a group');
+		if (!location) return;
+		const refs = selectedRefs(location, selected);
+		const named = asRecord(arg)?.group;
+		let group = typeof named === 'string' ? named : undefined;
+		if (!group) {
+			const inAll = (g: string) => refs.every((r) => marks.groupsOf(r).some((m) => sameName(m, g)));
+			const NEW = '$(new-folder) New Group…';
+			const picked = await vscode.window.showQuickPick(
+				[...marks.groups().filter((g) => !inAll(g)).map((g) => ({ label: g, iconPath: new vscode.ThemeIcon('folder') })), { label: NEW, alwaysShow: true }],
+				{ placeHolder: refs.length > 1 ? `Add ${refs.length} machines to` : `Add ${location.vm.name} to` }
+			);
+			if (!picked) return;
+			group = picked.label === NEW ? await askGroupName('New Group') : picked.label;
+			if (!group) return;
+		}
+		if (sameName(group, FAVORITES_LABEL)) return marks.setFavorite(refs, true);
+		await marks.addToGroup(refs, group);
+	}
+
+	/** From the Groups view the row says which group; elsewhere the user picks one of the machine's groups. */
+	async function removeFromGroup(arg: Arg, selected: unknown): Promise<void> {
+		const parent = asRecord(arg)?.parent;
+		const location = await resolveVm(arg, 'Select a virtual machine to remove from a group', (l) => marks.groupsOf(l.ref).length > 0);
+		if (!location) return;
+		const refs = selectedRefs(location, selected);
+		if (parent === FAVORITES) return marks.setFavorite(refs, false);
+		const named = asRecord(arg)?.group;
+		let group = typeof parent === 'string' ? groupsTree.groupName(parent) : typeof named === 'string' ? named : undefined;
+		if (!group) {
+			const groups = marks.groupsOf(location.ref);
+			group = groups.length === 1 ? groups[0] : await vscode.window.showQuickPick(groups, { placeHolder: `Remove ${location.vm.name} from` });
+		}
+		if (group) await marks.removeFromGroup(refs, group);
+	}
+
+	async function renameGroup(arg: Arg): Promise<void> {
+		const group = await resolveGroup(arg, 'Select a group to rename');
+		if (!group) return;
+		const name = await askGroupName(`Rename Group "${group}"`, group, group);
+		if (name) await marks.renameGroup(group, name);
+	}
+
+	async function deleteGroup(arg: Arg): Promise<void> {
+		const group = await resolveGroup(arg, 'Select a group to delete');
+		if (!group) return;
+		const choice = await vscode.window.showWarningMessage(`Delete the group "${group}"?`, { modal: true, detail: 'Its machines are not touched; they only leave the group.' }, 'Delete Group');
+		if (choice) await marks.deleteGroup(group);
+	}
 
 	async function showLog(arg: Arg): Promise<void> {
 		const location = await resolveVm(arg, 'Select a virtual machine to show the log of');
 		if (location) await activity.show(location.ref);
 	}
 
-	async function favorite(arg: Arg, on: boolean): Promise<void> {
+	async function favorite(arg: Arg, selected: unknown, on: boolean): Promise<void> {
 		const location = await resolveVm(arg, on ? 'Select a virtual machine to add to Favorites' : 'Select a virtual machine to remove from Favorites', (l) => marks.isFavorite(l.ref) !== on);
-		if (location) await marks.setFavorite([location.ref], on);
-	}
-
-	async function editTags(arg: Arg): Promise<void> {
-		const location = await resolveVm(arg, 'Select a virtual machine to tag');
-		if (!location) return;
-		const known = marks.knownTags();
-		const value = await vscode.window.showInputBox({
-			title: `Tags of ${location.vm.name}`,
-			prompt: `Separate tags with commas; empty removes them all.${known.length ? ` In use: ${known.join(', ')}` : ''}`,
-			value: marks.tags(location.ref).join(', '),
-			placeHolder: 'web, lab'
-		});
-		if (value === undefined) return;
-		await marks.setTags([location.ref], parseTags(value));
-		if (groupBySetting() !== 'tag' && parseTags(value).length && !context.globalState.get('vmm.notice.groupByTag')) {
-			await context.globalState.update('vmm.notice.groupByTag', true);
-			const choice = await vscode.window.showInformationMessage('Tags show in the tooltip. Group the Virtual Machines view by tag?', 'Group by Tag');
-			if (choice) await vscode.workspace.getConfiguration('vmm').update('tree.groupBy', 'tag', vscode.ConfigurationTarget.Global);
-		}
+		if (location) await marks.setFavorite(selectedRefs(location, selected), on);
 	}
 
 	async function chooseGrouping(): Promise<void> {
 		const current = groupBySetting();
 		const items: Array<vscode.QuickPickItem & { value: GroupBy }> = [
 			{ label: 'Cluster', description: 'cluster › node › machine', value: 'cluster' },
-			{ label: 'Tag', description: 'a group per tag; a machine with two tags is in both', value: 'tag' },
+			{ label: 'Group', description: 'your groups; a machine in two groups is in both', value: 'group' },
 			{ label: 'State', description: 'running, off, …', value: 'state' }
 		].map((item) => ({ ...item, label: `${item.value === current ? '$(check) ' : ''}${item.label}` })) as Array<vscode.QuickPickItem & { value: GroupBy }>;
 		const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Group the virtual machines by' });
@@ -986,9 +1062,13 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register('vmm.connectSerial', (arg) => connectSerial(arg)),
 		register('vmm.openExternal', (arg) => openExternal(arg)),
 		register('vmm.showVmLog', (arg) => showLog(arg)),
-		register('vmm.addToFavorites', (arg) => favorite(arg, true)),
-		register('vmm.removeFromFavorites', (arg) => favorite(arg, false)),
-		register('vmm.editTags', (arg) => editTags(arg)),
+		register('vmm.addToFavorites', (arg, selected) => favorite(arg, selected, true)),
+		register('vmm.removeFromFavorites', (arg, selected) => favorite(arg, selected, false)),
+		register('vmm.addToGroup', (arg, selected) => addToGroup(arg, selected)),
+		register('vmm.removeFromGroup', (arg, selected) => removeFromGroup(arg, selected)),
+		register('vmm.newGroup', () => newGroup()),
+		register('vmm.renameGroup', (arg) => renameGroup(arg)),
+		register('vmm.deleteGroup', (arg) => deleteGroup(arg)),
 		register('vmm.groupBy', () => chooseGrouping()),
 		register('vmm.getVmAddress', (arg) => vmAddress(arg, 'host')),
 		register('vmm.getVmSshPort', (arg) => vmAddress(arg, 'port')),

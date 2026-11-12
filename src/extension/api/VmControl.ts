@@ -38,7 +38,8 @@ export class VmControl implements VmControlApi, vscode.Disposable {
 			node: location.node.name,
 			state: location.vm.state,
 			ipAddresses: [...(location.vm.ipAddresses ?? [])],
-			tags: this.marks.tags(location.ref)
+			favorite: this.marks.isFavorite(location.ref),
+			groups: this.marks.groupsOf(location.ref)
 		};
 	}
 

@@ -34,9 +34,18 @@ function regexOf(when: string): RegExp {
 	return new RegExp(match[1]);
 }
 
-function commandsFor(menu: string, contextValue: string, { inline = false } = {}): string[] {
+/** Whether an item's `view == …` / `view =~ /…/` part (if any) holds in `view`. */
+function inView(when: string, view: string): boolean {
+	const eq = /view == (\S+)/.exec(when);
+	if (eq) return eq[1] === view;
+	const re = /view =~ \/(.*?)\/ &&/.exec(when);
+	return re ? new RegExp(re[1]).test(view) : true;
+}
+
+function commandsFor(menu: string, contextValue: string, { inline = false, view = 'vmm.clusters' } = {}): string[] {
 	return menus[menu]
 		.filter((m) => m.group.startsWith('inline') === inline)
+		.filter((m) => inView(m.when, view))
 		.filter((m) => regexOf(m.when).test(contextValue))
 		.map((m) => m.command);
 }
@@ -68,7 +77,7 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 			'vmm.deleteVm',
 			'vmm.showVmLog',
 			'vmm.addToFavorites',
-			'vmm.editTags',
+			'vmm.addToGroup',
 			'vmm.copyId'
 		]);
 	});
@@ -85,7 +94,7 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 			'vmm.deleteVm',
 			'vmm.showVmLog',
 			'vmm.addToFavorites',
-			'vmm.editTags',
+			'vmm.addToGroup',
 			'vmm.copyId'
 		]);
 	});
@@ -101,7 +110,7 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 			'vmm.deleteVm',
 			'vmm.showVmLog',
 			'vmm.addToFavorites',
-			'vmm.editTags',
+			'vmm.addToGroup',
 			'vmm.copyId'
 		]);
 		const poweringOff = { ...vm('stopping'), operation: 'stop' as const };
@@ -118,14 +127,14 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 
 	it('only offers actions the provider supports', () => {
 		const limited: Capabilities = { ...caps, power: ['start', 'stop'], consoles: [], preview: false, external: false, edit: false, delete: false };
-		expect(commandsFor(menu, vmContextValue(vm('running'), limited))).toEqual(['vmm.stop', 'vmm.showVmLog', 'vmm.addToFavorites', 'vmm.editTags', 'vmm.copyId']);
+		expect(commandsFor(menu, vmContextValue(vm('running'), limited))).toEqual(['vmm.stop', 'vmm.showVmLog', 'vmm.addToFavorites', 'vmm.addToGroup', 'vmm.copyId']);
 	});
 
 	it('offers Remove from Favorites instead of Add for a favorite, whatever the provider can do', () => {
 		const fav = commandsFor(menu, vmContextValue({ ...vm('running'), favorite: true }, caps));
 		expect(fav).toContain('vmm.removeFromFavorites');
 		expect(fav).not.toContain('vmm.addToFavorites');
-		expect(commandsFor(menu, vmContextValue({ ...vm('stopped'), favorite: true }, undefined))).toEqual(['vmm.showVmLog', 'vmm.removeFromFavorites', 'vmm.editTags', 'vmm.copyId']);
+		expect(commandsFor(menu, vmContextValue({ ...vm('stopped'), favorite: true }, undefined))).toEqual(['vmm.showVmLog', 'vmm.removeFromFavorites', 'vmm.addToGroup', 'vmm.copyId']);
 	});
 
 	it('offers create on nodes and management on clusters', () => {
@@ -339,12 +348,29 @@ describe('cancel sign-in', () => {
 	});
 });
 
+describe('Groups view', () => {
+	const menu = 'view/item/context';
+	it('lists a machine with the same menu as Clusters, plus an inline Remove from Group', () => {
+		const value = vmContextValue(vm('running'), caps);
+		expect(commandsFor(menu, value, { view: 'vmm.groups' })).toEqual(commandsFor(menu, value));
+		expect(commandsFor(menu, value, { view: 'vmm.groups', inline: true })).toContain('vmm.removeFromGroup');
+		expect(commandsFor(menu, value, { inline: true })).not.toContain('vmm.removeFromGroup');
+	});
+	it("renames and deletes only the user's own groups", () => {
+		expect(commandsFor(menu, 'group;custom;', { view: 'vmm.groups' })).toEqual(['vmm.newGroup', 'vmm.renameGroup', 'vmm.deleteGroup']);
+		expect(commandsFor(menu, 'group;custom;')).toEqual(['vmm.renameGroup', 'vmm.deleteGroup']);
+		expect(commandsFor(menu, 'group;favorites;', { view: 'vmm.groups' })).toEqual(['vmm.newGroup']);
+		expect(commandsFor(menu, 'group;other;')).toEqual([]);
+	});
+});
+
 describe('overview menu', () => {
 	// Same check as the VS Code integration test, so a missing entry fails fast and locally.
 	it('mirrors the tree menu: same commands, same state rules, same order', () => {
 		const tree = menus['view/item/context']
-			.filter((m) => !m.group.startsWith('inline'))
-			.map((m) => [m.command, m.when.replace('view == vmm.clusters && viewItem', '')]);
+			// Group rows (the user's groups) only exist in the tree.
+			.filter((m) => !m.group.startsWith('inline') && !m.when.includes('viewItem =~ /^group;'))
+			.map((m) => [m.command, m.when.replace(/^view (==|=~) \S+ && viewItem/, '')]);
 		const overview = menus['webview/context'].map((m) => [m.command, m.when.replace('webviewId == vmm.overview && vmmItem', '')]);
 		expect(overview).toEqual(tree);
 	});
