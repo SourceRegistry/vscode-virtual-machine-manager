@@ -1,5 +1,14 @@
 # Changelog
 
+# [0.10.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.9.0...vm-manager-qemu-v0.10.0) (2026-11-12)
+
+
+### Features
+
+* Groups view with Favorites and user-defined groups ([fd3920b](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/fd3920b69110d753d7337fb48363598f497de7ae))
+* **qemu:** shutdown countdown, emulated guests and QEMU's output in the machine log ([559730b](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/559730bb4530c77a95f4f679134ea0166a0a8da9))
+* **sdk:** shutdown timeout, emulated guests, hypervisor logs, and an API for other extensions ([8a78690](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/8a78690cf601899ee5ad925714920f05f86a1df9))
+
 # [0.9.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.8.1...vm-manager-qemu-v0.9.0) (2026-11-12)
 
 
