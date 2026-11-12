@@ -1,5 +1,13 @@
 # Changelog
 
+# [0.9.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-hyperv-v0.8.0...vm-manager-hyperv-v0.9.0) (2026-11-12)
+
+
+### Features
+
+* Groups view with Favorites and user-defined groups ([fd3920b](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/fd3920b69110d753d7337fb48363598f497de7ae))
+* **sdk:** shutdown timeout, emulated guests, hypervisor logs, and an API for other extensions ([8a78690](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/8a78690cf601899ee5ad925714920f05f86a1df9))
+
 # [0.8.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-hyperv-v0.7.1...vm-manager-hyperv-v0.8.0) (2026-11-12)
 
 
