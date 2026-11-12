@@ -1,6 +1,7 @@
 import { spawn, execFile } from 'node:child_process';
 import { connect, type Socket } from 'node:net';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { closeSync, constants, open } from 'node:fs';
+import { ReadStream, WriteStream } from 'node:tty';
 import { Duplex } from 'node:stream';
 import { ProviderError, type ConsoleStream } from '@vmm/sdk';
 import type { SshTarget } from './uri';
@@ -62,19 +63,32 @@ export async function openEndpoint(endpoint: Endpoint, ssh: SshTarget | undefine
 /** The serial console of a domain on this computer: a pseudo-terminal, put in raw mode so the guest does the echo. */
 export async function openPty(path: string): Promise<ConsoleStream> {
 	if (!/^\/dev\/[\w/.-]+$/.test(path)) throw new ProviderError(`Unexpected serial device ${path}.`, 'invalid');
+	// tty streams wait for data on the event loop. A file stream would park a libuv threadpool thread in a blocking
+	// read() that closing the file does not end, so a quiet guest would keep a thread per console ever opened.
+	// One descriptor each way: each tty stream closes its own.
+	const fds: number[] = [];
+	let reader: ReadStream | undefined;
+	let writer: WriteStream | undefined;
+	try {
+		for (let i = 0; i < 2; i++) fds.push(await new Promise<number>((resolve, reject) => open(path, constants.O_RDWR | constants.O_NOCTTY, (e, fd) => (e ? reject(e) : resolve(fd)))));
+		reader = new ReadStream(fds[0]);
+		writer = new WriteStream(fds[1]);
+	} catch (e) {
+		reader?.destroy();
+		for (const fd of fds.slice(reader ? 1 : 0)) closeSync(fd);
+		throw new ProviderError(`Could not open the serial console ${path}: ${(e as Error).message}. Another program may hold it.`, 'unavailable');
+	}
+	const stream = Duplex.from({ readable: reader, writable: writer });
+	// Closing a terminal ends its pending read; that is not an error worth surfacing.
+	reader.on('error', () => {});
+	writer.on('error', () => {});
+	stream.on('error', () => {});
+	// Raw mode only after the open: a terminal nobody holds gets its default settings back when it is opened
+	// (macOS), and with echo on, the guest's own output is echoed back to it as typing.
 	await new Promise<void>((resolve) => {
 		// BSD and GNU stty differ in how they name the device; the other one fails harmlessly.
 		execFile('stty', [process.platform === 'darwin' ? '-f' : '-F', path, 'raw', '-echo'], () => resolve());
 	});
-	const reader = createReadStream(path);
-	const writer = createWriteStream(path);
-	const stream = Duplex.from({ readable: reader, writable: writer });
-	// Closing a terminal aborts its pending read; that is not an error worth surfacing.
-	reader.on('error', () => {});
-	writer.on('error', () => {});
-	stream.on('error', () => {});
-	await new Promise<void>((resolve, reject) => { reader.once('open', () => resolve()); reader.once('error', reject); }).catch((e: Error) => {
-		throw new ProviderError(`Could not open the serial console ${path}: ${e.message}. Another program may hold it.`, 'unavailable');
-	});
-	return { stream, dispose: () => { reader.destroy(); writer.destroy(); stream.destroy(); } };
+	const r = reader, w = writer;
+	return { stream, dispose: () => { r.destroy(); w.destroy(); stream.destroy(); } };
 }
