@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { cloudInitProblem, hostnameFor, metaData, sha512Crypt, userData, validCloudUser, validHostname, validSshPublicKey } from '../src/cloudInit';
+import { cloudInitProblem, hostnameFor, metaData, sha512Crypt, userData, validCloudUser, validHostname, validSshPublicKey } from '../src/provisioning/cloudInit';
 
 const KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl me@laptop';
 

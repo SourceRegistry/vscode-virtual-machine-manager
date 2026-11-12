@@ -15,7 +15,8 @@
     "resolveJsonModule": true,
     "types": ["node", "vscode"],
     "paths": {
-      "@vmm/sdk": ["./packages/sdk/src/index.ts"]
+      "@vmm/sdk": ["./packages/sdk/src/index.ts"],
+      "@vmm/sdk/provisioning": ["./packages/sdk/src/provisioning/index.ts"]
     }
   }
 }

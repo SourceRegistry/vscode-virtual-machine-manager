@@ -10,8 +10,11 @@ src/extension/        core extension host (registry, clusters, tree, commands, w
 src/shared/           host ⇄ webview protocol types
 src/lib/client-lib/   client-lib (git submodule, branch migration/svelte-standards — never edited here)
 src/lib/client/       extension UI: views, components, SvelteKit shims, VS Code theme bridge
-packages/sdk/         @vmm/sdk — provider API shared by core and providers
+packages/sdk/         @vmm/sdk — provider API shared by core and providers;
+                      @vmm/sdk/provisioning — cloud images, cloud-init, cidata ISO (Node only, not for the webview)
 extensions/hyperv/    Hyper-V provider extension
+extensions/libvirt/   libvirt provider extension
+extensions/proxmox/   Proxmox VE provider extension
 extensions/qemu/      QEMU provider extension
 vendor/ironrdp/       vendored IronRDP web client (WebAssembly) for the RDP console
 media/marketplace/    Marketplace icon artwork
@@ -75,11 +78,25 @@ node scripts/vendor-ironrdp.mjs
 ## Marketplace icons
 
 The icons are rendered from `media/marketplace/icon.svg`; the provider icons add a badge with the
-platform logo (`hyperv.svg`, `qemu.svg`). After changing the artwork:
+platform logo (`media/marketplace/<id>.svg`, listed in `BADGES` in `scripts/render-icons.mjs`). After
+changing the artwork or adding a provider:
 
 ```sh
 node scripts/render-icons.mjs
 ```
+
+### Adding a provider extension
+
+The build (`esbuild.mjs`), the type check (`npm run check`), packaging and releases find every
+directory in `extensions/` on their own. A new provider needs:
+
+- `extensions/<id>/src/extension.ts` (bundled to `dist/extension.js`, which `main` must name) and a `tsconfig.json`
+- its platform logo as `media/marketplace/<id>.svg` and an entry in `BADGES`, then `node scripts/render-icons.mjs`
+  to write `extensions/<id>/media/icon.png`; `"icon": "media/icon.png"` in its `package.json`
+- a `.vscodeignore` that keeps `package.json`, `README.md`, `LICENSE`, `CHANGELOG.md`, `dist/extension.js` and `media/**`
+
+`test/extensions.test.ts` fails when any of these is missing, so `npm test` catches a provider that
+would ship without its icon.
 
 ## Releasing
 

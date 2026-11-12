@@ -1,11 +1,14 @@
 /**
  * End to end against a real libvirt (`VMM_E2E_LIBVIRT=1`): defines a throw-away domain in `qemu:///session`,
  * then drives the provider through virsh. Written for Apple Silicon (HVF, aarch64 `virt`); other hosts skip it.
- * `VMM_E2E_GUEST_IMAGE` (a qcow2) adds a disk, so the snapshot steps have something to snapshot.
+ * `VMM_E2E_GUEST_IMAGE` (a qcow2) adds a disk, so the snapshot steps have something to snapshot. When it is
+ * a cloud image (debian-*-genericcloud-arm64.qcow2), a domain is also created from it with cloud-init and
+ * booted until the guest agent cloud-init installs answers (needs internet in the guest, a few minutes).
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ClusterConfig, ProviderContext } from '@vmm/sdk';
@@ -143,4 +146,73 @@ describe.skipIf(!enabled)('libvirt provider against real libvirt', () => {
 			expect(existsSync(join(dir, 'disk.qcow2'))).toBe(false);
 		}
 	}, 60_000);
+
+	it('creates a domain through the provider, boots it and deletes it with its disk', async () => {
+		const name = `${NAME}-new`;
+		const schema = await connection.getCreateSchema('host');
+		expect(schema.map((f) => f.key)).toEqual(expect.arrayContaining(['name', 'cpus', 'memoryMB', 'diskGB', 'pool', 'network']));
+		try {
+			const vm = await connection.createVm('host', { name, cpus: 1, memoryMB: 512, diskGB: 1, network: 'user', pool: String(schema.find((f) => f.key === 'pool')!.default ?? ''), diskBus: 'virtio', iso: join(dir, 'empty.iso') });
+			expect(vm).toMatchObject({ name, state: 'stopped', cpus: 1, memoryMB: 512 });
+			expect(vm.consoles).toEqual(['vnc', 'serial']);
+			await connection.power('host', vm.id, 'start');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'running', 'running');
+			const details = await connection.getVmDetails('host', vm.id);
+			expect(details.disks.some((d) => d.id === 'vda')).toBe(true);
+			await connection.power('host', vm.id, 'stop');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'stopped', 'stopped');
+			await connection.deleteVm('host', vm.id, { deleteDisks: true });
+			expect(v('vol-list', '--pool', String(schema.find((f) => f.key === 'pool')!.default || 'default'))).not.toContain(`${name}.qcow2`);
+		} finally {
+			try { v('destroy', name); } catch { /* not running */ }
+			try { v('undefine', name, '--nvram', '--managed-save', '--storage', 'vda'); } catch { /* gone */ }
+		}
+	}, 120_000);
+	it.runIf(!!image && /cloud/.test(image ?? ''))('creates a domain from a cloud image, cloud-init sets it up, and deletes it with its volumes', async () => {
+		const name = `${NAME}-cloud`;
+		const schema = await connection.getCreateSchema('host');
+		const pool = String(schema.find((f) => f.key === 'pool')!.default || 'default');
+		try {
+			const vm = await connection.createVm('host', {
+				name, source: 'cloud', cloudImage: 'custom', cloudImageFile: image, ciUser: 'vmm', ciPassword: 'vmm-e2e', ciAgent: true,
+				cpus: 2, memoryMB: 1024, diskGB: 6, network: 'user', pool
+			});
+			const volumes = v('vol-list', '--pool', pool);
+			expect(volumes).toContain(`${name}.qcow2`);
+			expect(volumes).toContain(`${name}-cidata.iso`);
+			expect(v('vol-dumpxml', '--pool', pool, `${name}.qcow2`)).toContain(`<capacity unit='bytes'>${6 * 1024 ** 3}</capacity>`);
+			await connection.power('host', vm.id, 'start');
+			// The agent only runs when cloud-init read the seed and installed it: proof the user-data was applied.
+			await until(async () => { try { v('qemu-agent-command', name, '{"execute":"guest-ping"}'); return true; } catch { return false; } }, 'the guest agent', 6 * 60_000);
+			const hostname = JSON.parse(v('qemu-agent-command', name, '{"execute":"guest-get-host-name"}')).return['host-name'];
+			expect(hostname).toBe(name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+
+			// User-mode networking: SSH is reached through a forward, which comes back after a restart.
+			const port = 20000 + (process.pid % 20000);
+			await connection.addPortForward!('host', vm.id, { protocol: 'tcp', hostPort: port, guestPort: 22 });
+			expect((await connection.getVmDetails('host', vm.id)).forwards).toEqual([{ protocol: 'tcp', hostAddress: '127.0.0.1', hostPort: port, guestPort: 22 }]);
+			const banner = () => new Promise<string>((resolve, reject) => {
+				const socket = connect(port, '127.0.0.1');
+				socket.once('data', (d) => { resolve(d.toString('latin1')); socket.destroy(); });
+				socket.once('error', reject);
+				setTimeout(() => { socket.destroy(); reject(new Error('no SSH banner')); }, 5000);
+			});
+			await until(async () => /^SSH-2\.0-/.test(await banner().catch(() => '')), 'the SSH banner through the forward', 60_000);
+			await connection.power('host', vm.id, 'stop');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'stopped', 'stopped');
+			await connection.power('host', vm.id, 'start');
+			await until(async () => /^SSH-2\.0-/.test(await banner().catch(() => '')), 'the SSH banner after a restart', 3 * 60_000);
+			await connection.removePortForward!('host', vm.id, { protocol: 'tcp', hostPort: port, guestPort: 22 });
+			expect((await connection.getVmDetails('host', vm.id)).forwards).toEqual([]);
+			await connection.power('host', vm.id, 'stop');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'stopped', 'stopped');
+			await connection.deleteVm('host', vm.id, { deleteDisks: true });
+			const after = v('vol-list', '--pool', pool);
+			expect(after).not.toContain(`${name}.qcow2`);
+			expect(after).not.toContain(`${name}-cidata.iso`);
+		} finally {
+			try { v('destroy', name); } catch { /* not running */ }
+			try { v('undefine', name, '--nvram', '--managed-save', '--remove-all-storage'); } catch { /* gone */ }
+		}
+	}, 12 * 60_000);
 });

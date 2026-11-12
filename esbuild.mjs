@@ -3,24 +3,20 @@
 //
 //   node esbuild.mjs                 build all
 //   node esbuild.mjs --watch         rebuild on change
-//   node esbuild.mjs --only hyperv   build one target (core | hyperv | qemu | proxmox | libvirt)
+//   node esbuild.mjs --only hyperv   build one target (core, or a directory name in extensions/)
+//
+// The targets come from scripts/packages.mjs: a new directory in extensions/ is built without
+// touching this file. Its entry point is src/extension.ts, its bundle dist/extension.js.
 import * as esbuild from 'esbuild';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { buildTargets, root } from './scripts/packages.mjs';
 
-const root = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const watch = args.includes('--watch');
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : undefined;
 const production = !watch && process.env.NODE_ENV !== 'development';
 
-const targets = {
-	core: { entry: 'src/extension/extension.ts', out: 'dist/extension.js' },
-	hyperv: { entry: 'extensions/hyperv/src/extension.ts', out: 'extensions/hyperv/dist/extension.js' },
-	libvirt: { entry: 'extensions/libvirt/src/extension.ts', out: 'extensions/libvirt/dist/extension.js' },
-	proxmox: { entry: 'extensions/proxmox/src/extension.ts', out: 'extensions/proxmox/dist/extension.js' },
-	qemu: { entry: 'extensions/qemu/src/extension.ts', out: 'extensions/qemu/dist/extension.js' }
-};
+const targets = buildTargets();
 
 /** @type {import('esbuild').Plugin} */
 const problemMatcher = {
@@ -53,7 +49,8 @@ const contexts = await Promise.all(
 			platform: 'node',
 			target: 'node20',
 			external: ['vscode'],
-			alias: { '@vmm/sdk': path.join(root, 'packages/sdk/src/index.ts') },
+			// The directory, so the Node-only subpath `@vmm/sdk/provisioning` resolves too.
+			alias: { '@vmm/sdk': path.join(root, 'packages/sdk/src') },
 			sourcemap: !production,
 			sourcesContent: false,
 			minify: production,

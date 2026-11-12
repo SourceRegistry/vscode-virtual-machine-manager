@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { isFieldVisible, type FieldValues } from '@vmm/sdk';
 import { describe, expect, it } from 'vitest';
-import { cloudFields, defaultCloudUser, localSshPublicKey, parseKeys } from '../src/provision';
+import { cloudFields, defaultCloudUser, localSshPublicKey, parseKeys } from '../src/provisioning/fields';
 
 const KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl me@laptop';
 
