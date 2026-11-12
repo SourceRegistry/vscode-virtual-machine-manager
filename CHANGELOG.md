@@ -1,5 +1,14 @@
 # Changelog
 
+# [0.14.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.13.0...v0.14.0) (2026-11-12)
+
+
+### Features
+
+* agents hand back the keyboard and mouse; per-machine permission ([dad5c88](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/dad5c888df31fc9c80aecf1bd147434152e45a71))
+* language model tools and an MCP server for AI agents ([bcce5f4](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/bcce5f473e8944f7a98e969c75cfe7cbbff29538))
+* let AI agents see a VM's screen and use its keyboard and mouse ([27f776d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/27f776d0f58a166a82a3b1c181dd1d4a59b14b0e))
+
 # [0.13.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.12.0...v0.13.0) (2026-11-12)
 
 
