@@ -392,7 +392,23 @@ export class QemuConnection implements ClusterConnection {
 		private readonly imageDirectory = host.path.join(host.path.dirname(vmDirectory), 'images')
 	) {
 		// Importing from a folder and PCI/USB passthrough read this computer's own files and devices.
-		this.capabilities = host.remote ? { ...this.baseCapabilities, passthrough: false, importFolder: false, remotePaths: true } : this.baseCapabilities;
+		const capabilities = host.remote ? { ...this.baseCapabilities, passthrough: false, importFolder: false, remotePaths: true } : this.baseCapabilities;
+		this.capabilities = { ...capabilities, shutdownTimeoutSeconds: Math.round(shutdownTimeoutMs / 1000) };
+	}
+
+	/** Software emulation: another architecture than the host's, or no accelerator for this one (TCG only). */
+	private emulated(arch: Arch): boolean {
+		if (!this.native(arch)) return true;
+		try {
+			return (this.acceleratorsOf(arch)[0]?.split(',')[0] ?? 'tcg') === 'tcg';
+		} catch {
+			return false;
+		}
+	}
+
+	/** QEMU's own output (stderr) for a VM started here; an attached one has none. */
+	async readVmLog(_nodeId: string, vmId: string): Promise<string | undefined> {
+		return this.host.readFile(this.host.path.join(this.dir(vmId), 'qemu.log')).catch(() => undefined);
 	}
 
 	/** Whether guests of this architecture run natively on the host (the VM host, not this computer). */
@@ -594,7 +610,8 @@ export class QemuConnection implements ClusterConnection {
 					mediaInserted,
 					origin: def.origin,
 					template: def.template,
-					controllable: runtime ? hasControlChannel(runtime) : undefined
+					controllable: runtime ? hasControlChannel(runtime) : undefined,
+					emulated: this.emulated(guestArch(def)) || undefined
 				} satisfies VmInfo;
 			})
 		);
