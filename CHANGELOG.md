@@ -1,5 +1,20 @@
 # Changelog
 
+# [0.10.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.9.0...v0.10.0) (2026-11-12)
+
+
+### Bug Fixes
+
+* **libvirt:** ARM guests on Linux hosts, a first pool for qemu:///system; SSH end-to-end test ([c3ecc2d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/c3ecc2d600881b85c0fb2e6b97eff4d3fcfe4fca))
+* **sdk:** fall back to Debian's generic image when latest has no genericcloud ([4b9c217](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/4b9c217ea3dc60c2ccc0a3dfd702d1595b03721e))
+
+
+### Features
+
+* **libvirt:** create domains from a cloud image with cloud-init ([a461889](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/a4618894a5bf2d22db0f3ffbcf6dd6f19ab0be79))
+* **libvirt:** create domains from an installer ISO ([864f610](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/864f610021dcc57a0f2349fd185205004707d8da))
+* **libvirt:** port forwards for domains on user-mode networking ([7be9a1d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/7be9a1d4eaa833a1e9a75f010932fe846a3d3e23))
+
 # [0.9.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.8.0...v0.9.0) (2026-11-10)
 
 
