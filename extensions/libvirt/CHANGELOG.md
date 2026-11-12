@@ -1,5 +1,18 @@
 # Changelog
 
+# [1.3.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-libvirt-v1.2.0...vm-manager-libvirt-v1.3.0) (2026-11-12)
+
+
+### Bug Fixes
+
+* **sdk:** a missing file in the guest is not a missing guest agent ([2bbd5a7](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/2bbd5a7315a22bf89a0917eda4adf1bfc664f737))
+
+
+### Features
+
+* **libvirt:** commands and files in the guest; guest memory from the balloon ([503654a](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/503654a71732617a5209d9a5d24ebbe0c99bf550))
+* **sdk:** run commands and copy files in a guest through its agent ([02ccf2d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/02ccf2d61dad310cff89b8312ba6db192b8791b6))
+
 # [1.2.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-libvirt-v1.1.0...vm-manager-libvirt-v1.2.0) (2026-11-12)
 
 
