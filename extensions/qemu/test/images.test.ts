@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { LocalHost } from '../src/host';
-import { CLOUD_IMAGES, ensureImage, findImage, imageFileName, imagesFor, parseChecksums, type CloudImage, type DownloadProgress } from '@vmm/sdk/provisioning';
+import { CLOUD_IMAGES, ensureImage, findImage, imageFileName, imageFileNames, imagesFor, parseChecksums, type CloudImage, type DownloadProgress } from '@vmm/sdk/provisioning';
 import { SshHost } from '../src/sshHost';
 
 describe('catalog', () => {
@@ -160,6 +160,29 @@ describe('ensureImage', () => {
 		await expect(ensureImage(new LocalHost(), { ...image(), url: `${base}/missing.img`, checksumUrl: `${base}/SHA256SUMS` }, freshDir())).rejects.toThrow();
 	});
 
+	it('takes the first fallback the checksum list mentions when the usual file is missing from it', async () => {
+		const target = freshDir();
+		const withFallback = { ...image(), url: `${base}/missing.img`, fallbackUrls: [`${base}/also-missing.img`, `${base}/test.img`] };
+		const file = await ensureImage(new LocalHost(), withFallback, target);
+		expect(file).toBe(path.join(target, 'test.img'));
+		expect(fs.readFileSync(file).equals(content)).toBe(true);
+		expect(requests.some((r) => r.url === '/missing.img')).toBe(false);
+		// Offline, the verified fallback is still found.
+		offline = true;
+		try {
+			expect(await ensureImage(new LocalHost(), withFallback, target)).toBe(file);
+		} finally {
+			offline = false;
+		}
+		const previous = sums;
+		sums = `${goodHash} *another.img\n`;
+		try {
+			await expect(ensureImage(new LocalHost(), withFallback, freshDir())).rejects.toThrow(/missing\.img or also-missing\.img or test\.img/);
+		} finally {
+			sums = previous;
+		}
+	});
+
 	it('uses a verified copy when the network is gone, and fails clearly without one', async () => {
 		const target = freshDir();
 		await ensureImage(new LocalHost(), image(), target);
@@ -206,10 +229,14 @@ describe('ensureImage', () => {
 // The real catalog against the real mirrors. Opt-in (needs the internet):  VMM_E2E_CATALOG=1
 describe.skipIf(!process.env.VMM_E2E_CATALOG)('the catalog against the real mirrors', () => {
 	it.each(CLOUD_IMAGES.map((i) => [i.id, i] as const))('%s is downloadable and listed in its checksum file', async (_id, image) => {
-		const head = await fetch(image.url, { method: 'HEAD', redirect: 'follow' });
-		expect(head.status, image.url).toBe(200);
-		expect(Number(head.headers.get('content-length'))).toBeGreaterThan(100_000_000);
 		const sums = await (await fetch(image.checksumUrl)).text();
-		expect(parseChecksums(sums, imageFileName(image)), image.checksumUrl).toMatch(image.algorithm === 'sha256' ? /^[0-9a-f]{64}$/ : /^[0-9a-f]{128}$/);
+		// The variant ensureImage takes: the usual file, else the first listed fallback.
+		const name = imageFileNames(image).find((f) => parseChecksums(sums, f));
+		expect(name, `${image.checksumUrl} lists none of ${imageFileNames(image).join(', ')}`).toBeDefined();
+		expect(parseChecksums(sums, name!)).toMatch(image.algorithm === 'sha256' ? /^[0-9a-f]{64}$/ : /^[0-9a-f]{128}$/);
+		const url = `${image.checksumUrl.slice(0, image.checksumUrl.lastIndexOf('/'))}/${name}`;
+		const head = await fetch(url, { method: 'HEAD', redirect: 'follow' });
+		expect(head.status, url).toBe(200);
+		expect(Number(head.headers.get('content-length'))).toBeGreaterThan(100_000_000);
 	}, 60_000);
 });

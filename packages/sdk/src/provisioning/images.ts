@@ -47,6 +47,11 @@ export interface CloudImage {
 	label: string;
 	arch: Arch;
 	url: string;
+	/**
+	 * Images to take instead, in order, when the checksum list does not mention `url`'s file: a
+	 * distribution can publish a `latest` build without the usual variant (Debian 13 did, 2026-11).
+	 */
+	fallbackUrls?: string[];
 	/** A `SHA256SUMS` / `SHA512SUMS` file listing the image. */
 	checksumUrl: string;
 	algorithm: 'sha256' | 'sha512';
@@ -54,15 +59,20 @@ export interface CloudImage {
 	defaultUser: string;
 }
 
-function entry(distro: string, label: string, arch: Arch, base: string, file: (a: 'amd64' | 'arm64') => string, sums: string, algorithm: 'sha256' | 'sha512', defaultUser: string): CloudImage {
-	const name = arch === 'x86_64' ? file('amd64') : file('arm64');
-	return { id: `${distro}@${arch}`, label: `${label} (${arch === 'x86_64' ? 'x86-64' : 'ARM64'})`, arch, url: `${base}/${name}`, checksumUrl: `${base}/${sums}`, algorithm, defaultUser };
+function entry(distro: string, label: string, arch: Arch, base: string, files: (a: 'amd64' | 'arm64') => string[], sums: string, algorithm: 'sha256' | 'sha512', defaultUser: string): CloudImage {
+	const [name, ...fallbacks] = files(arch === 'x86_64' ? 'amd64' : 'arm64');
+	return {
+		id: `${distro}@${arch}`, label: `${label} (${arch === 'x86_64' ? 'x86-64' : 'ARM64'})`, arch, url: `${base}/${name}`,
+		...(fallbacks.length ? { fallbackUrls: fallbacks.map((f) => `${base}/${f}`) } : {}),
+		checksumUrl: `${base}/${sums}`, algorithm, defaultUser
+	};
 }
 
+// `genericcloud` is the small kernel for virtual machines; `generic` has every driver and cloud-init too.
 const DEBIAN = (v: string, code: string) => (arch: Arch) =>
-	entry(`debian-${v}`, `Debian ${v} cloud`, arch, `https://cloud.debian.org/images/cloud/${code}/latest`, (a) => `debian-${v}-genericcloud-${a}.qcow2`, 'SHA512SUMS', 'sha512', 'debian');
+	entry(`debian-${v}`, `Debian ${v} cloud`, arch, `https://cloud.debian.org/images/cloud/${code}/latest`, (a) => [`debian-${v}-genericcloud-${a}.qcow2`, `debian-${v}-generic-${a}.qcow2`], 'SHA512SUMS', 'sha512', 'debian');
 const UBUNTU = (v: string) => (arch: Arch) =>
-	entry(`ubuntu-${v}`, `Ubuntu ${v} LTS cloud`, arch, `https://cloud-images.ubuntu.com/releases/${v}/release`, (a) => `ubuntu-${v}-server-cloudimg-${a}.img`, 'SHA256SUMS', 'sha256', 'ubuntu');
+	entry(`ubuntu-${v}`, `Ubuntu ${v} LTS cloud`, arch, `https://cloud-images.ubuntu.com/releases/${v}/release`, (a) => [`ubuntu-${v}-server-cloudimg-${a}.img`], 'SHA256SUMS', 'sha256', 'ubuntu');
 
 export const CLOUD_IMAGES: readonly CloudImage[] = (['x86_64', 'aarch64'] as const).flatMap((arch) => [DEBIAN('13', 'trixie')(arch), DEBIAN('12', 'bookworm')(arch), UBUNTU('24.04')(arch), UBUNTU('22.04')(arch)]);
 
@@ -74,8 +84,15 @@ export function findImage(id: string): CloudImage | undefined {
 	return CLOUD_IMAGES.find((i) => i.id === id);
 }
 
+const fileOf = (url: string): string => decodeURIComponent(url.slice(url.lastIndexOf('/') + 1));
+
 export function imageFileName(image: CloudImage): string {
-	return decodeURIComponent(image.url.slice(image.url.lastIndexOf('/') + 1));
+	return fileOf(image.url);
+}
+
+/** The file names an image can arrive as: its own, then its fallbacks. */
+export function imageFileNames(image: CloudImage): string[] {
+	return [image.url, ...(image.fallbackUrls ?? [])].map(fileOf);
 }
 
 /** The hash of `fileName` in a checksum file: `hash  name`, `hash *name`, or BSD `SHA256 (name) = hash`. */
@@ -119,27 +136,38 @@ async function hashFile(file: string, algorithm: string, onProgress?: (done: num
  * Makes sure `image` is in `dir` on `host`, verified against its published checksum, and returns the path.
  * A cached copy is reused while its checksum is still the published one; a damaged transfer is deleted.
  */
-export async function ensureImage(host: ImageHost, image: CloudImage, dir: string, options: DownloadOptions = {}): Promise<string> {
+export async function ensureImage(host: ImageHost, catalogImage: CloudImage, dir: string, options: DownloadOptions = {}): Promise<string> {
 	const join = host.path.join;
-	const dest = join(dir, imageFileName(image));
-	const marker = markerOf(dest);
 	await host.mkdir(dir);
 
 	options.onProgress?.({ phase: 'checksum' });
 	let expected: string | undefined;
+	// The variant the checksum list offers: the image's own file, else the first fallback it mentions.
+	let image = catalogImage;
 	try {
 		const text = host.remote ? (await host.exec('curl', ['-fsSL', '--max-time', '60', image.checksumUrl], { timeout: 90_000 })).stdout : await (await (options.fetchImpl ?? fetch)(image.checksumUrl, { signal: AbortSignal.timeout(60_000) }).then(okOrThrow)).text();
-		expected = parseChecksums(text, imageFileName(image));
-		if (!expected) throw new ProviderError(`The checksum list at ${image.checksumUrl} does not mention ${imageFileName(image)}.`, 'failed');
+		for (const url of [catalogImage.url, ...(catalogImage.fallbackUrls ?? [])]) {
+			expected = parseChecksums(text, fileOf(url));
+			if (expected) {
+				image = { ...catalogImage, url };
+				break;
+			}
+		}
+		if (!expected) throw new ProviderError(`The checksum list at ${image.checksumUrl} does not mention ${imageFileNames(catalogImage).join(' or ')}.`, 'failed');
 	} catch (error) {
 		// Offline: a copy that was verified earlier is still good.
-		if ((await host.exists(dest)) && (await host.exists(marker))) {
-			options.onProgress?.({ phase: 'cached' });
-			return dest;
+		for (const name of imageFileNames(catalogImage)) {
+			const cached = join(dir, name);
+			if ((await host.exists(cached)) && (await host.exists(markerOf(cached)))) {
+				options.onProgress?.({ phase: 'cached' });
+				return cached;
+			}
 		}
 		if (error instanceof ProviderError) throw error;
 		throw new ProviderError(`Could not get the checksum of ${image.label}: ${(error as Error).message}`, 'unavailable');
 	}
+	const dest = join(dir, imageFileName(image));
+	const marker = markerOf(dest);
 
 	if ((await host.exists(dest)) && (await host.exists(marker)) && (await host.readFile(marker).catch(() => '')).trim() === expected) {
 		options.onProgress?.({ phase: 'cached' });
