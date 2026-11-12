@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.11.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.10.0...v0.11.0) (2026-11-12)
+
+
+### Bug Fixes
+
+* Copy File from Guest suggests /etc/os-release ([60d486d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/60d486d3f785110def99d42af66c293ea95aef04))
+* **sdk:** a missing file in the guest is not a missing guest agent ([2bbd5a7](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/2bbd5a7315a22bf89a0917eda4adf1bfc664f737))
+
+
+### Features
+
+* Run Command in Guest, Copy File to Guest / from Guest ([71f78f4](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/71f78f444ca63d4cf4d3e4279e75d7be57dea3a4))
+* **sdk:** run commands and copy files in a guest through its agent ([02ccf2d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/02ccf2d61dad310cff89b8312ba6db192b8791b6))
+
 # [0.10.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.9.0...v0.10.0) (2026-11-12)
 
 
