@@ -15,11 +15,17 @@ export type AgentCall = <T = unknown>(command: string, args?: Record<string, unk
 /** Turns a failed agent call into something the user can act on. */
 export function explainAgentError(error: unknown): ProviderError {
 	if (error instanceof ProviderError && error.code !== 'failed') return error;
-	const text = error instanceof Error ? error.message : String(error);
+	const raw = error instanceof Error ? error.message : String(error);
+	// libvirt wraps every error the agent returns: "guest agent command failed: unable to execute QEMU agent
+	// command 'guest-file-open': <the agent's own message>". That wrapper says nothing about the agent being gone.
+	const text = raw.replace(/^(?:error:\s*)?(?:guest agent command failed:\s*)?unable to execute QEMU agent command '[^']*':\s*/i, '').trim();
+	// The guest's own answer first: a missing file is not a missing agent.
+	if (/No such file or directory/i.test(text)) return new ProviderError(`Not found in the guest: ${text}`, 'notFound');
+	if (/Permission denied|Access is denied/i.test(text)) return new ProviderError(`The guest refused access: ${text}`, 'permission');
 	if (/has been disabled|not allowed|blocked|is disabled|blacklist|allow-rpcs|block-rpcs/i.test(text)) {
 		return new ProviderError(`The guest agent refuses this (${text}). Some distributions turn off running commands and file access in the agent's configuration (e.g. /etc/sysconfig/qemu-ga on RHEL).`, 'unsupported');
 	}
-	if (/not responding|not connected|No guest agent|timed out|connection (closed|failed)|not available|unable to execute QEMU agent command|agent is not/i.test(text)) {
+	if (/not responding|not connected|No guest agent|timed out|didn't respond|connection (closed|failed)|agent is not available/i.test(text)) {
 		return new ProviderError(`The guest agent does not answer (${text}). Install and start qemu-guest-agent in the guest; the machine also needs the agent channel.`, 'unavailable');
 	}
 	return new ProviderError(text || 'The guest agent failed', 'failed');

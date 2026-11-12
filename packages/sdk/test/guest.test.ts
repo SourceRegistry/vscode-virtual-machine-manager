@@ -140,4 +140,12 @@ describe('copying files', () => {
 	it('maps unknown failures to a plain failure', () => {
 		expect(explainAgentError(new Error('boom'))).toMatchObject({ code: 'failed', message: 'boom' });
 	});
+	it('reads past libvirt\'s wrapper: a missing file is not a missing agent', () => {
+		// Exactly what libvirt 12.9 said for a file Debian 13 does not have.
+		const missing = explainAgentError(new Error("guest agent command failed: unable to execute QEMU agent command 'guest-file-open': failed to open file '/var/log/syslog' (mode: 'rb'): No such file or directory"));
+		expect(missing).toMatchObject({ code: 'notFound', message: "Not found in the guest: failed to open file '/var/log/syslog' (mode: 'rb'): No such file or directory" });
+		expect(explainAgentError(new Error("unable to execute QEMU agent command 'guest-file-open': failed to open file '/root/x' (mode: 'rb'): Permission denied"))).toMatchObject({ code: 'permission' });
+		expect(explainAgentError(new Error("guest agent command timed out: guest agent didn't respond to command within '60' seconds"))).toMatchObject({ code: 'unavailable' });
+		expect(explainAgentError(new Error('Guest agent is not responding: QEMU guest agent is not connected'))).toMatchObject({ code: 'unavailable' });
+	});
 });
