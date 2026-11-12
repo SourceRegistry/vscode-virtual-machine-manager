@@ -48,7 +48,8 @@
   },
   "activationEvents": [
     "onWebviewPanel:vmm.overview",
-    "onTaskType:vm"
+    "onTaskType:vm",
+    "onStartupFinished"
   ],
   "contributes": {
     "viewsContainers": {
@@ -465,6 +466,17 @@
         "title": "Forget Console Sign-in",
         "category": "VM",
         "icon": "$(key)"
+      },
+      {
+        "command": "vmm.mcp.copySetup",
+        "title": "Copy MCP Server Setup",
+        "category": "VM",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "vmm.mcp.resetToken",
+        "title": "Reset MCP Access Token",
+        "category": "VM"
       }
     ],
     "menus": {
@@ -1312,6 +1324,23 @@
             ],
             "default": "cluster",
             "markdownDescription": "How the Clusters view groups machines. Favorites and your groups also have their own view below it."
+          },
+          "vmm.mcp.enabled": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Run an [MCP](https://modelcontextprotocol.io) server so AI agents outside VS Code (Claude Code, other MCP clients) can list and drive your machines. It listens on 127.0.0.1 only, needs an access token (**VM: Copy MCP Server Setup**), and asks you before every action."
+          },
+          "vmm.mcp.port": {
+            "type": "integer",
+            "default": 7254,
+            "minimum": 1024,
+            "maximum": 65535,
+            "markdownDescription": "Port of the MCP server on 127.0.0.1 (`http://127.0.0.1:<port>/mcp`)."
+          },
+          "vmm.agent.allowDestructive": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Let AI agents (agent mode in VS Code and MCP clients) power off or reset machines and revert or delete snapshots. Each call is still confirmed. Off: those calls are refused."
           }
         }
       },
@@ -1460,6 +1489,536 @@
             "minimum": 1,
             "description": "Seconds to wait in all before the task fails."
           }
+        }
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "vmm_list_clusters",
+        "displayName": "List hypervisor clusters",
+        "toolReferenceName": "vm_list_clusters",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "List hypervisor clusters",
+        "modelDescription": "Lists the hypervisor clusters configured in VM Manager (local QEMU, libvirt, Hyper-V, Proxmox, Nutanix…), whether they are connected, and their nodes with the number of machines on each.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_list_vms",
+        "displayName": "List virtual machines",
+        "toolReferenceName": "vm_list_vms",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "List virtual machines",
+        "modelDescription": "Lists the virtual machines and containers of every cluster with their state, IP addresses, vCPUs and memory. Filter by state, cluster or a text in the name. Use this first to find the machine to work on.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "description": "Only machines in this state.",
+              "enum": [
+                "running",
+                "stopped",
+                "paused",
+                "saved",
+                "starting",
+                "stopping",
+                "unknown"
+              ]
+            },
+            "cluster": {
+              "type": "string",
+              "description": "Only machines of the cluster with this name."
+            },
+            "name": {
+              "type": "string",
+              "description": "Only machines whose name contains this text (case-insensitive)."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_get_vm",
+        "displayName": "Get virtual machine details",
+        "toolReferenceName": "vm_get_vm",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Get virtual machine details",
+        "modelDescription": "Describes one machine: state, addresses, its disks, network adapters (with MAC and IP addresses), port forwards and devices, and what can be done with it here (power actions, snapshots, commands in the guest, file copies).",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            }
+          },
+          "required": [
+            "vm"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_get_vm_stats",
+        "displayName": "Get virtual machine usage",
+        "toolReferenceName": "vm_get_vm_stats",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Get virtual machine usage",
+        "modelDescription": "One sample of a running machine's usage: CPU (0..1), memory used and total in MB, uptime, and cumulative disk and network byte counters (take two samples to compute a rate).",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            }
+          },
+          "required": [
+            "vm"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_list_snapshots",
+        "displayName": "List snapshots",
+        "toolReferenceName": "vm_list_snapshots",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "List snapshots",
+        "modelDescription": "Lists the snapshots of a machine, oldest first, with their id, name, time and whether they hold memory state.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            }
+          },
+          "required": [
+            "vm"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_get_vm_address",
+        "displayName": "Get virtual machine address",
+        "toolReferenceName": "vm_get_vm_address",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Get virtual machine address",
+        "modelDescription": "Where to reach a running machine: an IP address, or with ssh=true a host and port where an SSH server answers (a port forward for machines behind NAT). Can wait for the machine to come up.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "ssh": {
+              "type": "boolean",
+              "description": "Return an address where SSH answers (checked with a banner probe) instead of any IP address."
+            },
+            "waitSeconds": {
+              "type": "integer",
+              "description": "Keep trying this long while there is no address yet (0 to 600).",
+              "minimum": 0,
+              "maximum": 600
+            }
+          },
+          "required": [
+            "vm"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_power_vm",
+        "displayName": "Start, shut down or restart a virtual machine",
+        "toolReferenceName": "vm_power_vm",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Start, shut down or restart a virtual machine",
+        "modelDescription": "Changes a machine's power state. start, shutdown (asks the guest to shut down) and reboot are ordinary actions; stop (immediate power off) and reset (hard reset) lose unsaved guest data and are only allowed when the user enabled destructive actions. With wait=true it returns once the machine reached the new state.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "action": {
+              "type": "string",
+              "description": "What to do.",
+              "enum": [
+                "start",
+                "shutdown",
+                "reboot",
+                "stop",
+                "reset"
+              ]
+            },
+            "wait": {
+              "type": "boolean",
+              "description": "Wait until the machine is running (start, reboot, reset) or stopped (shutdown, stop)."
+            },
+            "waitSeconds": {
+              "type": "integer",
+              "description": "How long to wait at most (default 120, at most 600).",
+              "minimum": 1,
+              "maximum": 600
+            }
+          },
+          "required": [
+            "vm",
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_wait_for_state",
+        "displayName": "Wait for a virtual machine state",
+        "toolReferenceName": "vm_wait_for_state",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Wait for a virtual machine state",
+        "modelDescription": "Waits until a machine reaches a state (for example running after a start that was not waited for) and returns it.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "state": {
+              "type": "string",
+              "description": "The state to wait for.",
+              "enum": [
+                "running",
+                "stopped",
+                "paused",
+                "saved"
+              ]
+            },
+            "waitSeconds": {
+              "type": "integer",
+              "description": "At most this long (default 120, at most 600).",
+              "minimum": 1,
+              "maximum": 600
+            }
+          },
+          "required": [
+            "vm",
+            "state"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_take_snapshot",
+        "displayName": "Take a snapshot",
+        "toolReferenceName": "vm_take_snapshot",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Take a snapshot",
+        "modelDescription": "Saves the current state of a machine as a named snapshot it can be reverted to later. Take one before risky changes inside the guest.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "name": {
+              "type": "string",
+              "description": "A short name, for example \"before-upgrade\"."
+            }
+          },
+          "required": [
+            "vm",
+            "name"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_revert_snapshot",
+        "displayName": "Revert to a snapshot",
+        "toolReferenceName": "vm_revert_snapshot",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Revert to a snapshot",
+        "modelDescription": "Returns a machine to a snapshot, discarding everything changed since. Destructive: only allowed when the user enabled destructive actions.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "snapshot": {
+              "type": "string",
+              "description": "The snapshot id or name from vmm_list_snapshots."
+            }
+          },
+          "required": [
+            "vm",
+            "snapshot"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_delete_snapshot",
+        "displayName": "Delete a snapshot",
+        "toolReferenceName": "vm_delete_snapshot",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Delete a snapshot",
+        "modelDescription": "Deletes a snapshot of a machine. Destructive: only allowed when the user enabled destructive actions.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "snapshot": {
+              "type": "string",
+              "description": "The snapshot id or name from vmm_list_snapshots."
+            }
+          },
+          "required": [
+            "vm",
+            "snapshot"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_run_in_guest",
+        "displayName": "Run a command in a virtual machine",
+        "toolReferenceName": "vm_run_in_guest",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Run a command in a virtual machine",
+        "modelDescription": "Runs a program inside a running machine through its guest agent (qemu-guest-agent) and returns its exit code, stdout and stderr. Use shell=true for a command line with pipes or variables (/bin/sh -c, or cmd.exe /c on Windows). Each call is confirmed by the user.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "command": {
+              "type": "string",
+              "description": "The program (absolute path is safest), or with shell=true the whole command line."
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Arguments for the program (without shell)."
+            },
+            "shell": {
+              "type": "boolean",
+              "description": "Run command through the guest's shell."
+            },
+            "input": {
+              "type": "string",
+              "description": "Text given to the program on stdin."
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "description": "How long to wait for it (default 60, at most 600). It keeps running in the guest after a timeout.",
+              "minimum": 1,
+              "maximum": 600
+            }
+          },
+          "required": [
+            "vm",
+            "command"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_copy_to_guest",
+        "displayName": "Copy a file into a virtual machine",
+        "toolReferenceName": "vm_copy_to_guest",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Copy a file into a virtual machine",
+        "modelDescription": "Copies a file from this computer into a running machine through its guest agent, replacing the file at guestPath. Each call is confirmed by the user.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "localPath": {
+              "type": "string",
+              "description": "Absolute path of the file on this computer."
+            },
+            "guestPath": {
+              "type": "string",
+              "description": "Absolute path in the guest."
+            }
+          },
+          "required": [
+            "vm",
+            "localPath",
+            "guestPath"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_copy_from_guest",
+        "displayName": "Copy a file out of a virtual machine",
+        "toolReferenceName": "vm_copy_from_guest",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Copy a file out of a virtual machine",
+        "modelDescription": "Copies a file from a running machine to this computer through its guest agent, replacing the file at localPath. Each call is confirmed by the user.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "guestPath": {
+              "type": "string",
+              "description": "Absolute path in the guest."
+            },
+            "localPath": {
+              "type": "string",
+              "description": "Absolute path on this computer."
+            }
+          },
+          "required": [
+            "vm",
+            "guestPath",
+            "localPath"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_add_port_forward",
+        "displayName": "Forward a port to a virtual machine",
+        "toolReferenceName": "vm_add_port_forward",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(vm)",
+        "userDescription": "Forward a port to a virtual machine",
+        "modelDescription": "Forwards a port on this computer (localhost) to a port in a machine behind NAT, for example host 2222 to guest 22 for SSH. Only for providers with port forwarding (QEMU, local libvirt).",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "hostPort": {
+              "type": "integer",
+              "description": "Port on this computer (1024-65535).",
+              "minimum": 1024,
+              "maximum": 65535
+            },
+            "guestPort": {
+              "type": "integer",
+              "description": "Port in the guest.",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "protocol": {
+              "type": "string",
+              "description": "tcp (default) or udp.",
+              "enum": [
+                "tcp",
+                "udp"
+              ]
+            }
+          },
+          "required": [
+            "vm",
+            "hostPort",
+            "guestPort"
+          ],
+          "additionalProperties": false
         }
       }
     ]
