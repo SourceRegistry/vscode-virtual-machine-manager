@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.8.0...vm-manager-qemu-v0.8.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **sdk:** fall back to Debian's generic image when latest has no genericcloud ([4b9c217](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/4b9c217ea3dc60c2ccc0a3dfd702d1595b03721e))
+
 # [0.8.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.7.0...vm-manager-qemu-v0.8.0) (2026-11-10)
 
 
