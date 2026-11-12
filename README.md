@@ -52,9 +52,12 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
 * **Virtual Machines view**: state icons, the running count as a badge, and quick actions next to
   each machine (start, connect, shut down). A graceful shutdown counts down in the view and the status bar
   (*Shutting down… 23 s left*) until the hypervisor gives up on the guest.
-* **Favorites and tags**: **Add to Favorites** lists a machine first, above the clusters; **Tags…** gives it
-  tags of your own. **VM: Group By…** (or `vmm.tree.groupBy`) groups the view by cluster, tag or state.
-  VM Manager keeps favorites and tags itself; the hypervisor never sees them.
+* **Favorites and groups**: a **Groups** view under the main one holds **Favorites** (**Add to Favorites**)
+  and groups of your own: **New Group…** in its title bar, then drag machines in from Clusters (dragging
+  between groups moves them) or use **Add to Group…** on a machine. A machine can be in several groups; the
+  ✕ next to it removes it from that group, and a group's menu renames or deletes it (its machines stay).
+  **VM: Group By…** (or `vmm.tree.groupBy`) groups the main view by cluster, group or state. VM Manager
+  keeps favorites and groups itself; the hypervisor never sees them.
 * **Overview** (**VM: Open Overview**): a dashboard of everything you manage.
   * A summary of machines by state (click a state to filter the table) and of the processors and
     memory allocated against what the nodes have, flagged when they are overcommitted.
@@ -232,7 +235,7 @@ When a console does ask for a password, **VM: Forget Console Sign-in** removes t
 | `vmm.ssh.user` | empty | Account to sign in as in a guest. Empty: your user name on this computer. Remembered per machine. |
 | `vmm.ssh.addConfigEntry` | `true` | Offer to add an ssh config entry before connecting. Turn off to connect by address without touching the file. |
 | `vmm.notifications.stateChanges` | `outside` | Notify when a machine starts, stops, pauses or resumes: `outside` only for changes VS Code did not ask for, `all`, or `off`. Each machine's log has them either way. |
-| `vmm.tree.groupBy` | `cluster` | Group the Virtual Machines view by `cluster`, `tag` or `state`. Favorites are always first. |
+| `vmm.tree.groupBy` | `cluster` | Group the Clusters view by `cluster`, `group` or `state`. Favorites and your groups also have their own view below it. |
 
 Providers add their own settings, for example `vmm.qemu.path`.
 

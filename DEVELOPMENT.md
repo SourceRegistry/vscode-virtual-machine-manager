@@ -196,5 +196,6 @@ if (api?.vms) {
 }
 ```
 
-Connecting to a cluster may ask the user to sign in. The same actions are available without code as
+A `VmSummary` also carries the user's `favorite` and `groups`, for example to act on every machine of a
+group. Connecting to a cluster may ask the user to sign in. The same actions are available without code as
 the `vm` task type and the `vmm.getVmAddress` / `vmm.getVmSshPort` commands (see the README).
