@@ -4,12 +4,23 @@
  * MCP server for agents outside VS Code (`mcpServer.ts`). No `vscode` import here, so it is unit tested as is.
  *
  * Every call has a risk: `read` runs without asking, `action` (start, snapshot, a command in the guest…) is
- * confirmed by the user first, and `destructive` (power off, reset, revert, delete) also needs
- * `vmm.agent.allowDestructive`. Results never carry cluster settings or secrets: only machine facts.
+ * confirmed by the user first, `control` (keyboard and mouse) is allowed once per machine for a while, and
+ * `destructive` (power off, reset, revert, delete) also needs `vmm.agent.allowDestructive`. Results never carry
+ * cluster settings or secrets: only machine facts.
  */
 import type { Capabilities, GuestCommand, GuestCommandResult, PortForward, PowerAction, Snapshot, VmDetails, VmState, VmStats } from '@vmm/sdk';
+import type { MouseAction, Screenshot } from './display';
+import { comboStrokes, textStrokes, type KeyStroke } from './keys';
 
-export type Risk = 'read' | 'action' | 'destructive';
+export type Risk = 'read' | 'action' | 'control' | 'destructive';
+
+/** A result with pictures: the JSON part as text for the model, the images beside it. */
+export class ToolOutput {
+	constructor(
+		readonly json: unknown,
+		readonly images: Array<{ mimeType: 'image/png'; data: Buffer }>
+	) {}
+}
 
 /** A JSON schema for a tool's input: the subset the tools use, checked by `validateInput`. */
 export interface InputSchema {
@@ -61,6 +72,10 @@ export interface AgentBackend {
 	copyToGuest(vm: string, localPath: string, guestPath: string): Promise<void>;
 	copyFromGuest(vm: string, guestPath: string, localPath: string): Promise<void>;
 	addPortForward(vm: string, forward: PortForward): Promise<void>;
+	/** The screen now, or after `settleMs` (so what a key or click caused has been drawn). */
+	screenshot(vm: string, options?: { settleMs?: number }): Promise<Screenshot>;
+	sendKeys(vm: string, strokes: readonly KeyStroke[]): Promise<void>;
+	mouse(vm: string, action: MouseAction): Promise<void>;
 }
 
 export interface AgentTool<I = Record<string, unknown>> {
@@ -74,6 +89,7 @@ export interface AgentTool<I = Record<string, unknown>> {
 	risk(input: I): Risk;
 	/** One line for the confirmation of an `action` or `destructive` call. */
 	describe(input: I): string;
+	/** A plain value is sent as JSON; a `ToolOutput` also carries images. */
 	run(input: I, backend: AgentBackend): Promise<unknown>;
 }
 
@@ -96,9 +112,23 @@ function abilities(caps: Capabilities, vm: AgentVm): string[] {
 		...(caps.snapshots ? ['snapshots'] : []),
 		...(caps.guestExec ? ['run_in_guest'] : []),
 		...(caps.guestFiles ? ['copy_files'] : []),
-		...(caps.forwards ? ['port_forwards'] : [])
+		...(caps.forwards ? ['port_forwards'] : []),
+		...(caps.consoles.includes('vnc') ? ['screen'] : [])
 	];
 }
+
+/** How long after a key or click a `screenshotAfter` waits, so the guest has drawn the result. */
+const SETTLE_MS = 700;
+const MAX_TEXT = 2000;
+
+function screenshotOutput(shot: Screenshot, extra: Record<string, unknown> = {}): ToolOutput {
+	return new ToolOutput(
+		{ ...extra, screenshot: { width: shot.width, height: shot.height }, screen: shot.screen, note: 'Coordinates for vmm_mouse are pixels of this screenshot.' },
+		[{ mimeType: 'image/png', data: shot.png }]
+	);
+}
+
+const screenshotAfterParam = { type: 'boolean' as const, description: 'Return a screenshot taken just after, to see the result without another call.' };
 
 export const TOOLS: AgentTool<any>[] = [
 	{
@@ -319,6 +349,83 @@ export const TOOLS: AgentTool<any>[] = [
 			await backend.addPortForward(input.vm, { protocol: input.protocol ?? 'tcp', hostAddress: '127.0.0.1', hostPort: input.hostPort, guestPort: input.guestPort });
 			return { forwarded: true, host: '127.0.0.1', port: input.hostPort };
 		}
+	},
+	{
+		name: 'vmm_screenshot',
+		title: 'Take a screenshot of a virtual machine',
+		description: 'Takes a screenshot of a running machine\'s display (its VNC console): a PNG of at most 1280 pixels on the longest side. Use it to see a graphical desktop, an installer, a login screen or boot messages, and to find where to click with vmm_mouse. Machines with a VNC display only (QEMU, libvirt, Proxmox, Nutanix; not Hyper-V).',
+		inputSchema: { type: 'object', properties: { vm: vmParam }, required: ['vm'], additionalProperties: false },
+		risk: () => 'read',
+		describe: (input: { vm: string }) => `Take a screenshot of ${input.vm}`,
+		run: async (input: { vm: string }, backend) => screenshotOutput(await backend.screenshot(input.vm))
+	},
+	{
+		name: 'vmm_send_keys',
+		title: 'Type on a virtual machine\'s keyboard',
+		description: 'Types text and/or presses keys on a running machine\'s display, as if on its keyboard. text is typed character by character (US layout); keys are combinations pressed after it, in order, such as "enter", "ctrl+alt+delete", "alt+f4", "shift+tab", "f2". For a command line in the guest prefer vmm_run_in_guest. The user allows keyboard and mouse control once per machine, for 15 minutes.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				vm: vmParam,
+				text: { type: 'string', description: `Text to type (at most ${MAX_TEXT} characters; a newline presses Enter).` },
+				keys: { type: 'array', items: { type: 'string' }, description: 'Key combinations to press after the text, in order: "enter", "ctrl+c", "ctrl+alt+delete", "f12", …' },
+				screenshotAfter: screenshotAfterParam
+			},
+			required: ['vm'],
+			additionalProperties: false
+		},
+		risk: () => 'control',
+		describe: (input: { vm: string; text?: string; keys?: string[] }) => {
+			const text = input.text ? `type "${input.text.length > 40 ? `${input.text.slice(0, 40)}…` : input.text}"` : '';
+			const keys = input.keys?.length ? `press ${input.keys.join(', ')}` : '';
+			return `On ${input.vm}: ${[text, keys].filter(Boolean).join(', then ') || 'nothing'}`;
+		},
+		run: async (input: { vm: string; text?: string; keys?: string[]; screenshotAfter?: boolean }, backend) => {
+			if (!input.text && !input.keys?.length) throw new Error('Give text to type, keys to press, or both.');
+			if (input.text && input.text.length > MAX_TEXT) throw new Error(`text is longer than ${MAX_TEXT} characters: send it in parts.`);
+			const strokes = [...textStrokes(input.text ?? ''), ...(input.keys ?? []).flatMap((k) => comboStrokes(k))];
+			await backend.sendKeys(input.vm, strokes);
+			const done = { typed: input.text?.length ?? 0, pressed: input.keys ?? [] };
+			return input.screenshotAfter ? screenshotOutput(await backend.screenshot(input.vm, { settleMs: SETTLE_MS }), done) : done;
+		}
+	},
+	{
+		name: 'vmm_mouse',
+		title: 'Use a virtual machine\'s mouse',
+		description: 'Moves, clicks, drags or scrolls the mouse on a running machine\'s display. x and y are pixels of the latest vmm_screenshot (0,0 is the top left). Take a screenshot first to know where things are. The user allows keyboard and mouse control once per machine, for 15 minutes.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				vm: vmParam,
+				action: { type: 'string', description: 'What to do at (x, y).', enum: ['move', 'click', 'double_click', 'right_click', 'middle_click', 'drag', 'scroll'] },
+				x: { type: 'integer', description: 'Horizontal position in screenshot pixels.', minimum: 0 },
+				y: { type: 'integer', description: 'Vertical position in screenshot pixels.', minimum: 0 },
+				toX: { type: 'integer', description: 'For drag: where to release, horizontally.', minimum: 0 },
+				toY: { type: 'integer', description: 'For drag: where to release, vertically.', minimum: 0 },
+				direction: { type: 'string', description: 'For scroll: up or down (default down).', enum: ['up', 'down'] },
+				amount: { type: 'integer', description: 'For scroll: how many wheel steps (default 3).', minimum: 1, maximum: 50 },
+				screenshotAfter: screenshotAfterParam
+			},
+			required: ['vm', 'action', 'x', 'y'],
+			additionalProperties: false
+		},
+		risk: () => 'control',
+		describe: (input: { vm: string; action: string; x: number; y: number; toX?: number; toY?: number }) =>
+			`On ${input.vm}: ${input.action.replace('_', ' ')} at (${input.x}, ${input.y})${input.action === 'drag' ? ` to (${input.toX}, ${input.toY})` : ''}`,
+		run: async (input: { vm: string; action: MouseAction['action']; x: number; y: number; toX?: number; toY?: number; direction?: 'up' | 'down'; amount?: number; screenshotAfter?: boolean }, backend) => {
+			let action: MouseAction;
+			if (input.action === 'drag') {
+				if (input.toX === undefined || input.toY === undefined) throw new Error('A drag needs toX and toY.');
+				action = { action: 'drag', x: input.x, y: input.y, toX: input.toX, toY: input.toY };
+			} else if (input.action === 'scroll') {
+				action = { action: 'scroll', x: input.x, y: input.y, direction: input.direction ?? 'down', amount: input.amount ?? 3 };
+			} else {
+				action = { action: input.action, x: input.x, y: input.y };
+			}
+			await backend.mouse(input.vm, action);
+			const done = { done: input.action, at: { x: input.x, y: input.y } };
+			return input.screenshotAfter ? screenshotOutput(await backend.screenshot(input.vm, { settleMs: SETTLE_MS }), done) : done;
+		}
 	}
 ];
 
@@ -359,6 +466,7 @@ export function validateInput(schema: InputSchema, input: unknown): string | und
 
 /** Why an agent may not make this call, or undefined when it may (after the user's confirmation for actions). */
 export function refusal(risk: Risk, allowDestructive: boolean): string | undefined {
+	// `control` is not refused here: the user allows it per machine (see the agent's index).
 	return risk === 'destructive' && !allowDestructive
 		? 'Destructive actions (power off, reset, revert or delete a snapshot) are turned off for AI agents. The user can allow them with the setting vmm.agent.allowDestructive.'
 		: undefined;

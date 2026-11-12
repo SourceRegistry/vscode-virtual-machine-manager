@@ -30,9 +30,14 @@ export interface McpServerOptions {
 	serverInfo: { name: string; version: string };
 	instructions?: string;
 	tools(): McpToolInfo[];
-	/** Runs a tool. A rejection becomes an error result the model can read (`isError`). */
-	call(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<string>;
+	/** Runs a tool: its text, or text and PNG images. A rejection becomes an error result the model can read (`isError`). */
+	call(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<string | McpToolResult>;
 	log?(line: string): void;
+}
+
+export interface McpToolResult {
+	text: string;
+	images?: Array<{ mimeType: string; data: Buffer }>;
 }
 
 export interface McpServerHandle {
@@ -98,8 +103,10 @@ export async function startMcpServer(options: McpServerOptions): Promise<McpServ
 				if (!options.tools().some((t) => t.name === name)) return rpcError(id, -32602, `Unknown tool: ${name}`);
 				const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
 				try {
-					const text = await options.call(name, args, signal);
-					return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }], isError: false } };
+					const answer = await options.call(name, args, signal);
+					const { text, images = [] } = typeof answer === 'string' ? { text: answer } : answer;
+					const content = [{ type: 'text', text }, ...images.map((image) => ({ type: 'image', data: image.data.toString('base64'), mimeType: image.mimeType }))];
+					return { jsonrpc: '2.0', id, result: { content, isError: false } };
 				} catch (error) {
 					return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true } };
 				}

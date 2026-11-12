@@ -5,6 +5,7 @@
  *  - an MCP server for agents outside VS Code (Claude Code, other MCP clients), opt-in with `vmm.mcp.enabled`,
  *    on 127.0.0.1 with a bearer token; actions are confirmed in a VS Code dialog.
  * Destructive calls (power off, reset, revert or delete a snapshot) are refused unless `vmm.agent.allowDestructive`.
+ * Keyboard and mouse control is allowed per machine for 15 minutes; a status bar item shows it and takes it back.
  */
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
@@ -13,8 +14,10 @@ import type { VmControl } from '../api/VmControl';
 import type { VmActivity } from '../activity/VmActivity';
 import { errorMessage, scopedLogger } from '../util/log';
 import { ExtensionAgentBackend } from './backend';
-import { startMcpServer, type McpServerHandle, type McpToolInfo } from './mcpServer';
-import { TOOLS, findTool, refusal, validateInput, type AgentBackend, type AgentTool } from './tools';
+import { DisplaySessions } from './display';
+import { startMcpServer, type McpServerHandle, type McpToolInfo, type McpToolResult } from './mcpServer';
+import { TOOLS, ToolOutput, findTool, refusal, validateInput, type AgentBackend, type AgentTool } from './tools';
+import { vmHandle } from '../../shared/vmLookup';
 
 const TOKEN_SECRET = 'vmm.mcp.token';
 const log = scopedLogger('agent');
@@ -26,13 +29,78 @@ const toJson = (value: unknown) => JSON.stringify(value, null, 2);
  * Runs a tool after checking its input and whether agents may make this call at all, and after `confirm`
  * (the MCP path asks the user here; VS Code's agent mode asked already through `prepareInvocation`).
  */
-export async function runTool(tool: AgentTool, input: unknown, backend: AgentBackend, destructiveAllowed: boolean, confirm?: (tool: AgentTool, input: unknown) => Promise<void>): Promise<string> {
+export async function runTool(tool: AgentTool, input: unknown, backend: AgentBackend, destructiveAllowed: boolean, confirm?: (tool: AgentTool, input: unknown) => Promise<void>): Promise<McpToolResult> {
 	const invalid = validateInput(tool.inputSchema, input);
 	if (invalid) throw new Error(`Invalid input for ${tool.name}: ${invalid}`);
 	const refused = refusal(tool.risk(input as never), destructiveAllowed);
 	if (refused) throw new Error(refused);
 	await confirm?.(tool, input);
-	return toJson(await tool.run(input as never, backend));
+	const result = await tool.run(input as never, backend);
+	return result instanceof ToolOutput ? { text: toJson(result.json), images: result.images } : { text: toJson(result) };
+}
+
+/** How long one "Allow" gives agents a machine's keyboard and mouse. */
+export const CONTROL_MINUTES = 15;
+
+/**
+ * Which machines agents may type and click on, until when. Shown in the status bar while any is allowed;
+ * clicking it takes control back from all of them.
+ */
+class ControlGrants implements vscode.Disposable {
+	private readonly grants = new Map<string, { name: string; until: number; location: VmLocation }>();
+	private readonly item = vscode.window.createStatusBarItem('vmm.agentControl', vscode.StatusBarAlignment.Left, 50);
+	private readonly timer = setInterval(() => this.update(), 30_000);
+
+	constructor(
+		private readonly onRevoke: (location: VmLocation, why: string) => void,
+		private readonly closeDisplay: (key: string) => void
+	) {
+		this.item.name = 'VM Manager: AI agent control';
+		this.item.command = 'vmm.agent.revokeControl';
+		this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+	}
+
+	has(key: string): boolean {
+		const grant = this.grants.get(key);
+		return !!grant && grant.until > Date.now();
+	}
+
+	allow(key: string, location: VmLocation): void {
+		this.grants.set(key, { name: location.vm.name, until: Date.now() + CONTROL_MINUTES * 60_000, location });
+		this.update();
+	}
+
+	revokeAll(why: string): number {
+		const count = this.grants.size;
+		for (const [key, grant] of this.grants) {
+			this.closeDisplay(key);
+			this.onRevoke(grant.location, why);
+		}
+		this.grants.clear();
+		this.update();
+		return count;
+	}
+
+	private update(): void {
+		for (const [key, grant] of this.grants) {
+			if (grant.until > Date.now()) continue;
+			this.grants.delete(key);
+			this.closeDisplay(key);
+			this.onRevoke(grant.location, 'Keyboard and mouse control by AI agents ended (time is up)');
+		}
+		const grants = [...this.grants.values()];
+		void vscode.commands.executeCommand('setContext', 'vmm.agentControlActive', grants.length > 0);
+		if (!grants.length) return this.item.hide();
+		const minutes = (until: number) => Math.max(1, Math.ceil((until - Date.now()) / 60_000));
+		this.item.text = `$(hubot) AI controls ${grants.length === 1 ? grants[0].name : `${grants.length} machines`}`;
+		this.item.tooltip = `AI agents may use the keyboard and mouse of ${grants.map((g) => `${g.name} (${minutes(g.until)} min left)`).join(', ')}.\n\nClick to take control back now.`;
+		this.item.show();
+	}
+
+	dispose(): void {
+		clearInterval(this.timer);
+		this.item.dispose();
+	}
 }
 
 export function toolInfo(tool: AgentTool): McpToolInfo {
@@ -43,25 +111,50 @@ export function toolInfo(tool: AgentTool): McpToolInfo {
 
 export function registerAgentTools(context: vscode.ExtensionContext, manager: ConnectionManager, control: VmControl, activity: VmActivity): vscode.Disposable[] {
 	const record = { record: (location: VmLocation, text: string, level?: 'info' | 'warn' | 'error') => activity.record(location.ref, text, level) };
-	const chatBackend = new ExtensionAgentBackend(manager, control, record, 'an AI agent in VS Code');
-	const mcpBackend = new ExtensionAgentBackend(manager, control, record, 'an MCP client');
-	const disposables: vscode.Disposable[] = [];
+	const displays = new DisplaySessions();
+	const chatBackend = new ExtensionAgentBackend(manager, control, record, 'an AI agent in VS Code', displays);
+	const mcpBackend = new ExtensionAgentBackend(manager, control, record, 'an MCP client', displays);
+	const grants = new ControlGrants((location, why) => activity.record(location.ref, why), (key) => displays.close(key));
+	const disposables: vscode.Disposable[] = [displays, grants];
+	/** The machine a tool input names, as the key control is allowed under. */
+	const target = async (input: unknown) => {
+		const location = await control.resolve(String((input as { vm?: unknown })?.vm ?? ''));
+		return { location, key: vmHandle(location.ref) };
+	};
+	const allow = (location: VmLocation, key: string, via: string) => {
+		grants.allow(key, location);
+		activity.record(location.ref, `Keyboard and mouse control allowed to AI agents for ${CONTROL_MINUTES} minutes (asked by ${via})`);
+	};
+	const controlQuestion = (name: string) => `Let AI agents use the keyboard and mouse of ${name}?`;
+	const controlDetail = `For ${CONTROL_MINUTES} minutes, without asking again for each key or click. The status bar shows it; click there to take control back.`;
 
 	// Language model tools: declared in package.json `languageModelTools`, implemented here.
 	if (vscode.lm?.registerTool) {
 		for (const tool of TOOLS) {
 			disposables.push(
 				vscode.lm.registerTool<Record<string, unknown>>(tool.name, {
-					prepareInvocation: (options) => {
+					prepareInvocation: async (options) => {
 						const risk = tool.risk(options.input as never);
 						const what = tool.describe(options.input as never);
 						if (risk === 'read') return { invocationMessage: what };
+						if (risk === 'control') {
+							const { location, key } = await target(options.input);
+							if (grants.has(key)) return { invocationMessage: what };
+							return { invocationMessage: what, confirmationMessages: { title: controlQuestion(location.vm.name), message: new vscode.MarkdownString(`${what}\n\n${controlDetail}`) } };
+						}
 						const warning = risk === 'destructive' ? '\n\n**This cannot be undone.**' : '';
 						return { invocationMessage: what, confirmationMessages: { title: tool.title, message: new vscode.MarkdownString(`${what}${warning}`) } };
 					},
 					invoke: async (options) => {
 						try {
-							return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(await runTool(tool, options.input, chatBackend, allowDestructive()))]);
+							// Getting here means the user allowed it in VS Code's confirmation.
+							if (tool.risk(options.input as never) === 'control') {
+								const { location, key } = await target(options.input);
+								if (!grants.has(key)) allow(location, key, 'an AI agent in VS Code');
+							}
+							const result = await runTool(tool, options.input, chatBackend, allowDestructive());
+							// Image parts are newer than the types this extension builds against (1.95).
+							return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(result.text), ...imageParts(result)] as vscode.LanguageModelTextPart[]);
 						} catch (error) {
 							log.warn(`${tool.name}: ${errorMessage(error)}`);
 							throw error;
@@ -86,6 +179,14 @@ export function registerAgentTools(context: vscode.ExtensionContext, manager: Co
 	const confirm = async (tool: AgentTool, input: unknown): Promise<void> => {
 		const risk = tool.risk(input as never);
 		if (risk === 'read') return;
+		if (risk === 'control') {
+			const { location, key } = await target(input);
+			if (grants.has(key)) return;
+			const choice = await vscode.window.showWarningMessage(controlQuestion(location.vm.name), { modal: true, detail: `An MCP client wants to: ${tool.describe(input as never)}.\n\n${controlDetail}` }, `Allow for ${CONTROL_MINUTES} Minutes`);
+			if (!choice) throw new Error('The user declined keyboard and mouse control of this machine.');
+			allow(location, key, 'an MCP client');
+			return;
+		}
 		const choice = await vscode.window.showWarningMessage(
 			`An MCP client wants to: ${tool.describe(input as never)}`,
 			{ modal: true, detail: `Tool ${tool.name}, asked through the VM Manager MCP server.${risk === 'destructive' ? ' This cannot be undone.' : ''}` },
@@ -148,6 +249,10 @@ export function registerAgentTools(context: vscode.ExtensionContext, manager: Co
 			await vscode.env.clipboard.writeText(pick.value);
 			void vscode.window.showInformationMessage(`Copied the ${pick.label} setup for ${server.url}. It holds the access token; "VM: Reset MCP Access Token" makes a new one.`);
 		}),
+		vscode.commands.registerCommand('vmm.agent.revokeControl', () => {
+			const count = grants.revokeAll('Keyboard and mouse control taken back from AI agents');
+			void vscode.window.setStatusBarMessage(count ? 'AI agents no longer control any machine’s keyboard and mouse.' : 'AI agents control no machine.', 4000);
+		}),
 		vscode.commands.registerCommand('vmm.mcp.resetToken', async () => {
 			await context.secrets.delete(TOKEN_SECRET);
 			await restart();
@@ -157,4 +262,15 @@ export function registerAgentTools(context: vscode.ExtensionContext, manager: Co
 	);
 	void restart();
 	return disposables;
+}
+
+/**
+ * Screenshots as image parts of a language model tool result. `LanguageModelDataPart` exists from VS Code 1.106;
+ * on older versions the model gets the text only (which says the size), and the call says why there is no image.
+ */
+function imageParts(result: McpToolResult): unknown[] {
+	if (!result.images?.length) return [];
+	const DataPart = (vscode as unknown as { LanguageModelDataPart?: { image(data: Uint8Array, mimeType: string): unknown } }).LanguageModelDataPart;
+	if (!DataPart) return [new vscode.LanguageModelTextPart('(This VS Code is too old to pass the screenshot to the model: it needs VS Code 1.106 or newer.)')];
+	return result.images.map((image) => DataPart.image(new Uint8Array(image.data), image.mimeType));
 }

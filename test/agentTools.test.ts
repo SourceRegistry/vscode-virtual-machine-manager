@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Capabilities } from '@vmm/sdk';
-import { MAX_OUTPUT_CHARS, TOOLS, findTool, refusal, validateInput, type AgentBackend, type AgentVm } from '../src/extension/agent/tools';
+import { MAX_OUTPUT_CHARS, TOOLS, ToolOutput, findTool, refusal, validateInput, type AgentBackend, type AgentVm } from '../src/extension/agent/tools';
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
 
@@ -28,6 +28,9 @@ function backend(overrides: Partial<AgentBackend> = {}): AgentBackend {
 		copyToGuest: vi.fn(),
 		copyFromGuest: vi.fn(),
 		addPortForward: vi.fn(),
+		screenshot: vi.fn().mockResolvedValue({ png: Buffer.from('png'), width: 1280, height: 720, screen: { width: 1920, height: 1080 } }),
+		sendKeys: vi.fn(),
+		mouse: vi.fn(),
 		...overrides
 	};
 }
@@ -110,7 +113,7 @@ describe('agent tools against a backend', () => {
 	});
 	it('describes a machine with what can be done with it', async () => {
 		const result = (await run('vmm_get_vm', { vm: 'web-01' }, backend())) as { can: string[]; details: unknown };
-		expect(result.can).toEqual(['power:start', 'power:shutdown', 'power:stop', 'details', 'snapshots', 'run_in_guest']);
+		expect(result.can).toEqual(['power:start', 'power:shutdown', 'power:stop', 'details', 'snapshots', 'run_in_guest', 'screen']);
 		expect(result.details).toEqual({ disks: [], nics: [], devices: [], forwards: [] });
 	});
 	it('starts and waits for running, shuts down and waits for stopped', async () => {
@@ -141,5 +144,48 @@ describe('agent tools against a backend', () => {
 		const b = backend();
 		await run('vmm_add_port_forward', { vm: 'web-01', hostPort: 2222, guestPort: 22 }, b);
 		expect(b.addPortForward).toHaveBeenCalledWith('web-01', { protocol: 'tcp', hostAddress: '127.0.0.1', hostPort: 2222, guestPort: 22 });
+	});
+});
+
+describe('screen tools', () => {
+	const run = (name: string, input: Record<string, unknown>, b: AgentBackend) => findTool(name)!.run(input, b);
+
+	it('returns a screenshot as an image with its size, without asking', async () => {
+		expect(findTool('vmm_screenshot')!.risk({})).toBe('read');
+		const out = await run('vmm_screenshot', { vm: 'web-01' }, backend());
+		expect(out).toBeInstanceOf(ToolOutput);
+		const { json, images } = out as ToolOutput;
+		expect(images).toEqual([{ mimeType: 'image/png', data: Buffer.from('png') }]);
+		expect(json).toMatchObject({ screenshot: { width: 1280, height: 720 }, screen: { width: 1920, height: 1080 } });
+	});
+
+	it('asks for keyboard and mouse control, and types text then keys', async () => {
+		expect(findTool('vmm_send_keys')!.risk({})).toBe('control');
+		expect(findTool('vmm_mouse')!.risk({})).toBe('control');
+		const b = backend();
+		expect(await run('vmm_send_keys', { vm: 'web-01', text: 'Hi', keys: ['enter'] }, b)).toEqual({ typed: 2, pressed: ['enter'] });
+		const strokes = vi.mocked(b.sendKeys).mock.calls[0][1];
+		// Shift around H, then i, then Enter.
+		expect(strokes.map((s) => [s.keysym, s.down])).toEqual([[0xffe1, true], [0x48, true], [0x48, false], [0xffe1, false], [0x69, true], [0x69, false], [0xff0d, true], [0xff0d, false]]);
+		await expect(run('vmm_send_keys', { vm: 'web-01' }, b)).rejects.toThrow(/text to type, keys/);
+		await expect(run('vmm_send_keys', { vm: 'web-01', keys: ['hyper+x'] }, b)).rejects.toThrow(/Unknown key "hyper"/);
+	});
+
+	it('clicks, drags and scrolls in screenshot pixels, with a screenshot after when asked', async () => {
+		const b = backend();
+		await run('vmm_mouse', { vm: 'web-01', action: 'double_click', x: 10, y: 20 }, b);
+		await run('vmm_mouse', { vm: 'web-01', action: 'scroll', x: 1, y: 2 }, b);
+		expect(vi.mocked(b.mouse).mock.calls.map((c) => c[1])).toEqual([
+			{ action: 'double_click', x: 10, y: 20 },
+			{ action: 'scroll', x: 1, y: 2, direction: 'down', amount: 3 }
+		]);
+		await expect(run('vmm_mouse', { vm: 'web-01', action: 'drag', x: 1, y: 2 }, b)).rejects.toThrow(/toX and toY/);
+		const out = await run('vmm_mouse', { vm: 'web-01', action: 'click', x: 5, y: 6, screenshotAfter: true }, b);
+		expect(out).toBeInstanceOf(ToolOutput);
+		expect(vi.mocked(b.screenshot)).toHaveBeenCalledWith('web-01', { settleMs: 700 });
+	});
+
+	it('lists the screen among what a machine with a VNC display can do', async () => {
+		expect(await run('vmm_get_vm', { vm: 'web-01' }, backend())).toMatchObject({ can: expect.arrayContaining(['screen']) });
 	});
 });

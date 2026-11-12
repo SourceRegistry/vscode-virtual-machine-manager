@@ -8,6 +8,11 @@ import type { ConnectionManager, VmLocation } from '../clusters/ConnectionManage
 import type { VmControl } from '../api/VmControl';
 import type { AgentBackend, AgentCluster, AgentVm } from './tools';
 import { vmHandle } from '../../shared/vmLookup';
+import type { DisplaySessions, MouseAction, Screenshot } from './display';
+import type { KeyStroke } from './keys';
+
+/** A screenshot is written to the machine's log at most this often (an agent may take one every few seconds). */
+const SCREENSHOT_LOG_MS = 5 * 60_000;
 
 export interface AgentActivity {
 	record(location: VmLocation, text: string, level?: 'info' | 'warn' | 'error'): void;
@@ -19,8 +24,11 @@ export class ExtensionAgentBackend implements AgentBackend {
 		private readonly control: VmControl,
 		private readonly activity: AgentActivity,
 		/** Says who asked, in the machine's log: "Copilot", "an MCP client". */
-		private readonly via: string
+		private readonly via: string,
+		private readonly displays: DisplaySessions
 	) {}
+
+	private readonly screenshotLogged = new Map<string, number>();
 
 	private agentVm(location: VmLocation): AgentVm {
 		const vm = location.vm;
@@ -179,5 +187,36 @@ export class ExtensionAgentBackend implements AgentBackend {
 		await connection.addPortForward!(location.ref.nodeId, location.ref.vmId, forward);
 		this.record(location, `Forwarded ${forward.hostAddress ?? '127.0.0.1'}:${forward.hostPort} to guest port ${forward.guestPort}/${forward.protocol}`);
 		await this.manager.refresh(location.ref.clusterId);
+	}
+
+	/** The machine's screen: its key for the shared VNC session, and how to open one. */
+	private async display(query: string) {
+		const { location, connection, caps } = await this.open(query);
+		if (!caps.consoles.includes('vnc')) throw new Error(`${location.vm.name} has no VNC display VM Manager can use${caps.consoles.includes('rdp') ? ' (Hyper-V shows its screen over RDP, which agents cannot use yet)' : ''}.`);
+		if (location.vm.state !== 'running' && location.vm.state !== 'paused') throw new Error(`${location.vm.name} is ${location.vm.state}: start it first.`);
+		const key = vmHandle(location.ref);
+		return { location, key, open: () => connection.openConsole(location.ref.nodeId, location.ref.vmId, 'vnc') };
+	}
+
+	async screenshot(query: string, options: { settleMs?: number } = {}): Promise<Screenshot> {
+		if (options.settleMs) await new Promise((r) => setTimeout(r, options.settleMs));
+		const { location, key, open } = await this.display(query);
+		const shot = await this.displays.screenshot(key, open);
+		const last = this.screenshotLogged.get(key) ?? 0;
+		if (Date.now() - last > SCREENSHOT_LOG_MS) {
+			this.screenshotLogged.set(key, Date.now());
+			this.record(location, 'Screenshot of the display taken (more may follow without a log line for 5 minutes)');
+		}
+		return shot;
+	}
+
+	async sendKeys(query: string, strokes: readonly KeyStroke[]): Promise<void> {
+		const { key, open } = await this.display(query);
+		await this.displays.keys(key, open, strokes);
+	}
+
+	async mouse(query: string, action: MouseAction): Promise<void> {
+		const { key, open } = await this.display(query);
+		await this.displays.mouse(key, open, action);
 	}
 }

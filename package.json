@@ -477,6 +477,12 @@
         "command": "vmm.mcp.resetToken",
         "title": "Reset MCP Access Token",
         "category": "VM"
+      },
+      {
+        "command": "vmm.agent.revokeControl",
+        "title": "Take Back Keyboard and Mouse from AI Agents",
+        "category": "VM",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {
@@ -703,6 +709,10 @@
         {
           "command": "vmm.getVmSshPort",
           "when": "false"
+        },
+        {
+          "command": "vmm.agent.revokeControl",
+          "when": "vmm.agentControlActive"
         }
       ],
       "view/title": [
@@ -2017,6 +2027,153 @@
             "vm",
             "hostPort",
             "guestPort"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_screenshot",
+        "displayName": "Take a screenshot of a virtual machine",
+        "toolReferenceName": "vm_screenshot",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(device-camera)",
+        "userDescription": "Take a screenshot of a virtual machine",
+        "modelDescription": "Takes a screenshot of a running machine's display (its VNC console): a PNG of at most 1280 pixels on the longest side. Use it to see a graphical desktop, an installer, a login screen or boot messages, and to find where to click with vmm_mouse. Machines with a VNC display only (QEMU, libvirt, Proxmox, Nutanix; not Hyper-V).",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            }
+          },
+          "required": [
+            "vm"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_send_keys",
+        "displayName": "Type on a virtual machine's keyboard",
+        "toolReferenceName": "vm_send_keys",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(keyboard)",
+        "userDescription": "Type on a virtual machine's keyboard",
+        "modelDescription": "Types text and/or presses keys on a running machine's display, as if on its keyboard. text is typed character by character (US layout); keys are combinations pressed after it, in order, such as \"enter\", \"ctrl+alt+delete\", \"alt+f4\", \"shift+tab\", \"f2\". For a command line in the guest prefer vmm_run_in_guest. The user allows keyboard and mouse control once per machine, for 15 minutes.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "text": {
+              "type": "string",
+              "description": "Text to type (at most 2000 characters; a newline presses Enter)."
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Key combinations to press after the text, in order: \"enter\", \"ctrl+c\", \"ctrl+alt+delete\", \"f12\", …"
+            },
+            "screenshotAfter": {
+              "type": "boolean",
+              "description": "Return a screenshot taken just after, to see the result without another call."
+            }
+          },
+          "required": [
+            "vm"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_mouse",
+        "displayName": "Use a virtual machine's mouse",
+        "toolReferenceName": "vm_mouse",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(pointer)",
+        "userDescription": "Use a virtual machine's mouse",
+        "modelDescription": "Moves, clicks, drags or scrolls the mouse on a running machine's display. x and y are pixels of the latest vmm_screenshot (0,0 is the top left). Take a screenshot first to know where things are. The user allows keyboard and mouse control once per machine, for 15 minutes.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            },
+            "action": {
+              "type": "string",
+              "description": "What to do at (x, y).",
+              "enum": [
+                "move",
+                "click",
+                "double_click",
+                "right_click",
+                "middle_click",
+                "drag",
+                "scroll"
+              ]
+            },
+            "x": {
+              "type": "integer",
+              "description": "Horizontal position in screenshot pixels.",
+              "minimum": 0
+            },
+            "y": {
+              "type": "integer",
+              "description": "Vertical position in screenshot pixels.",
+              "minimum": 0
+            },
+            "toX": {
+              "type": "integer",
+              "description": "For drag: where to release, horizontally.",
+              "minimum": 0
+            },
+            "toY": {
+              "type": "integer",
+              "description": "For drag: where to release, vertically.",
+              "minimum": 0
+            },
+            "direction": {
+              "type": "string",
+              "description": "For scroll: up or down (default down).",
+              "enum": [
+                "up",
+                "down"
+              ]
+            },
+            "amount": {
+              "type": "integer",
+              "description": "For scroll: how many wheel steps (default 3).",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "screenshotAfter": {
+              "type": "boolean",
+              "description": "Return a screenshot taken just after, to see the result without another call."
+            }
+          },
+          "required": [
+            "vm",
+            "action",
+            "x",
+            "y"
           ],
           "additionalProperties": false
         }
