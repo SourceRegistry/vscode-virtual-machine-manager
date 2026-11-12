@@ -60,6 +60,7 @@ Value = how much it moves "best VM extension for VS Code", weighed against effor
 | 10 | 15 | `feat/disk-management` | Resize/convert/export; useful, not a differentiator | yes |
 | 11 | 17 | `feat/qemu-network-v2` | NIC editor, bridge/vmnet; privileges make it costly on macOS | partly |
 | 12 | 20 | `feat/more-providers` | VMware, VirtualBox, Parallels, XCP-ng, Nutanix; big but each is its own project | mostly no |
+| 13 | 21 | `feat/mcp` | VMs as tools for AI agents (Copilot agent mode, Claude, any MCP client): list, start, stop, IP, run in guest | yes |
 
 Phase numbers stay stable (they name sections and branches); the rank is the build order. Phases 5-7 and 10 are built but their leftovers sit in their own sections.
 
@@ -346,6 +347,16 @@ Order by demand; each is its own extension and its own release line.
 - [ ] XCP-ng, Nutanix: remote APIs only, mocks + a real server later
 - [ ] Any new provider must pass the SDK conformance tests (add them first, using the fake provider as reference)
 
+### Phase 21: `feat/mcp`  (Local: yes)
+
+Let AI agents in VS Code (Copilot agent mode, Claude Code, any MCP client) see and drive VMs through the same providers. Builds on phase 18's public API (`vmm.api`) and phase 16's guest exec.
+- [ ] Decide the surface: **language model tools** (`contributes.languageModelTools` + `vscode.lm.registerTool`, used by agent mode inside VS Code) and/or an **MCP server** VS Code registers itself (`contributes.mcpServerDefinitionProviders` + `vscode.lm.registerMcpServerDefinitionProvider`, VS Code 1.101+, so it reaches external agents too). Both need `engines.vscode` raised from `^1.95.0`; check the API is stable (not proposed) at that version first
+- [ ] Read-only tools first: list clusters / VMs with state, VM details (disks, NICs, addresses, forwards), stats, snapshots
+- [ ] Actions behind a confirmation in VS Code (`prepareInvocation` / tool confirmation): start, shut down, snapshot, forward a port, run a command in the guest (phase 16), copy files. Destructive ones (power off, delete, revert) off by default, a setting to allow them
+- [ ] An MCP server runs in the extension host (stdio launched by VS Code, or local HTTP on a random loopback port with a token); never exposed beyond the machine; secrets (Proxmox tokens, passwords) never in tool results
+- [ ] Opt-in setting (`vmm.mcp.enabled`), off by default
+- [ ] Tests: tool schemas, confirmation gating, an MCP client round trip against the fake provider; manual check in Copilot agent mode and from Claude Code
+
 ## What we can build and test on this Mac now
 
 | Phase | Work | Why it works here |
@@ -358,11 +369,12 @@ Order by demand; each is its own extension and its own release line.
 | 16 | Balloon / agent memory, guest exec, file copy, clipboard, audio | Guest agent already wired; `coreaudio` backend |
 | 17 | Multi-NIC editor, vmnet (partly) | User mode works; vmnet may need privileges |
 | 18 | UX items, notifications, logs, API | Extension-only |
+| 21 | Language model tools / MCP server | Extension-only; test with Copilot agent mode and an MCP client against the fake provider and real QEMU |
 | 9 | QEMU over SSH | Test against `localhost` with macOS Remote Login, or a second Linux VM |
 | 19 | libvirt `qemu:///session` | Via Homebrew, verify first |
 
 Cannot be validated on this Mac: Hyper-V (phase 8, parts of 2-4), VFIO/DDA (phase 7), Linux-only shared folders and bridges, Proxmox against a real cluster (Proxmox is x86 only; it could run nested under TCG but is slow), SPICE if the build lacks it.
-Build order on the Mac: 11 → 12 → 13 → 14 → 9 → 19 (check Homebrew libvirt first) → 16 → 18 → 15 → 17.
+Build order on the Mac: 11 → 12 → 13 → 14 → 9 → 19 (check Homebrew libvirt first) → 16 → 18 → 21 → 15 → 17.
 
 ## Log
 
