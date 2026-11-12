@@ -1,5 +1,14 @@
 # Changelog
 
+# [1.4.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-libvirt-v1.3.1...vm-manager-libvirt-v1.4.0) (2026-11-12)
+
+
+### Features
+
+* Groups view with Favorites and user-defined groups ([fd3920b](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/fd3920b69110d753d7337fb48363598f497de7ae))
+* **libvirt:** shutdown countdown, emulated domains and libvirt's domain log ([4898da7](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/4898da7a298954590fa7b6f245b85874043d352b))
+* **sdk:** shutdown timeout, emulated guests, hypervisor logs, and an API for other extensions ([8a78690](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/8a78690cf601899ee5ad925714920f05f86a1df9))
+
 ## [1.3.1](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-libvirt-v1.3.0...vm-manager-libvirt-v1.3.1) (2026-11-12)
 
 
