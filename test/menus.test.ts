@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Capabilities, VmInfo, VmState } from '@vmm/sdk';
-import { clusterContextValue, nodeContextValue, vmContextValue } from '../src/shared/contextValue';
+import { FEATURES, clusterContextValue, featureFlags, nodeContextValue, vmContextValue } from '../src/shared/contextValue';
 
 interface MenuItem {
 	command: string;
@@ -331,5 +331,42 @@ describe('overview menu', () => {
 			.map((m) => [m.command, m.when.replace('view == vmm.clusters && viewItem', '')]);
 		const overview = menus['webview/context'].map((m) => [m.command, m.when.replace('webviewId == vmm.overview && vmmItem', '')]);
 		expect(overview).toEqual(tree);
+	});
+});
+
+describe('commands that cannot work are not offered', () => {
+	it('offers Connect with Remote-SSH only while Remote - SSH is installed', () => {
+		for (const menu of ['view/item/context', 'webview/context', 'commandPalette']) {
+			const items = menus[menu]!.filter((m) => m.command === 'vmm.connectSsh');
+			expect(items.length, menu).toBeGreaterThan(0);
+			for (const item of items) expect(item.when, menu).toMatch(/&& vmm\.remoteSshInstalled$/);
+		}
+	});
+
+	it('gates every VM command in the palette on a feature some connected provider has', () => {
+		const vmCommands = menus.commandPalette!.filter((m) => (m.when ?? '').startsWith('vmm.hasVms') && m.command !== 'vmm.searchVms');
+		expect(vmCommands.length).toBeGreaterThan(20);
+		for (const item of vmCommands) {
+			const feature = /vmm\.can\.(\w+)/.exec(item.when)?.[1];
+			expect(feature, item.command).toBeDefined();
+			expect(FEATURES as readonly string[], item.command).toContain(feature);
+		}
+	});
+
+	it('names the same feature in the palette as the VM flag the context menu checks', () => {
+		// The palette asks "does any provider have it"; the menu may ask something narrower of the VM.
+		const narrower: Record<string, string> = { 'vmm.ejectMedia': 'ejectable', 'vmm.convertToTemplate': 'totemplate', 'vmm.convertToVm': 'istemplate', 'vmm.createFromTemplate': 'istemplate', 'vmm.detachVm': 'detach' };
+		for (const item of menus.commandPalette!.filter((m) => /vmm\.can\./.test(m.when ?? ''))) {
+			const flag = narrower[item.command] ?? /vmm\.can\.(\w+)/.exec(item.when)![1]!;
+			const context = menus['view/item/context']!.filter((m) => m.command === item.command && /\^vm;/.test(m.when));
+			// Inline quick actions can be narrower still (the terminal button only without a display).
+			if (context.length) expect(context.some((m) => m.when.includes(`\\b${flag};`)), `${item.command} should check ${flag}`).toBe(true);
+		}
+	});
+
+	it('derives the features from the connected providers\' capabilities', () => {
+		const flags = featureFlags([caps, { ...caps, power: ['start'], consoles: ['vnc'], preview: false, external: false, snapshots: true, forwards: true }]);
+		expect(flags).toMatchObject({ start: true, shutdown: true, graphical: true, serial: true, snapshots: true, forwards: true, guestexec: false, clone: false, details: false });
+		expect(Object.values(featureFlags([])).every((v) => v === false)).toBe(true);
 	});
 });
