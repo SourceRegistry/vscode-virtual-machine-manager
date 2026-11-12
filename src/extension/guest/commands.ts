@@ -83,7 +83,7 @@ export async function copyFileFromGuest(context: vscode.ExtensionContext, manage
 	const guestPath = await vscode.window.showInputBox({
 		title: `Copy a file from ${vm.name}`,
 		prompt: 'Path of the file in the guest',
-		value: context.workspaceState.get<string>(key(location, 'from')) ?? '/var/log/syslog',
+		value: context.workspaceState.get<string>(key(location, 'from')) ?? '/etc/os-release',
 		ignoreFocusOut: true
 	});
 	if (!guestPath?.trim()) return;
