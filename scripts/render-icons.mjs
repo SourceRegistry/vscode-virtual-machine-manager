@@ -49,7 +49,9 @@ export const BADGES = {
 	qemu: { file: 'qemu.svg', scale: 1.3 },
 	proxmox: { file: 'proxmox.svg', scale: 1.4 },
 	// The official libvirt square logo (https://libvirt.org/logos/): its tin is rotated, so it needs the same room as the QEMU tail.
-	libvirt: { file: 'libvirt.svg', scale: 1.75 }
+	libvirt: { file: 'libvirt.svg', scale: 1.75 },
+	// The Nutanix "X" mark from Simple Icons (CC0, https://simpleicons.org/?q=nutanix) in its brand blue.
+	nutanix: { file: 'nutanix.svg', scale: 1.2 }
 };
 
 function icons() {
