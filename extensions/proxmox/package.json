@@ -2,7 +2,7 @@
   "name": "vm-manager-proxmox",
   "displayName": "VM Manager – Proxmox VE",
   "description": "Manage Proxmox VE virtual machines, nodes, power actions and metrics from VS Code.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "sourceregistry",
   "icon": "media/icon.png",
   "license": "Apache-2.0",
