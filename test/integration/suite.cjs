@@ -74,6 +74,12 @@ async function run() {
 	// The "vm" task provider answers (no machines, so no tasks). Running one needs a tasks.json: checked by hand.
 	assert.deepEqual(await vscode.tasks.fetchTasks({ type: 'vm' }), [], 'vm task provider is registered');
 
+	// Every declared language model tool is registered (agent mode lists it); the MCP server stays off by default.
+	const declared = core.packageJSON.contributes.languageModelTools.map((t) => t.name);
+	const registeredTools = new Set(vscode.lm.tools.map((t) => t.name));
+	assert.deepEqual(declared.filter((name) => !registeredTools.has(name)), [], 'all language model tools are registered');
+	assert.equal(vscode.workspace.getConfiguration('vmm.mcp').get('enabled'), false, 'MCP server is off by default');
+
 	// UI surfaces open without throwing.
 	await vscode.commands.executeCommand('vmm.openOverview');
 	await new Promise((r) => setTimeout(r, 1500));

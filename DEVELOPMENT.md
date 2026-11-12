@@ -6,7 +6,7 @@ see the [README](README.md).
 ## Repository layout
 
 ```
-src/extension/        core extension host (registry, clusters, tree, commands, webview hosts, RDP gateway)
+src/extension/        core extension host (registry, clusters, tree, commands, webview hosts, RDP gateway, agent tools + MCP server)
 src/shared/           host ⇄ webview protocol types
 src/lib/client-lib/   client-lib (git submodule, branch migration/svelte-standards — never edited here)
 src/lib/client/       extension UI: views, components, SvelteKit shims, VS Code theme bridge

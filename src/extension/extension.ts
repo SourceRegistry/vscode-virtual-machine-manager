@@ -18,6 +18,7 @@ import { VmMarksStore } from './tree/VmMarksStore';
 import { VmControl } from './api/VmControl';
 import { VmTaskProvider } from './tasks/VmTaskProvider';
 import { REMOTE_SSH_ID } from './ssh/connect';
+import { registerAgentTools } from './agent';
 
 export function activate(context: vscode.ExtensionContext): VmManagerApi {
 	initLog(context);
@@ -55,7 +56,8 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 		control,
 		new VmTaskProvider(manager, control),
 		OverviewPanel.registerSerializer(context.extensionUri, manager),
-		...registerCommands({ context, store, registry, manager, tree, groupsTree, consoles, credentials, activity, marks, control })
+		...registerCommands({ context, store, registry, manager, tree, groupsTree, consoles, credentials, activity, marks, control }),
+		...registerAgentTools(context, manager, control, activity)
 	);
 
 	const updateProviderContext = () =>
