@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["src/extension/**/*.ts", "src/shared/**/*.ts", "packages/sdk/src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/extension/**/*.ts", "src/shared/**/*.ts", "packages/sdk/src/**/*.ts", "packages/sdk/test/**/*.ts", "test/**/*.ts"],
   "exclude": ["test/webview.test.ts"]
 }

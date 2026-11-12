@@ -49,7 +49,8 @@ const contexts = await Promise.all(
 			platform: 'node',
 			target: 'node20',
 			external: ['vscode'],
-			alias: { '@vmm/sdk': path.join(root, 'packages/sdk/src/index.ts') },
+			// The directory, so the Node-only subpath `@vmm/sdk/provisioning` resolves too.
+			alias: { '@vmm/sdk': path.join(root, 'packages/sdk/src') },
 			sourcemap: !production,
 			sourcesContent: false,
 			minify: production,

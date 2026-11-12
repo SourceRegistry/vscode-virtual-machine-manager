@@ -6,10 +6,40 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { ProviderError } from '@vmm/sdk';
-import type { Arch } from './arch';
-import type { Host } from './host';
-import { shq } from './sshHost';
+import { ProviderError } from '../index';
+
+/** A guest architecture, in QEMU's and libvirt's spelling. */
+export type Arch = 'x86_64' | 'aarch64';
+
+/**
+ * Where an image is kept: this computer, or a host reached over SSH (then `exec` runs there and the
+ * transfer never passes through this computer). The QEMU provider's hosts have this shape.
+ */
+export interface ImageHost {
+	readonly remote: boolean;
+	readonly path: Pick<typeof path, 'join'>;
+	exec(file: string, args: string[], options?: { timeout?: number }): Promise<{ stdout: string }>;
+	readFile(file: string): Promise<string>;
+	writeFile(file: string, data: string): Promise<void>;
+	mkdir(dir: string): Promise<void>;
+	rm(target: string): Promise<void>;
+	exists(file: string): Promise<boolean>;
+}
+
+/** This computer, as an image host (no `exec`: local downloads use `fetch`). */
+export const localImageHost: ImageHost = {
+	remote: false,
+	path,
+	exec: () => Promise.reject(new Error('Not available for a local image cache.')),
+	readFile: (file) => fs.promises.readFile(file, 'utf8'),
+	writeFile: (file, data) => fs.promises.writeFile(file, data),
+	mkdir: async (dir) => void (await fs.promises.mkdir(dir, { recursive: true })),
+	rm: (target) => fs.promises.rm(target, { force: true }),
+	exists: (file) => fs.promises.access(file).then(() => true, () => false)
+};
+
+/** A word for a POSIX shell, single-quoted. */
+const shq = (word: string): string => `'${word.replace(/'/g, `'\\''`)}'`;
 
 export interface CloudImage {
 	/** Stable id, e.g. `debian-12@aarch64`. */
@@ -89,7 +119,7 @@ async function hashFile(file: string, algorithm: string, onProgress?: (done: num
  * Makes sure `image` is in `dir` on `host`, verified against its published checksum, and returns the path.
  * A cached copy is reused while its checksum is still the published one; a damaged transfer is deleted.
  */
-export async function ensureImage(host: Host, image: CloudImage, dir: string, options: DownloadOptions = {}): Promise<string> {
+export async function ensureImage(host: ImageHost, image: CloudImage, dir: string, options: DownloadOptions = {}): Promise<string> {
 	const join = host.path.join;
 	const dest = join(dir, imageFileName(image));
 	const marker = markerOf(dest);
@@ -180,7 +210,7 @@ async function downloadLocal(image: CloudImage, part: string, options: DownloadO
 	}
 }
 
-async function downloadRemote(host: Host, image: CloudImage, part: string, options: DownloadOptions): Promise<void> {
+async function downloadRemote(host: ImageHost, image: CloudImage, part: string, options: DownloadOptions): Promise<void> {
 	let total: number | undefined;
 	try {
 		const head = (await host.exec('curl', ['-sIL', '--max-time', '60', image.url], { timeout: 90_000 })).stdout;
@@ -209,7 +239,7 @@ async function downloadRemote(host: Host, image: CloudImage, part: string, optio
 	}
 }
 
-async function hashRemote(host: Host, file: string, algorithm: 'sha256' | 'sha512'): Promise<string> {
+async function hashRemote(host: ImageHost, file: string, algorithm: 'sha256' | 'sha512'): Promise<string> {
 	const bits = algorithm === 'sha256' ? '256' : '512';
 	const { stdout } = await host.exec('sh', ['-c', `sha${bits}sum ${shq(file)} 2>/dev/null || shasum -a ${bits} ${shq(file)}`], { timeout: 30 * 60_000 });
 	return stdout.trim().split(/\s+/)[0]!.toLowerCase();

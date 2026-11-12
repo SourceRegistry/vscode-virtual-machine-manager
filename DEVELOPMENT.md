@@ -10,7 +10,8 @@ src/extension/        core extension host (registry, clusters, tree, commands, w
 src/shared/           host ⇄ webview protocol types
 src/lib/client-lib/   client-lib (git submodule, branch migration/svelte-standards — never edited here)
 src/lib/client/       extension UI: views, components, SvelteKit shims, VS Code theme bridge
-packages/sdk/         @vmm/sdk — provider API shared by core and providers
+packages/sdk/         @vmm/sdk — provider API shared by core and providers;
+                      @vmm/sdk/provisioning — cloud images, cloud-init, cidata ISO (Node only, not for the webview)
 extensions/hyperv/    Hyper-V provider extension
 extensions/libvirt/   libvirt provider extension
 extensions/proxmox/   Proxmox VE provider extension

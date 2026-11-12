@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildIso, isoName } from '../src/iso9660';
+import { buildIso, isoName } from '../src/provisioning/iso9660';
 
 const SECTOR = 2048;
 

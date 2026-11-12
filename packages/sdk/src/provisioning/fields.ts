@@ -2,10 +2,9 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { FieldSchema } from '@vmm/sdk';
-import type { Arch } from './arch';
-import { hostnameFor, validCloudUser, validSshPublicKey } from './cloudInit';
-import { imageFileName, imagesFor } from './images';
+import type { FieldSchema } from '../index';
+import { validCloudUser, validSshPublicKey } from './cloudInit';
+import { imageFileName, imagesFor, type Arch } from './images';
 
 export const SOURCE_ISO = { key: 'source', equals: 'iso', default: 'iso' } as const;
 const SOURCE_CLOUD = { key: 'source', equals: 'cloud' } as const;
@@ -80,4 +79,3 @@ export function cloudFields(o: CloudSchemaOptions): FieldSchema[] {
 	];
 }
 
-export { hostnameFor };

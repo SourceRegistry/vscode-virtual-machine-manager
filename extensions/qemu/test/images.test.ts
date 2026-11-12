@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { LocalHost } from '../src/host';
-import { CLOUD_IMAGES, ensureImage, findImage, imageFileName, imagesFor, parseChecksums, type CloudImage, type DownloadProgress } from '../src/images';
+import { CLOUD_IMAGES, ensureImage, findImage, imageFileName, imagesFor, parseChecksums, type CloudImage, type DownloadProgress } from '@vmm/sdk/provisioning';
 import { SshHost } from '../src/sshHost';
 
 describe('catalog', () => {
