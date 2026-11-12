@@ -148,7 +148,9 @@ Other extensions get the same through the API: `vscode.extensions.getExtension('
 ### Let AI agents work with your machines
 
 AI agents can list your machines, read their details, usage, snapshots and addresses, and (when you allow
-it) start and shut them down, take snapshots, run commands in a guest, copy files and forward ports.
+it) start and shut them down, take snapshots, run commands in a guest, copy files and forward ports. They can
+also look at a machine's screen and use its keyboard and mouse, for a graphical desktop, an installer or a
+login screen (machines with a VNC display: QEMU, libvirt, Proxmox, Nutanix).
 
 * **Agent mode in VS Code** (Copilot chat and other chat participants): the tools are there without setup;
   reference them with `#vm_list_vms` and the like, or let the agent pick them. VS Code asks before every
@@ -159,8 +161,10 @@ it) start and shut them down, take snapshots, run commands in a guest, copy file
   **VM: Reset MCP Access Token** makes a new one), refuses web pages, and VS Code asks you before every
   action it is sent.
 
-Reading runs without asking. Power off, hard reset, reverting and deleting snapshots are refused until you
-turn on `vmm.agent.allowDestructive`, and still asked about then. What an agent did shows up in the
+Reading runs without asking, screenshots included. Keyboard and mouse are allowed per machine, for 15 minutes
+at a time: the first key or click asks, the status bar then shows **AI controls web-01**, and clicking it takes
+control back. Power off, hard reset, reverting and deleting snapshots are refused until you turn on
+`vmm.agent.allowDestructive`, and still asked about then. What an agent did shows up in the
 machine's log (**VM: Show Log**). Results never contain cluster settings, passwords or tokens.
 
 ### Bring in machines you already have
