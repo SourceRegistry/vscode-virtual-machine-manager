@@ -14,7 +14,10 @@ Status: `todo` · `in progress` · `testing` · `merged`
 
 Done when: phase 11 has no open box we can close on this Mac, and a new user can create a cloud-image VM, snapshot it and open it in Remote-SSH without leaving VS Code.
 
-Working now: **phase 11**. Next: phase 12.
+The "done when" flow (cloud image → snapshot → Remote-SSH) is built for QEMU. libvirt has all three steps, but cannot snapshot its UEFI domains while their variable store is a raw file (a libvirt limit, see `extensions/libvirt/README.md`); some manual checks are still open (phases 11-14).
+
+Merged: phases 1-7, 9, 10, 12, 13, 14; most of 19; the first slice of 16. Phase 11 stays open (manual checks).
+Next on this Mac: **phase 18** (dev UX), then 21 (MCP), 15, 17.
 
 ## Ground rules
 
@@ -27,40 +30,40 @@ Working now: **phase 11**. Next: phase 12.
 
 ## Overview
 
-Phases 1-10 are built (most still need a manual check). Phases 11-20 are the backlog; 8 and 9 are the remote-host phases.
+Phases 1-7 and 10 were merged together with PR #1 (2026-11-05); most still have an open manual check. Phases 11-21 are the backlog; 8 and 9 are the remote-host phases.
 
 ### Built / in testing
 
 | # | Branch | Release | Status |
 |---|--------|---------|--------|
-| 1 | `fix/qemu-shutdown` | patch | testing |
-| 2 | `feat/vm-details-sdk` | minor | testing (stacked on phase 1) |
-| 3 | `feat/vm-dashboard` | minor | testing (stacked on phase 2) |
-| 4 | `feat/host-dashboard` | minor | testing (stacked on phase 3) |
-| 5 | `feat/qemu-network` | minor | testing (status was stale; code and tests done) |
-| 6 | `feat/qemu-import` | minor | testing (status was stale; code and tests done) |
-| 7 | `feat/passthrough` | minor | testing (status was stale; code and tests done) |
-| 10 | `feat/qemu-arm64` | minor | testing |
+| 1 | `fix/qemu-shutdown` | patch | merged (manual checks open) |
+| 2 | `feat/vm-details-sdk` | minor | merged (manual checks open) |
+| 3 | `feat/vm-dashboard` | minor | merged (manual checks open) |
+| 4 | `feat/host-dashboard` | minor | merged (manual checks open) |
+| 5 | `feat/qemu-network` | minor | merged (manual checks open) |
+| 6 | `feat/qemu-import` | minor | merged (manual checks open) |
+| 7 | `feat/passthrough` | minor | merged (manual checks open) |
+| 10 | `feat/qemu-arm64` | minor | merged (manual checks open) |
 
 ### Backlog, highest value first
 
 Value = how much it moves "best VM extension for VS Code", weighed against effort. **Mac** = can be built and tested on the dev Mac.
 
-| Rank | Phase | Branch | Why it ranks here | Mac |
-|---|---|---|---|---|
-| 1 | 11 | `fix/validate-existing` | Trust: unverified code and open manual checks undercut everything else | partly |
-| 2 | 12 | `feat/snapshots` | First thing dev/test users reach for; absent today | yes |
-| 3 | 13 | `feat/remote-ssh-connect` | The feature only a VS Code extension can offer; small effort | yes |
-| 4 | 14 | `feat/provisioning` | Image downloader + cloud-init removes the slow ISO install | yes |
-| 5 | 9 | `feat/qemu-remote-ssh` | Remote/headless hosts are the main reason to want this in an editor | yes (localhost) |
-| 6 | 19 | `feat/libvirt-provider` | One provider covers most Linux KVM users | partly |
-| 7 | 8 | `feat/hyperv-remote` | Remote Hyper-V hosts; large Windows audience, but no Windows host to test | no |
-| 8 | 16 | `feat/guest-integration` | Guest memory, run/copy, clipboard; makes VMs feel integrated | partly |
-| 9 | 18 | `feat/dev-ux` | Countdown, notifications, logs, API; cheap polish, wide effect | yes |
-| 10 | 15 | `feat/disk-management` | Resize/convert/export; useful, not a differentiator | yes |
-| 11 | 17 | `feat/qemu-network-v2` | NIC editor, bridge/vmnet; privileges make it costly on macOS | partly |
-| 12 | 20 | `feat/more-providers` | VMware, VirtualBox, Parallels, XCP-ng, Nutanix; big but each is its own project | mostly no |
-| 13 | 21 | `feat/mcp` | VMs as tools for AI agents (Copilot agent mode, Claude, any MCP client): list, start, stop, IP, run in guest | yes |
+| Rank | Phase | Branch | Why it ranks here | Mac | Status |
+|---|---|---|---|---|---|
+| 1 | 11 | `fix/validate-existing` | Trust: unverified code and open manual checks undercut everything else | partly | in progress |
+| 2 | 12 | `feat/snapshots` | First thing dev/test users reach for; absent today | yes | merged (PR #3) |
+| 3 | 13 | `feat/remote-ssh-connect` | The feature only a VS Code extension can offer; small effort | yes | merged (PR #4) |
+| 4 | 14 | `feat/provisioning` | Image downloader + cloud-init removes the slow ISO install | yes | merged (PR #5) |
+| 5 | 9 | `feat/qemu-remote-ssh` | Remote/headless hosts are the main reason to want this in an editor | yes (localhost) | merged (PR #4) |
+| 6 | 19 | `feat/libvirt-provider` | One provider covers most Linux KVM users | partly | mostly merged (PR #7, #9) |
+| 7 | 8 | `feat/hyperv-remote` | Remote Hyper-V hosts; large Windows audience, but no Windows host to test | no | todo |
+| 8 | 16 | `feat/guest-integration` | Guest memory, run/copy, clipboard; makes VMs feel integrated | partly | first slice merged (PR #10) |
+| 9 | 18 | `feat/dev-ux` | Countdown, notifications, logs, API; cheap polish, wide effect | yes | todo |
+| 10 | 15 | `feat/disk-management` | Resize/convert/export; useful, not a differentiator | yes | todo |
+| 11 | 17 | `feat/qemu-network-v2` | NIC editor, bridge/vmnet; privileges make it costly on macOS | partly | todo |
+| 12 | 20 | `feat/more-providers` | VMware, VirtualBox, Parallels, XCP-ng, Nutanix; big but each is its own project | mostly no | todo |
+| 13 | 21 | `feat/mcp` | VMs as tools for AI agents (Copilot agent mode, Claude, any MCP client): list, start, stop, IP, run in guest | yes | todo |
 
 Phase numbers stay stable (they name sections and branches); the rank is the build order. Phases 5-7 and 10 are built but their leftovers sit in their own sections.
 
@@ -189,7 +192,7 @@ Details page, card **Host devices** (loaded on demand: listing USB can be slow).
 
 ## Phase 9: `feat/qemu-remote-ssh`
 
-Status: **built** on `feat/remote-ssh-connect`; verified against real QEMU through a stand-in for `ssh` (same commands, same tunnels), not yet against a real remote machine.
+Status: **merged** (PR #4, 2026-11-10); verified against real QEMU through a stand-in for `ssh` (same commands, same tunnels), not yet against a real remote machine.
 
 - [x] QEMU cluster over SSH: the provider talks to a `Host` (`host.ts`: `LocalHost`, `sshHost.ts`: `SshHost`); the local behaviour is unchanged. Spawns, controls and stops `qemu-system` on the remote host; definitions, disks, runtime files live there
 - [x] System `ssh`, no new dependency: agent, keys, `~/.ssh/config` aliases and `ProxyJump`, `known_hosts` all apply; `BatchMode` (never prompts, readable errors for host keys / permissions / DNS); connection sharing (`ControlMaster`) where the client supports it
@@ -242,14 +245,14 @@ Trust first. Close the open "manual check" items before adding features.
 - [ ] Full guest OS install on ARM64 (only firmware boot verified so far)
 - [x] Proxmox provider: verified status written down 2026-11-09 (`extensions/proxmox/README.md`): unit tests use a mocked `pve-client`, nothing has run against a live server
 - [ ] Proxmox provider: run against a real server (HTTPS token, session ticket, OIDC, VNC and serial consoles, power tasks, create). Not possible on this Mac without a Proxmox host; ask whoever has one
-- [ ] Merge or close the stacked branches (phases 1-4)
+- [x] Merge or close the stacked branches (phases 1-4): merged with PR #1 on 2026-11-05
 - [x] Views of a VM that disappears are closed (details, settings, display and serial consoles), also when it vanishes outside VM Manager. Deliberately slow to conclude: needs two successful listings in a row without it, and a failed or offline node counts for nothing. Told to the user unless they powered it off, deleted it or removed the cluster from here (`src/shared/vanished.ts`, unit tested). **Verified by hand 2026-11-10** with attached external VMs: force-killing the process closed the tabs and showed the notice; powering it off from VM Manager closed the tabs with no notice. The manager wiring itself has no automated test
 - [ ] Hyper-V, VFIO, DDA, Windows `sampleProcess`: **Not local** (need a Windows / Linux IOMMU host); keep marked experimental/untested
-- [~] CI: `qemu-e2e` job added to `.github/workflows/ci.yml` (ubuntu + macos, non-blocking via `continue-on-error`); **never run on GitHub yet**. Make it blocking once green on both. Still to do: a Windows job for Hyper-V script syntax
+- [~] CI: `qemu-e2e` job in `.github/workflows/ci.yml` (ubuntu + macos) runs on every pull request and passes on both (PRs #9 and #10, 2026-11-12), but is still non-blocking (`continue-on-error`): make it blocking. Still to do: a Windows job for Hyper-V script syntax
 
 ### Phase 12: `feat/snapshots`  (Local: yes)
 
-Status: **in progress** on `feat/snapshots`. QEMU snapshots work end to end on this Mac; the UI is built but not yet clicked through by hand.
+Status: **merged** (PR #3, 2026-11-10). QEMU snapshots work end to end on this Mac; the open manual checks are below.
 
 - [x] SDK (optional, additive): `Snapshot`, `Capabilities.snapshots`, `Capabilities.snapshotRevertNeedsStopped`, `listSnapshots` / `createSnapshot` / `revertSnapshot` / `deleteSnapshot`
 - [x] QEMU, disk-only qcow2 internal snapshots (`extensions/qemu/src/snapshots.ts`): stopped VM through `qemu-img snapshot -c/-a/-d` and `qemu-img info -U`; running VM through QMP `blockdev-snapshot-internal-sync` / `-delete-internal-sync` and `query-block`. All disks or none (rolled back on failure); only snapshots present on every disk are listed; names validated and unique (case-insensitive); raw disks and attached-from-outside VMs refused with the reason
@@ -268,7 +271,7 @@ Status: **in progress** on `feat/snapshots`. QEMU snapshots work end to end on t
 
 ### Phase 13: `feat/remote-ssh-connect`  (Local: yes)
 
-Status: **built** on `feat/remote-ssh-connect` (stacked on `feat/snapshots`); automated checks done, not yet clicked through by hand.
+Status: **merged** (PR #4, 2026-11-10). Connect used by hand on 2026-11-12 (a libvirt domain through its SSH port forward).
 
 - [x] `VM: Connect with Remote-SSH…` (`src/extension/ssh/connect.ts`): target from the VM's details (`chooseSshTarget`: a TCP forward to guest port 22 first, else a reachable IPv4 address; `NicDevice.reachable: false` keeps QEMU's NAT address out), Remote - SSH installed check (offers to install), SSH banner probe before connecting (QEMU's forward accepts connections even with no sshd behind it), then Remote - SSH's `opensshremotes.openEmptyWindow` with `{ host }` (shape read from the installed 0.128 extension: an **internal, undocumented** command, so it may change; failures show the error)
 - [x] ssh config entry, shown in full before writing, never silent: marked block (`# BEGIN VM Manager: <key>`), `HostKeyAlias` so a reused forwarded port never triggers "host identification changed", values validated against config injection, other lines untouched, one-time `config.vmm.bak`, honours `remote.SSH.configFile`. Verified with the real client: `ssh -G` resolves the block, and a login through the alias works
@@ -276,13 +279,13 @@ Status: **built** on `feat/remote-ssh-connect` (stacked on `feat/snapshots`); au
 - [x] `VM: Forward SSH Port…`: free host port from 2222, forward to guest port 22
 - [x] Settings `vmm.ssh.user` (per-machine answer remembered) and `vmm.ssh.addConfigEntry`
 - [x] Tests: target choice, aliases, block rendering / injection guards / listing / removal round-trips, `ssh -G`, banner probe against local servers, menus; **real guest** (Debian 12 arm64, HVF): no route before a forward, route from real details after, a real sshd banner, a login with plain `ssh` through the written alias, host key stored under the alias
-- [ ] Manual check in VS Code with Remote - SSH installed: connect to a running VM, add and remove machines, the prompts
-- [ ] Not done: injecting a public key into a guest (needs guest-agent file writes, phase 16, or cloud-init, phase 14); an ssh key choice (`IdentityFile`) per machine; Hyper-V and Proxmox untested (they use the address route, which has no hardware here)
+- [~] Manual check in VS Code with Remote - SSH installed: connecting to a running machine through a port forward **works** (2026-11-12, libvirt domain, Debian 13). Not yet checked by hand: Add / Remove Machines to SSH Config, the address route
+- [ ] Not done: injecting a public key into an existing guest (cloud-init does it for new machines; phase 16's file copy makes it possible now, no command for it yet); an ssh key choice (`IdentityFile`) per machine; Hyper-V and Proxmox untested (they use the address route, which has no hardware here)
 - [ ] The ssh config entry goes stale when the forward port changes later; Connect rewrites it, a batch entry is not refreshed on its own
 
 ### Phase 14: `feat/provisioning`  (Local: yes)
 
-Status: **cloud images and templates done**; installer ISO downloads open.
+Status: **merged** (PR #5, 2026-11-10): cloud images and templates; installer ISO downloads open.
 
 - [x] Cloud image downloader (`images.ts`): curated catalog (Debian 13 / 12, Ubuntu 24.04 / 22.04 LTS; x86-64 and ARM64; every URL and checksum list checked against the live mirrors), checksum verified (SHA-256 / SHA-512 from the published list), resumable (`Range`), cached with a verified marker (reused while the published checksum is unchanged, also offline), progress; on an SSH host the transfer runs on the host with `curl`
 - [x] cloud-init seed disk (`iso9660.ts`, `cloudInit.ts`): our own ISO 9660 + Joliet writer (no external tool; read back by an independent reader, by libarchive and mounted by macOS as `cidata`), `user-data` / `meta-data` with the user, passwordless sudo, SSH keys, host name, guest agent; passwords as SHA-512 crypt (checked against the published test vectors), never as text
@@ -300,6 +303,9 @@ Status: **cloud images and templates done**; installer ISO downloads open.
 - [ ] Hyper-V (`Resize-VHD`, `New-VHD`) and Proxmox disk API: **not local**, mocks only
 
 ### Phase 16: `feat/guest-integration`  (Local: partly)
+
+Status: first slice **merged** (PR #10, 2026-11-12): guest memory, run command, file copies. Checked by hand in VS Code on a libvirt Debian 13 guest; QEMU through its end-to-end test.
+
 
 - [x] Guest memory from the virtio balloon statistics (QEMU: `qom-get … guest-stats` after setting the polling interval, a `virtio-balloon-pci` device on every VM; libvirt: `domstats --balloon` available − usable, `<stats period='5'/>` on new domains and `dommemstat --period` for others). `VmStats.memorySource` says `guest` or `host`; the chart says which. The agent has no memory-usage command, so the balloon is the source
 - [x] Run command in guest and copy files host to guest and back through the guest agent (`guest-exec`, `guest-file-*`), shared in `@vmm/sdk/guest` (QEMU agent socket with 1 MiB pieces; libvirt `virsh qemu-agent-command` writes in 4 KiB pieces, about 80 KB/s, because libvirt 12.9 cuts agent requests of ~8 KB short: a faster path for libvirt is open). `VM: Run Command in Guest…` (output channel), `Copy File to Guest…`, `Copy File from Guest…`; also on the Fake provider. Verified on real Debian 13 guests (QEMU and libvirt). Not done: a terminal with live output, stopping a running command (the agent cannot), Windows guests untested
@@ -329,14 +335,16 @@ Finishes phase 5's deferred item.
 ### Phase 19: `feat/libvirt-provider`  (Local: partly)
 
 One provider that covers most Linux KVM users.
-- [x] New `extensions/libvirt` (first slice): `qemu:///session`, `qemu:///system`, `qemu+ssh://` and custom URIs through `virsh` (no native binding); list, power, details, stats, VNC and serial consoles, media, snapshots, delete. Verified against real libvirt 12.9 on this Mac (`VMM_E2E_LIBVIRT=1`); not yet on Linux `qemu:///system` or over SSH
+
+Status: first slice **merged** (PR #7, 2026-11-10); create (ISO, cloud image) and port forwards **merged** (PR #9, 2026-11-12).
+- [x] New `extensions/libvirt` (first slice): `qemu:///session`, `qemu:///system`, `qemu+ssh://` and custom URIs through `virsh` (no native binding); list, power, details, stats, VNC and serial consoles, media, snapshots, delete. Verified against real libvirt 12.9 on this Mac (`VMM_E2E_LIBVIRT=1`) and over `qemu+ssh://` against a Debian 12 libvirt 9.0 host (`qemu:///system`, arm64 guest without KVM; `VMM_E2E_LIBVIRT_URI`); not yet on a KVM or x86 host
 - [x] Create-VM from an ISO (domain XML builder, qcow2 volume in a directory pool, a pool is made in `~/.local/share/libvirt/images` when a local connection has none); verified on real libvirt 12.9 (HVF, `qemu:///session`). Needs `<controller type='usb' model='qemu-xhci'/>` on ARM `virt` or libvirt refuses the USB input devices
 - [x] Cloud-image create (2026-11-12): image downloaded and verified on this computer (shared catalog in `@vmm/sdk/provisioning`), `vol-upload` into the pool as the domain's disk, `pool-refresh` for libvirt to read its format, `vol-resize`, a `<name>-cidata.iso` seed volume (CD-ROM without a boot entry; deleted with the disks). Verified on real libvirt 12.9 (HVF, `qemu:///session`, Debian 13 arm64: guest agent up, host name set); not yet over SSH
-- [x] Port forwards for user-mode networking (local connections): HMP `hostfwd_add` through `virsh qemu-monitor-command`, saved in the domain `<metadata>`, re-added on start and when details are read. Verified: SSH banner through the forward, also after a restart
+- [x] Port forwards for user-mode networking (local connections): HMP `hostfwd_add` through `virsh qemu-monitor-command`, saved in the domain `<metadata>`, re-added on start and when details are read. Verified: SSH banner through the forward, also after a restart; used by hand 2026-11-12 for Connect with Remote-SSH
 - [ ] Edit, clone, templates, storage pools and networks, port forwards on remote hosts / passt `<portForward>` on Linux, one long-lived `virsh` shell instead of a process per call (faster over SSH)
 - [~] Map domains and snapshots onto the SDK (done); storage pools and networks (open)
 - [x] Local check (2026-11-10): Homebrew `libvirt` 12.9.0 + QEMU 11.1.2 on Apple Silicon runs an arm64 guest under `qemu:///session` with `<domain type='hvf'>`. Needs `<features><gic version='3'/></features>` (libvirt's default GICv2 fails: "HVF does not support GICv2 emulation") and `<os firmware='efi'>`. `virsh domstats --cpu-total` reports 0 on macOS (no cgroups), so CPU% must come from the QEMU process instead. The session daemon starts on demand; no `brew services` needed
-- [x] Remote hosts through `qemu+ssh://`: libvirt's own ssh transport (`no_tty=1`, key or agent), VNC/serial TCP through `ssh -W`. Untested against a real host
+- [x] Remote hosts through `qemu+ssh://`: libvirt's own ssh transport (`no_tty=1`, key or agent), VNC/serial TCP through `ssh -W`. Verified against a Debian 12 host (create from an ISO with a pool made on the way, start, details, stats, the VNC display through the tunnel, delete); a cloud-image create over SSH not yet
 
 ### Phase 20: `feat/more-providers`  (Local: mostly no)
 
@@ -379,3 +387,17 @@ Build order on the Mac: 11 → 12 → 13 → 14 → 9 → 19 (check Homebrew lib
 ## Log
 
 Record merges here: `YYYY-MM-DD  phase N  branch  version  notes`.
+
+Versions are core first, then the provider extensions that were released with it.
+
+```
+2026-11-05  phases 1-7, 10  feat/sign-out (PR #1)              core 0.4.0; hyperv, proxmox, qemu 0.4.0   stacked phase branches, sign out, API handshake, per-extension releases
+2026-11-08  -               feat/qemu-attach-consoles (PR #2)  core 0.5.0; qemu 0.5.0                    consoles of attached QEMU VMs
+2026-11-10  phases 11, 12   feat/snapshots (PR #3)             core 0.6.0; qemu 0.6.0; hyperv, proxmox 0.5.0
+2026-11-10  phase 14        feat/provisioning (PR #5)          core 0.7.0; qemu 0.7.0; hyperv, proxmox 0.6.0
+2026-11-10  phases 9, 13    feat/remote-ssh-connect (PR #4)    core 0.7.0 (same release as PR #5)
+2026-11-10  phase 19        feat/libvirt-provider (PR #7)      core 0.8.0; libvirt 1.0.0; qemu 0.8.0; hyperv, proxmox 0.7.0
+2026-11-10  phase 19        docs/libvirt-logo-feature-table (PR #8)  core 0.9.0; libvirt 1.1.0
+2026-11-12  phase 19        feat/libvirt-create-vm (PR #9)     core 0.10.0; libvirt 1.2.0; qemu 0.8.1; hyperv, proxmox 0.7.1   create from ISO / cloud image, port forwards
+2026-11-12  phase 16        feat/guest-integration (PR #10)    core 0.11.0; libvirt 1.3.0; qemu 0.9.0; hyperv, proxmox 0.8.0   run command, file copies, guest memory
+```

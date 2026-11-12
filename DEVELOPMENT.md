@@ -12,6 +12,8 @@ src/lib/client-lib/   client-lib (git submodule, branch migration/svelte-standar
 src/lib/client/       extension UI: views, components, SvelteKit shims, VS Code theme bridge
 packages/sdk/         @vmm/sdk — provider API shared by core and providers;
                       @vmm/sdk/provisioning — cloud images, cloud-init, cidata ISO (Node only, not for the webview)
+                      @vmm/sdk/guest — run commands and copy files through the QEMU guest agent (Node only)
+                      (any packages/sdk/src/<name>/index.ts is importable as @vmm/sdk/<name>)
 extensions/hyperv/    Hyper-V provider extension
 extensions/libvirt/   libvirt provider extension
 extensions/proxmox/   Proxmox VE provider extension
