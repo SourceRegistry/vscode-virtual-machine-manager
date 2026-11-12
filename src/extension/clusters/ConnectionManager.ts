@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import type { ClusterConnection, PowerAction } from '@vmm/sdk';
+import type { ClusterConnection, PowerAction, VmState } from '@vmm/sdk';
 import type { ClusterSnapshot, ClusterStatus, NodeSnapshot, VmRef, VmSnapshot } from '../../shared/protocol';
 import type { ClusterStore, StoredCluster } from './ClusterStore';
 import type { ProviderRegistry } from '../registry/ProviderRegistry';
 import { errorMessage, log, scopedLogger } from '../util/log';
 import { OPERATION_LABEL, OPERATION_STATE, allowedDuring } from '../../shared/operations';
 import { VanishedVms, type GoneVm, type ObservedNode } from '../../shared/vanished';
+import { StateTracker, causeOf, type PowerRequest } from '../../shared/stateChanges';
 
 /** A VM that disappeared. `expected`: the user powered it off from here, so there is nothing to tell them. */
 export interface VanishedVm {
@@ -14,6 +15,25 @@ export interface VanishedVm {
 	name: string;
 	adopted: boolean;
 	expected: boolean;
+}
+
+/** A machine that settled in another state between two listings. */
+export interface VmStateChanged {
+	ref: VmRef;
+	name: string;
+	from: VmState;
+	to: VmState;
+	/** `vscode`: a recent request from here explains it. */
+	cause: 'vscode' | 'outside';
+}
+
+/** A power action asked for from here: requested, then done or failed. */
+export interface VmPowerEvent {
+	ref: VmRef;
+	name: string;
+	action: PowerAction;
+	phase: 'requested' | 'done' | 'failed';
+	error?: unknown;
 }
 
 /** How long a power-off request still explains a VM disappearing (a graceful shutdown can take minutes). */
@@ -65,13 +85,26 @@ export class ConnectionManager implements vscode.Disposable {
 	/** Fires with the VMs that have disappeared (deleted elsewhere, an attached process that exited, a removed cluster). */
 	readonly onDidRemoveVms = this.vanishedEmitter.event;
 	private readonly vanished = new VanishedVms();
+	private readonly states = new StateTracker();
+	private readonly stateEmitter = new vscode.EventEmitter<VmStateChanged[]>();
+	/** Fires with machines whose settled state changed (seen by a refresh; nothing on a cluster's first listing). */
+	readonly onDidChangeVmState = this.stateEmitter.event;
+	private readonly powerEmitter = new vscode.EventEmitter<VmPowerEvent>();
+	/** Fires as power actions asked for from here are requested, done or failed. */
+	readonly onDidPower = this.powerEmitter.event;
+	private readonly tickEmitter = new vscode.EventEmitter<string[]>();
+	/** Fires every second with the clusters that have a power operation running, for countdowns. */
+	readonly onDidTick = this.tickEmitter.event;
+	private ticker: NodeJS.Timeout | undefined;
+	/** The last power action asked for from here, by VM: tells a change VS Code asked for from one it did not. */
+	private readonly requests = new Map<string, PowerRequest>();
 	/** When a shutdown or power-off was last requested from here, by VM. */
 	private readonly powerOffRequested = new Map<string, number>();
 	private readonly visibility = new Set<string>();
 	private timer: NodeJS.Timeout | undefined;
 	/** Power operations in flight, by VM (see `power`). */
-	private readonly operations = new Map<string, { action: PowerAction }>();
-	private readonly disposables: vscode.Disposable[] = [this.emitter, this.vanishedEmitter];
+	private readonly operations = new Map<string, { action: PowerAction; startedAt: number }>();
+	private readonly disposables: vscode.Disposable[] = [this.emitter, this.vanishedEmitter, this.stateEmitter, this.powerEmitter, this.tickEmitter];
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -130,7 +163,20 @@ export class ConnectionManager implements vscode.Disposable {
 		return this.allVms().filter((l) => l.vm.state === 'running').length;
 	}
 
+	/** Favorites and tags, added to the snapshots the Overview gets. */
+	private marks: { get(ref: VmRef): { favorite?: boolean; tags?: string[] } } | undefined;
+
+	setMarks(marks: { get(ref: VmRef): { favorite?: boolean; tags?: string[] }; onDidChange: vscode.Event<void> }): void {
+		this.marks = marks;
+		this.disposables.push(marks.onDidChange(() => this.emitter.fire(undefined)));
+	}
+
 	snapshot(): ClusterSnapshot[] {
+		const marked = (clusterId: string, node: NodeSnapshot): NodeSnapshot => {
+			const marks = this.marks;
+			if (!marks) return node;
+			return { ...node, vms: node.vms.map((vm) => ({ ...vm, ...marks.get({ clusterId, nodeId: node.id, vmId: vm.id }) })) };
+		};
 		return this.clusters().map((rt) => ({
 			id: rt.cluster.id,
 			name: rt.cluster.name,
@@ -140,7 +186,7 @@ export class ConnectionManager implements vscode.Disposable {
 			status: rt.status,
 			error: rt.error,
 			capabilities: rt.connection?.capabilities,
-			nodes: rt.nodes
+			nodes: rt.nodes.map((node) => marked(rt.cluster.id, node))
 		}));
 	}
 
@@ -287,12 +333,15 @@ export class ConnectionManager implements vscode.Disposable {
 				// Providers may return nodes in a different order on every poll.
 				// Sort before publishing so the tree and overview keep the same order.
 				rt.nodes = snapshots.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+				// Before the overlay of running operations: what the hypervisor itself says.
+				const changes = this.noticeStateChanges(rt.cluster.id, observed, rt.nodes);
 				this.applyOperations(rt.cluster.id, false);
 				rt.loaded = true;
 				if (rt.status !== 'connected') this.setStatus(rt, 'connected');
 				this.emitter.fire(rt.cluster.id);
 				this.updateContextKeys();
 				this.reportVanished(this.vanished.update(rt.cluster.id, observed));
+				if (changes.length) this.stateEmitter.fire(changes);
 			} catch (error) {
 				if (rt.signedOut) return;
 				rt.loaded = true;
@@ -314,6 +363,11 @@ export class ConnectionManager implements vscode.Disposable {
 		return this.operations.get(vmKey(ref))?.action;
 	}
 
+	/** When the running power operation on a VM started (`Date.now()`). */
+	operationStartedAt(ref: VmRef): number | undefined {
+		return this.operations.get(vmKey(ref))?.startedAt;
+	}
+
 	/**
 	 * Runs a power operation as a background task: the VM shows its transitional state right away
 	 * and the returned promise settles when the hypervisor call returns (a graceful shutdown can
@@ -326,17 +380,26 @@ export class ConnectionManager implements vscode.Disposable {
 			throw new Error(`${OPERATION_LABEL[running.action].replace('…', '')} is already in progress.`);
 		}
 		if (action === 'shutdown' || action === 'stop') this.powerOffRequested.set(key, Date.now());
-		const operation = { action };
+		this.requests.set(key, { action, at: Date.now() });
+		const name = this.findVm(ref)?.vm.name ?? ref.vmId;
+		const operation = { action, startedAt: Date.now() };
 		this.operations.set(key, operation);
 		this.applyOperations(ref.clusterId);
+		this.updateTicker();
+		this.powerEmitter.fire({ ref, name, action, phase: 'requested' });
 		try {
 			const connection = await this.connect(ref.clusterId);
 			await connection.power(ref.nodeId, ref.vmId, action);
 			// Some hypervisors only send the ACPI request (QEMU): the guest is still shutting down.
 			if (action === 'shutdown') await this.waitUntilOff(connection, ref, () => this.operations.get(key) === operation);
+			this.powerEmitter.fire({ ref, name, action, phase: 'done' });
+		} catch (error) {
+			this.powerEmitter.fire({ ref, name, action, phase: 'failed', error });
+			throw error;
 		} finally {
 			// A later operation (power-off during a shutdown) replaced this one: leave it.
 			if (this.operations.get(key) === operation) this.operations.delete(key);
+			this.updateTicker();
 			await this.refresh(ref.clusterId);
 			// Many hypervisors report transitional states for a few seconds; refresh again shortly.
 			setTimeout(() => void this.refresh(ref.clusterId), 2500);
@@ -353,6 +416,35 @@ export class ConnectionManager implements vscode.Disposable {
 			if (!vm || vm.state === 'stopped' || vm.state === 'saved') return;
 			await new Promise((resolve) => setTimeout(resolve, 2000));
 		}
+	}
+
+	/** Ticks once a second while any power operation runs (the tree counts down a shutdown). */
+	private updateTicker(): void {
+		if (this.operations.size && !this.ticker) {
+			this.ticker = setInterval(() => {
+				const clusters = new Set([...this.operations.keys()].map((key) => key.split('/')[0]));
+				if (clusters.size) this.tickEmitter.fire([...clusters]);
+			}, 1000);
+		} else if (!this.operations.size && this.ticker) {
+			clearInterval(this.ticker);
+			this.ticker = undefined;
+		}
+	}
+
+	private noticeStateChanges(clusterId: string, observed: ObservedNode[], nodes: NodeSnapshot[]): VmStateChanged[] {
+		const listed = new Set(observed.map((o) => o.nodeId));
+		const vms = nodes
+			.filter((node) => listed.has(node.id))
+			.flatMap((node) => node.vms.map((vm) => ({ key: vmKey({ clusterId, nodeId: node.id, vmId: vm.id }), name: vm.name, state: vm.state, ref: { clusterId, nodeId: node.id, vmId: vm.id } })));
+		const refs = new Map(vms.map((vm) => [vm.key, vm.ref]));
+		const now = Date.now();
+		return this.states.update(clusterId, vms).map((change) => ({
+			ref: refs.get(change.key)!,
+			name: change.name,
+			from: change.from,
+			to: change.to,
+			cause: causeOf(change, this.requests.get(change.key), now)
+		}));
 	}
 
 	/** Shows running operations as transitional states (the hypervisor may still report the old one). */
@@ -427,6 +519,7 @@ export class ConnectionManager implements vscode.Disposable {
 			if (!ids.has(id)) {
 				this.disconnect(rt);
 				this.runtimes.delete(id);
+				this.states.reset(id);
 				// The user removed the cluster themselves: close its tabs, tell them nothing.
 				this.reportVanished(this.vanished.removeCluster(id), true);
 			}
@@ -440,6 +533,7 @@ export class ConnectionManager implements vscode.Disposable {
 				this.disconnect(rt);
 				rt.cluster = cluster;
 				this.vanished.reset(cluster.id);
+				this.states.reset(cluster.id);
 				rt.nodes = [];
 				rt.loaded = false;
 				rt.status = 'disconnected';
@@ -489,6 +583,7 @@ export class ConnectionManager implements vscode.Disposable {
 
 	dispose(): void {
 		if (this.timer) clearInterval(this.timer);
+		if (this.ticker) clearInterval(this.ticker);
 		for (const rt of this.runtimes.values()) this.disconnect(rt);
 		vscode.Disposable.from(...this.disposables).dispose();
 	}

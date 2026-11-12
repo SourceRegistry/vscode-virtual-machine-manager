@@ -31,6 +31,9 @@ export type ClusterStatus = 'disconnected' | 'connecting' | 'connected' | 'error
 /** A VM as the UI shows it: while `operation` runs, `state` is its transitional state. */
 export interface VmSnapshot extends VmInfo {
 	operation?: PowerAction;
+	/** Marked by the user in VM Manager (not on the hypervisor). */
+	favorite?: boolean;
+	tags?: string[];
 }
 
 export interface NodeSnapshot extends NodeInfo {

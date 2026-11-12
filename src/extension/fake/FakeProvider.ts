@@ -65,7 +65,8 @@ class FakeConnection implements ClusterConnection {
 		preview: true,
 		external: false,
 		guestExec: true,
-		guestFiles: true
+		guestFiles: true,
+		shutdownTimeoutSeconds: 20
 	};
 	/** Files "in" the fake guests, by VM id and path. */
 	private readonly guestFiles = new Map<string, Buffer>();
@@ -148,8 +149,15 @@ class FakeConnection implements ClusterConnection {
 			.filter((v) => v.nodeId === nodeId)
 			.map(({ nodeId: _n, started, values: _v, ...vm }) => ({
 				...vm,
-				uptimeSeconds: started ? Math.floor((Date.now() - started) / 1000) : undefined
+				uptimeSeconds: started ? Math.floor((Date.now() - started) / 1000) : undefined,
+				// One machine plays an emulated guest, for the one-time notice.
+				...(vm.id.endsWith('-2') ? { emulated: true } : {})
 			}));
+	}
+
+	async readVmLog(_nodeId: string, vmId: string): Promise<string | undefined> {
+		const vm = this.get(vmId);
+		return `fake-hypervisor: ${vm.name} is ${vm.state}\nfake-hypervisor: nothing else to report\n`;
 	}
 
 	async getCreateSchema() {
@@ -190,7 +198,8 @@ class FakeConnection implements ClusterConnection {
 			}, 1500);
 		};
 		if (action === 'start') transition('starting', 'running');
-		else if (action === 'shutdown') transition('stopping', 'stopped');
+		// A guest that takes its time, so the countdown shows.
+		else if (action === 'shutdown') setTimeout(() => transition('stopping', 'stopped'), 6000);
 		else if (action === 'reboot') transition('starting', 'running');
 		else {
 			vm.state = 'stopped';

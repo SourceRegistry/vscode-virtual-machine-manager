@@ -47,7 +47,8 @@
     "vscode:prepublish": "npm run build"
   },
   "activationEvents": [
-    "onWebviewPanel:vmm.overview"
+    "onWebviewPanel:vmm.overview",
+    "onTaskType:vm"
   ],
   "contributes": {
     "viewsContainers": {
@@ -222,6 +223,46 @@
         "title": "Copy File from Guest…",
         "category": "VM",
         "icon": "$(cloud-download)"
+      },
+      {
+        "command": "vmm.showVmLog",
+        "title": "Show Log",
+        "category": "VM",
+        "icon": "$(output)"
+      },
+      {
+        "command": "vmm.addToFavorites",
+        "title": "Add to Favorites",
+        "category": "VM",
+        "icon": "$(star-empty)"
+      },
+      {
+        "command": "vmm.removeFromFavorites",
+        "title": "Remove from Favorites",
+        "category": "VM",
+        "icon": "$(star-full)"
+      },
+      {
+        "command": "vmm.editTags",
+        "title": "Tags…",
+        "category": "VM",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "vmm.groupBy",
+        "title": "Group By…",
+        "category": "VM",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "vmm.getVmAddress",
+        "title": "Get Address of a Virtual Machine",
+        "category": "VM"
+      },
+      {
+        "command": "vmm.getVmSshPort",
+        "title": "Get SSH Port of a Virtual Machine",
+        "category": "VM"
       },
       {
         "command": "vmm.addSshConfigEntries",
@@ -575,6 +616,34 @@
         {
           "command": "vmm.console.stop",
           "when": "activeWebviewPanelId =~ /^vmm\\.console\\./"
+        },
+        {
+          "command": "vmm.showVmLog",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.addToFavorites",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.removeFromFavorites",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.editTags",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.groupBy",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.getVmAddress",
+          "when": "false"
+        },
+        {
+          "command": "vmm.getVmSshPort",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -607,6 +676,11 @@
           "command": "vmm.showWalkthrough",
           "when": "view == vmm.clusters",
           "group": "9_more@2"
+        },
+        {
+          "command": "vmm.groupBy",
+          "when": "view == vmm.clusters && vmm.hasVms",
+          "group": "1_view@1"
         }
       ],
       "view/item/context": [
@@ -831,6 +905,26 @@
           "group": "3_manage@3"
         },
         {
+          "command": "vmm.showVmLog",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;/",
+          "group": "4_log@1"
+        },
+        {
+          "command": "vmm.addToFavorites",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;(?!.*\\bfavorite;)/",
+          "group": "5_marks@1"
+        },
+        {
+          "command": "vmm.removeFromFavorites",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bfavorite;/",
+          "group": "5_marks@1"
+        },
+        {
+          "command": "vmm.editTags",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;/",
+          "group": "5_marks@2"
+        },
+        {
           "command": "vmm.copyId",
           "when": "view == vmm.clusters && viewItem =~ /^vm;/",
           "group": "9_copy@1"
@@ -1050,6 +1144,26 @@
           "group": "3_manage@3"
         },
         {
+          "command": "vmm.showVmLog",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;/",
+          "group": "4_log@1"
+        },
+        {
+          "command": "vmm.addToFavorites",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;(?!.*\\bfavorite;)/",
+          "group": "5_marks@1"
+        },
+        {
+          "command": "vmm.removeFromFavorites",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bfavorite;/",
+          "group": "5_marks@1"
+        },
+        {
+          "command": "vmm.editTags",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;/",
+          "group": "5_marks@2"
+        },
+        {
           "command": "vmm.copyId",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;/",
           "group": "9_copy@1"
@@ -1091,6 +1205,36 @@
             "type": "boolean",
             "default": true,
             "markdownDescription": "Offer to add an entry for the machine to your ssh config before connecting (it is always shown first and never written silently). Turn off to connect by address without touching the file."
+          },
+          "vmm.notifications.stateChanges": {
+            "type": "string",
+            "enum": [
+              "outside",
+              "all",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Only changes VS Code did not ask for: a guest that shut itself down, a machine started or stopped in another tool, a crash.",
+              "Every change, also the ones you asked for here.",
+              "No notifications; changes are still written to each machine's log (VM: Show Log)."
+            ],
+            "default": "outside",
+            "markdownDescription": "Tell you when a virtual machine starts, stops, pauses or resumes. Changes are noticed while VM Manager refreshes: when the Virtual Machines view or the Overview is visible, or when the provider reports them (QEMU does)."
+          },
+          "vmm.tree.groupBy": {
+            "type": "string",
+            "enum": [
+              "cluster",
+              "tag",
+              "state"
+            ],
+            "enumDescriptions": [
+              "Cluster › node › machine.",
+              "A group per tag (VM: Tags…); a machine with two tags is in both, untagged ones last.",
+              "Running, off, paused, …"
+            ],
+            "default": "cluster",
+            "markdownDescription": "How the Virtual Machines view groups machines. Favorites are always listed first."
           }
         }
       },
@@ -1191,6 +1335,55 @@
             ]
           }
         ]
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "vm",
+        "required": [
+          "vm",
+          "action"
+        ],
+        "properties": {
+          "vm": {
+            "type": "string",
+            "description": "The machine: its name, cluster/name when two clusters have one of that name, or an id from the VM Manager API."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "shutdown",
+              "reboot",
+              "stop",
+              "reset"
+            ],
+            "description": "What to do. start does nothing on a running machine, shutdown and stop nothing on one that is off."
+          },
+          "waitFor": {
+            "type": "string",
+            "enum": [
+              "state",
+              "address",
+              "ssh",
+              "none"
+            ],
+            "enumDescriptions": [
+              "Until the machine is running (start, reboot, reset) or off (shutdown, stop).",
+              "Also until it has an IP address.",
+              "Also until an SSH server answers (a port forward to 22, or its address).",
+              "Not at all once the hypervisor accepted the action."
+            ],
+            "default": "state",
+            "description": "What the task waits for before it ends."
+          },
+          "timeout": {
+            "type": "number",
+            "default": 300,
+            "minimum": 1,
+            "description": "Seconds to wait in all before the task fails."
+          }
+        }
       }
     ]
   },

@@ -21,6 +21,12 @@ import { deleteVmDetail } from '../../shared/deleteDetail';
 import { withDelayedProgress } from '../util/progress';
 import { matchesQuery } from '../../shared/vmSearch';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
+import { operationText } from '../../shared/countdown';
+import { parseTags, type GroupBy } from '../../shared/treeGroups';
+import { groupBySetting } from '../tree/VmTreeProvider';
+import type { VmActivity } from '../activity/VmActivity';
+import type { VmMarksStore } from '../tree/VmMarksStore';
+import type { VmControl } from '../api/VmControl';
 
 export const WALKTHROUGH_ID = 'sourceregistry.vm-manager#gettingStarted';
 
@@ -32,12 +38,16 @@ export interface CommandDeps {
 	tree: VmTreeProvider;
 	consoles: ConsoleManager;
 	credentials: RdpCredentialStore;
+	activity: VmActivity;
+	marks: VmMarksStore;
+	control: VmControl;
 }
 
 type Arg = unknown;
 
 // ---------------------------------------------------------------------------------------------
-// Argument resolution: commands accept tree elements, VmRefs (overview), or nothing (palette).
+// Argument resolution: commands accept tree elements, VmRefs (overview), a machine's name or { vm: name }
+// (keybindings, tasks, other extensions), or nothing (palette).
 // ---------------------------------------------------------------------------------------------
 
 function asRecord(arg: Arg): Record<string, unknown> | undefined {
@@ -64,13 +74,29 @@ function asClusterId(arg: Arg): string | undefined {
 }
 
 export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
-	const { context, store, registry, manager, tree, consoles, credentials } = deps;
+	const { context, store, registry, manager, tree, consoles, credentials, activity, marks, control } = deps;
+
+	/** A name (or `cluster/name`, or an API id) given as the argument: `"web-01"` or `{ "vm": "web-01" }`. */
+	function namedVm(arg: Arg): string | undefined {
+		if (typeof arg === 'string') return arg;
+		const vm = asRecord(arg)?.vm;
+		return typeof vm === 'string' ? vm : undefined;
+	}
 
 	async function loadAll(): Promise<void> {
 		await Promise.all(manager.clusters().map((c) => manager.ensureLoaded(c.cluster.id)));
 	}
 
 	async function resolveVm(arg: Arg, placeholder: string, filter: (l: VmLocation) => boolean = () => true): Promise<VmLocation | undefined> {
+		const named = namedVm(arg);
+		if (named !== undefined) {
+			try {
+				return await control.resolve(named);
+			} catch (error) {
+				void vscode.window.showErrorMessage(errorMessage(error));
+				return undefined;
+			}
+		}
 		const ref = asVmRef(arg);
 		if (ref) {
 			const location = manager.findVm(ref);
@@ -129,7 +155,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		});
 		quickPick.dispose();
 		if (!picked) return;
-		await tree.reveal({ kind: 'vm', ...picked.location.ref }).then(undefined, () => undefined);
+		await tree.revealVm(picked.location.ref).then(undefined, () => undefined);
 		VmDashboardPanel.show(context.extensionUri, manager, picked.location.ref);
 	}
 
@@ -213,10 +239,16 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		// hypervisor call returns (a graceful shutdown can take minutes).
 		const name = location.vm.name;
 		const task = manager.power(location.ref, action);
-		void vscode.window.withProgress(
-			{ location: vscode.ProgressLocation.Window, title: `${OPERATION_TITLE[action]} ${name}` },
-			() => task.catch(() => undefined)
-		);
+		const timeout = location.cluster.connection?.capabilities.shutdownTimeoutSeconds;
+		void vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `${OPERATION_TITLE[action]} ${name}` }, (progress) => {
+			// The status bar counts down a graceful shutdown, like the tree.
+			const started = Date.now();
+			const timer = setInterval(() => {
+				const extra = operationText(action, started, Date.now(), timeout).slice(OPERATION_LABEL[action].length).trim();
+				if (extra) progress.report({ message: extra });
+			}, 1000);
+			return task.catch(() => undefined).finally(() => clearInterval(timer));
+		});
 		task.catch((error: unknown) => {
 			// The guest ignored a graceful request: don't leave the user stuck, offer the hard way out.
 			// Duck-typed: the provider extension bundles its own copy of the SDK's ProviderError.
@@ -269,6 +301,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			const drive = await pickDrive(location, connection, true);
 			if (!drive) return;
 			await connection.ejectMedia(location.ref.nodeId, location.ref.vmId, drive.id);
+			activity.record(location.ref, `Ejected ${drive.path ?? 'the media'} from ${drive.label}`);
 			await manager.refresh(location.ref.clusterId);
 			void vscode.window.setStatusBarMessage(`Ejected ${drive.path ? path.basename(drive.path) : 'media'} from ${location.vm.name}`, 4000);
 		} catch (error) {
@@ -299,6 +332,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			}
 			if (!image) return;
 			await connection.insertMedia(location.ref.nodeId, location.ref.vmId, drive.id, image);
+			activity.record(location.ref, `Inserted ${image} into ${drive.label}`);
 			await manager.refresh(location.ref.clusterId);
 			void vscode.window.setStatusBarMessage(`Inserted ${path.basename(image)} into ${location.vm.name}`, 4000);
 		} catch (error) {
@@ -333,9 +367,10 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			void vscode.window.showInformationMessage(`"${location.vm.name}" is not running.`);
 			return;
 		}
-		if (what === 'run') await runCommandInGuest(context, manager, location);
-		else if (what === 'to') await copyFileToGuest(context, manager, location);
-		else await copyFileFromGuest(context, manager, location);
+		const record = (text: string, level?: 'info' | 'warn' | 'error') => activity.record(location.ref, text, level);
+		if (what === 'run') await runCommandInGuest(context, manager, location, record);
+		else if (what === 'to') await copyFileToGuest(context, manager, location, record);
+		else await copyFileFromGuest(context, manager, location, record);
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -363,6 +398,8 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 				{ location: vscode.ProgressLocation.Notification, title: `Cloning ${location.vm.name}… (large disks take a while)` },
 				() => connection.cloneVm!(location.ref.nodeId, location.ref.vmId, name.trim())
 			);
+			activity.record(location.ref, `Cloned into "${copy.name}"`);
+			activity.record({ ...location.ref, vmId: copy.id }, `Created as a clone of "${location.vm.name}"`);
 			await manager.refresh(location.ref.clusterId);
 			const choice = await vscode.window.showInformationMessage(`"${copy.name}" is ready.`, 'Start');
 			if (choice === 'Start') await power({ ...location.ref, vmId: copy.id }, 'start');
@@ -399,21 +436,94 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 
 	async function takeSnapshot(arg: Arg): Promise<void> {
 		const location = await resolveVm(arg, 'Select a virtual machine to snapshot', canSnapshot);
-		if (location) await snapshotFlow.takeSnapshot(manager, location);
+		if (!location) return;
+		const snapshot = await snapshotFlow.takeSnapshot(manager, location);
+		if (snapshot) activity.record(location.ref, `Snapshot "${snapshot.name}" taken${snapshot.includesMemory ? ' (with memory)' : ''}`);
 	}
 
 	async function revertSnapshot(arg: Arg): Promise<void> {
 		const location = await resolveVm(arg, 'Select a virtual machine to revert', canSnapshot);
 		if (!location) return;
 		const snapshot = await snapshotFlow.pickSnapshot(manager, location, `Revert ${location.vm.name} to…`);
-		if (snapshot) await snapshotFlow.revertSnapshot(manager, location, snapshot);
+		if (snapshot && (await snapshotFlow.revertSnapshot(manager, location, snapshot))) activity.record(location.ref, `Reverted to snapshot "${snapshot.name}"`);
 	}
 
 	async function deleteSnapshot(arg: Arg): Promise<void> {
 		const location = await resolveVm(arg, 'Select a virtual machine to delete a snapshot of', canSnapshot);
 		if (!location) return;
 		const snapshot = await snapshotFlow.pickSnapshot(manager, location, `Delete a snapshot of ${location.vm.name}`);
-		if (snapshot) await snapshotFlow.deleteSnapshot(manager, location, snapshot);
+		if (snapshot && (await snapshotFlow.deleteSnapshot(manager, location, snapshot))) activity.record(location.ref, `Snapshot "${snapshot.name}" deleted`);
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Log, favorites, tags, grouping
+	// -----------------------------------------------------------------------------------------
+
+	async function showLog(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to show the log of');
+		if (location) await activity.show(location.ref);
+	}
+
+	async function favorite(arg: Arg, on: boolean): Promise<void> {
+		const location = await resolveVm(arg, on ? 'Select a virtual machine to add to Favorites' : 'Select a virtual machine to remove from Favorites', (l) => marks.isFavorite(l.ref) !== on);
+		if (location) await marks.setFavorite([location.ref], on);
+	}
+
+	async function editTags(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to tag');
+		if (!location) return;
+		const known = marks.knownTags();
+		const value = await vscode.window.showInputBox({
+			title: `Tags of ${location.vm.name}`,
+			prompt: `Separate tags with commas; empty removes them all.${known.length ? ` In use: ${known.join(', ')}` : ''}`,
+			value: marks.tags(location.ref).join(', '),
+			placeHolder: 'web, lab'
+		});
+		if (value === undefined) return;
+		await marks.setTags([location.ref], parseTags(value));
+		if (groupBySetting() !== 'tag' && parseTags(value).length && !context.globalState.get('vmm.notice.groupByTag')) {
+			await context.globalState.update('vmm.notice.groupByTag', true);
+			const choice = await vscode.window.showInformationMessage('Tags show in the tooltip. Group the Virtual Machines view by tag?', 'Group by Tag');
+			if (choice) await vscode.workspace.getConfiguration('vmm').update('tree.groupBy', 'tag', vscode.ConfigurationTarget.Global);
+		}
+	}
+
+	async function chooseGrouping(): Promise<void> {
+		const current = groupBySetting();
+		const items: Array<vscode.QuickPickItem & { value: GroupBy }> = [
+			{ label: 'Cluster', description: 'cluster › node › machine', value: 'cluster' },
+			{ label: 'Tag', description: 'a group per tag; a machine with two tags is in both', value: 'tag' },
+			{ label: 'State', description: 'running, off, …', value: 'state' }
+		].map((item) => ({ ...item, label: `${item.value === current ? '$(check) ' : ''}${item.label}` })) as Array<vscode.QuickPickItem & { value: GroupBy }>;
+		const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Group the virtual machines by' });
+		if (picked) await vscode.workspace.getConfiguration('vmm').update('tree.groupBy', picked.value, vscode.ConfigurationTarget.Global);
+	}
+
+	/**
+	 * For launch.json inputs and other extensions: `{ "vm": "web-01", "ssh": true, "timeout": 120 }` gives the host
+	 * (or with `port: true` the port) to reach it on; waits up to `timeout` seconds for one. Errors are shown and
+	 * returned as undefined, which cancels a launch.
+	 */
+	async function vmAddress(arg: Arg, part: 'host' | 'port'): Promise<string | undefined> {
+		const options = asRecord(arg) ?? {};
+		const name = namedVm(arg);
+		if (!name) {
+			void vscode.window.showErrorMessage('Say which machine: "args": { "vm": "<name>" }.');
+			return undefined;
+		}
+		const ssh = part === 'port' || options.ssh === true;
+		const timeoutMs = Math.max(0, Number(options.timeout ?? 60)) * 1000;
+		try {
+			const found = await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: ssh ? `Waiting for SSH on ${name}…` : `Waiting for an address of ${name}…`, cancellable: true },
+				(_progress, token) => control.address(name, { ssh, timeoutMs }, token)
+			);
+			if (!found) throw new Error(ssh ? `No SSH server answered on ${name}.` : `${name} has no IP address yet (is it running, with the guest agent?).`);
+			return part === 'host' ? found.host : String(found.port ?? 22);
+		} catch (error) {
+			void vscode.window.showErrorMessage(errorMessage(error));
+			return undefined;
+		}
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -554,7 +664,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			if (!values || values === BACK) return;
 			const invalid = validateValues(schema.filter((f) => !f.advanced), values);
 			if (invalid) throw new Error(invalid.message);
-			const vm = await vscode.window.withProgress(
+			const vm: VmInfo = await vscode.window.withProgress(
 				{ location: vscode.ProgressLocation.Notification, title: `Creating ${String(values.name ?? 'virtual machine')}…` },
 				(progress) => {
 					let shown = 0;
@@ -568,7 +678,8 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			);
 			await manager.refresh(nodeRef.clusterId);
 			const ref: VmRef = { ...nodeRef, vmId: vm.id };
-			await tree.reveal({ kind: 'vm', ...ref }).then(undefined, () => undefined);
+			activity.record(ref, 'Created in VS Code');
+			await tree.revealVm(ref).then(undefined, () => undefined);
 			const choice = await vscode.window.showInformationMessage(`Created ${vm.name}.`, 'Start', 'Settings');
 			if (choice === 'Start') await power(ref, 'start');
 			if (choice === 'Settings') VmSettingsPanel.show(context.extensionUri, manager, ref);
@@ -720,6 +831,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 				() => connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks: choice === 'Delete VM and Disks' })
 			);
 			manager.forgetVm(location.ref);
+			await marks.forget(location.ref);
 			closeViews(location.ref);
 			await manager.refresh(location.ref.clusterId);
 		} catch (error) {
@@ -873,6 +985,13 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register('vmm.connectGraphical', (arg) => connectGraphical(arg)),
 		register('vmm.connectSerial', (arg) => connectSerial(arg)),
 		register('vmm.openExternal', (arg) => openExternal(arg)),
+		register('vmm.showVmLog', (arg) => showLog(arg)),
+		register('vmm.addToFavorites', (arg) => favorite(arg, true)),
+		register('vmm.removeFromFavorites', (arg) => favorite(arg, false)),
+		register('vmm.editTags', (arg) => editTags(arg)),
+		register('vmm.groupBy', () => chooseGrouping()),
+		register('vmm.getVmAddress', (arg) => vmAddress(arg, 'host')),
+		register('vmm.getVmSshPort', (arg) => vmAddress(arg, 'port')),
 		register('vmm.copyId', async (arg) => {
 			const ref = asVmRef(arg);
 			if (ref) await vscode.env.clipboard.writeText(ref.vmId);

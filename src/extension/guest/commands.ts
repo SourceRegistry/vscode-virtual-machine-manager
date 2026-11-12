@@ -21,7 +21,11 @@ function guestOutput(context: vscode.ExtensionContext): vscode.OutputChannel {
 
 const key = (location: VmLocation, what: string) => `vmm.guest.${what}.${location.ref.clusterId}/${location.ref.vmId}`;
 
-export async function runCommandInGuest(context: vscode.ExtensionContext, manager: ConnectionManager, location: VmLocation): Promise<void> {
+/** Writes a line to the machine's activity log. */
+export type RecordActivity = (text: string, level?: 'info' | 'warn' | 'error') => void;
+const none: RecordActivity = () => undefined;
+
+export async function runCommandInGuest(context: vscode.ExtensionContext, manager: ConnectionManager, location: VmLocation, record: RecordActivity = none): Promise<void> {
 	const { ref, vm } = location;
 	const command = await vscode.window.showInputBox({
 		title: `Run in ${vm.name}`,
@@ -40,14 +44,16 @@ export async function runCommandInGuest(context: vscode.ExtensionContext, manage
 			() => connection.runInGuest!(ref.nodeId, ref.vmId, { command, shell: true, timeoutMs: 5 * 60_000 })
 		);
 		channel.append(formatGuestRun(vm.name, command, result));
+		record(`Ran in the guest: ${command} ${guestRunStatus(result)}`, result.exitCode === 0 ? 'info' : 'warn');
 		channel.show(true);
 		void vscode.window.setStatusBarMessage(`${vm.name}: ${command} ${guestRunStatus(result)}`, 6000);
 	} catch (error) {
+		record(`Could not run in the guest: ${command}`, 'error');
 		await showError(`Could not run the command in ${vm.name}`, error);
 	}
 }
 
-export async function copyFileToGuest(context: vscode.ExtensionContext, manager: ConnectionManager, location: VmLocation): Promise<void> {
+export async function copyFileToGuest(context: vscode.ExtensionContext, manager: ConnectionManager, location: VmLocation, record: RecordActivity = none): Promise<void> {
 	const { ref, vm } = location;
 	const [file] = (await vscode.window.showOpenDialog({ title: `Copy a file to ${vm.name}`, canSelectMany: false, openLabel: 'Copy to Guest' })) ?? [];
 	if (!file) return;
@@ -72,13 +78,14 @@ export async function copyFileToGuest(context: vscode.ExtensionContext, manager:
 				last = percent;
 			});
 		});
+		record(`Copied ${file.fsPath} to ${guestPath} in the guest`);
 		void vscode.window.setStatusBarMessage(`Copied ${name} to ${vm.name}:${guestPath}`, 5000);
 	} catch (error) {
 		await showError(`Could not copy ${name} to ${vm.name}`, error);
 	}
 }
 
-export async function copyFileFromGuest(context: vscode.ExtensionContext, manager: ConnectionManager, location: VmLocation): Promise<void> {
+export async function copyFileFromGuest(context: vscode.ExtensionContext, manager: ConnectionManager, location: VmLocation, record: RecordActivity = none): Promise<void> {
 	const { ref, vm } = location;
 	const guestPath = await vscode.window.showInputBox({
 		title: `Copy a file from ${vm.name}`,
@@ -106,6 +113,7 @@ export async function copyFileFromGuest(context: vscode.ExtensionContext, manage
 				last = percent;
 			});
 		});
+		record(`Copied ${guestPath} from the guest to ${target.fsPath}`);
 		const choice = await vscode.window.showInformationMessage(`Copied ${guestPath} from ${vm.name} to ${target.fsPath}`, 'Open');
 		if (choice === 'Open') await vscode.commands.executeCommand('vscode.open', target);
 	} catch (error) {

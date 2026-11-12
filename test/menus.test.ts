@@ -66,6 +66,9 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 			'vmm.openExternal',
 			'vmm.editVm',
 			'vmm.deleteVm',
+			'vmm.showVmLog',
+			'vmm.addToFavorites',
+			'vmm.editTags',
 			'vmm.copyId'
 		]);
 	});
@@ -80,6 +83,9 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 			'vmm.openExternal',
 			'vmm.editVm',
 			'vmm.deleteVm',
+			'vmm.showVmLog',
+			'vmm.addToFavorites',
+			'vmm.editTags',
 			'vmm.copyId'
 		]);
 	});
@@ -93,6 +99,9 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 			'vmm.openExternal',
 			'vmm.editVm',
 			'vmm.deleteVm',
+			'vmm.showVmLog',
+			'vmm.addToFavorites',
+			'vmm.editTags',
 			'vmm.copyId'
 		]);
 		const poweringOff = { ...vm('stopping'), operation: 'stop' as const };
@@ -109,7 +118,14 @@ describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
 
 	it('only offers actions the provider supports', () => {
 		const limited: Capabilities = { ...caps, power: ['start', 'stop'], consoles: [], preview: false, external: false, edit: false, delete: false };
-		expect(commandsFor(menu, vmContextValue(vm('running'), limited))).toEqual(['vmm.stop', 'vmm.copyId']);
+		expect(commandsFor(menu, vmContextValue(vm('running'), limited))).toEqual(['vmm.stop', 'vmm.showVmLog', 'vmm.addToFavorites', 'vmm.editTags', 'vmm.copyId']);
+	});
+
+	it('offers Remove from Favorites instead of Add for a favorite, whatever the provider can do', () => {
+		const fav = commandsFor(menu, vmContextValue({ ...vm('running'), favorite: true }, caps));
+		expect(fav).toContain('vmm.removeFromFavorites');
+		expect(fav).not.toContain('vmm.addToFavorites');
+		expect(commandsFor(menu, vmContextValue({ ...vm('stopped'), favorite: true }, undefined))).toEqual(['vmm.showVmLog', 'vmm.removeFromFavorites', 'vmm.editTags', 'vmm.copyId']);
 	});
 
 	it('offers create on nodes and management on clusters', () => {

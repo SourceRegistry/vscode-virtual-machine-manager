@@ -64,6 +64,15 @@ async function run() {
 	});
 	disposable.dispose();
 
+	// The API for other extensions (no clusters in this profile, so no machines).
+	assert.ok(api.vms, 'api.vms is exported');
+	assert.deepEqual(await api.vms.list(), [], 'no machines without clusters');
+	assert.equal(await api.vms.get('nope'), undefined, 'an unknown machine is undefined');
+	await assert.rejects(api.vms.power('nope', 'start'), /No virtual machine is called "nope"/);
+
+	// The "vm" task provider answers (no machines, so no tasks). Running one needs a tasks.json: checked by hand.
+	assert.deepEqual(await vscode.tasks.fetchTasks({ type: 'vm' }), [], 'vm task provider is registered');
+
 	// UI surfaces open without throwing.
 	await vscode.commands.executeCommand('vmm.openOverview');
 	await new Promise((r) => setTimeout(r, 1500));
