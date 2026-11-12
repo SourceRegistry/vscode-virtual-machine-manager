@@ -6,7 +6,7 @@
  * booted until the guest agent cloud-init installs answers (needs internet in the guest, a few minutes).
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
 import { join } from 'node:path';
@@ -186,6 +186,22 @@ describe.skipIf(!enabled)('libvirt provider against real libvirt', () => {
 			await until(async () => { try { v('qemu-agent-command', name, '{"execute":"guest-ping"}'); return true; } catch { return false; } }, 'the guest agent', 6 * 60_000);
 			const hostname = JSON.parse(v('qemu-agent-command', name, '{"execute":"guest-get-host-name"}')).return['host-name'];
 			expect(hostname).toBe(name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+
+			// Guest agent through virsh: a command, a file both ways (many 4 KiB writes, 1 MiB reads), guest memory.
+			expect(await connection.runInGuest('host', vm.id, { command: 'cat /etc/hostname; exit 4', shell: true })).toMatchObject({ stdout: `${hostname}\n`, exitCode: 4 });
+			const data = Buffer.from(Array.from({ length: 200 * 1024 + 5 }, (_, i) => (i * 13) % 256));
+			writeFileSync(join(dir, 'up.bin'), data);
+			await connection.copyToGuest('host', vm.id, join(dir, 'up.bin'), '/tmp/vmm-up.bin');
+			await connection.copyFromGuest('host', vm.id, '/tmp/vmm-up.bin', join(dir, 'down.bin'));
+			expect(readFileSync(join(dir, 'down.bin')).equals(data)).toBe(true);
+			let stats = await connection.getVmStats('host', vm.id);
+			for (let i = 0; i < 12 && stats.memorySource !== 'guest'; i++) {
+				await new Promise((r) => setTimeout(r, 2500));
+				stats = await connection.getVmStats('host', vm.id);
+			}
+			expect(stats).toMatchObject({ memorySource: 'guest' });
+			expect(stats.memoryUsedMB).toBeGreaterThan(30);
+			expect(stats.memoryUsedMB).toBeLessThan(1024);
 
 			// User-mode networking: SSH is reached through a forward, which comes back after a restart.
 			const port = 20000 + (process.pid % 20000);

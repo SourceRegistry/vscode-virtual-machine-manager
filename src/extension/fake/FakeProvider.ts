@@ -6,8 +6,11 @@ import {
 	type ClusterConnection,
 	type FieldSchema,
 	type FieldValues,
+	type GuestCommand,
+	type GuestCommandResult,
 	type HypervisorProvider,
 	type PreviewFrame,
+	type TransferProgress,
 	type VmInfo
 } from '@vmm/sdk';
 
@@ -60,8 +63,12 @@ class FakeConnection implements ClusterConnection {
 		power: ['start', 'shutdown', 'reboot', 'stop'],
 		consoles: ['serial'],
 		preview: true,
-		external: false
+		external: false,
+		guestExec: true,
+		guestFiles: true
 	};
+	/** Files "in" the fake guests, by VM id and path. */
+	private readonly guestFiles = new Map<string, Buffer>();
 	private readonly emitter = new vscode.EventEmitter<{ vmId?: string }>();
 	readonly onDidChange = this.emitter.event;
 	private readonly vms = new Map<string, VmInfo & { nodeId: string; started?: number; values: FieldValues }>();
@@ -71,6 +78,34 @@ class FakeConnection implements ClusterConnection {
 		for (let n = 0; n < nodeCount; n++) {
 			for (let i = 0; i < 3; i++) this.add(`node-${n + 1}`, { name: `vm-${n + 1}${String.fromCharCode(97 + i)}`, cpus: 2, memoryMB: 2048, os: 'linux' }, i === 0);
 		}
+	}
+
+	private running(vmId: string): void {
+		const vm = this.vms.get(vmId);
+		if (!vm) throw new ProviderError('No such VM', 'notFound');
+		if (vm.state !== 'running') throw new ProviderError('Start the machine first.', 'invalid');
+	}
+
+	/** Echoes the command line, like a guest whose shell only knows `echo`. */
+	async runInGuest(_nodeId: string, vmId: string, command: GuestCommand): Promise<GuestCommandResult> {
+		this.running(vmId);
+		await new Promise((r) => setTimeout(r, 300));
+		const line = [command.command, ...(command.args ?? [])].join(' ');
+		return { stdout: `fake guest ran: ${line}\n`, stderr: '', exitCode: 0, truncated: false, timedOut: false };
+	}
+
+	async copyToGuest(_nodeId: string, vmId: string, localPath: string, guestPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void> {
+		this.running(vmId);
+		const data = await vscode.workspace.fs.readFile(vscode.Uri.file(localPath));
+		onProgress?.({ done: data.length, total: data.length });
+		this.guestFiles.set(`${vmId}:${guestPath}`, Buffer.from(data));
+	}
+
+	async copyFromGuest(_nodeId: string, vmId: string, guestPath: string, localPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void> {
+		this.running(vmId);
+		const data = this.guestFiles.get(`${vmId}:${guestPath}`) ?? Buffer.from(`fake contents of ${guestPath}\n`);
+		await vscode.workspace.fs.writeFile(vscode.Uri.file(localPath), data);
+		onProgress?.({ done: data.length, total: data.length });
 	}
 
 	private add(nodeId: string, values: FieldValues, running = false): VmInfo {

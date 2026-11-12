@@ -82,6 +82,11 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
   machine's details: a port forward to port 22 (QEMU's NAT address is never offered), or an address the
   computer can reach. It checks that an SSH server answers first, and asks before adding an entry for the
   machine to your ssh config; nothing is written silently. **Forward SSH Port…** sets up the forward.
+* **Run Command in Guest…**, **Copy File to Guest…** and **Copy File from Guest…** work on a running machine through its
+  guest agent (`qemu-guest-agent`, installed by the cloud-image setup), without SSH or a network route. The command runs in
+  the guest's shell (`/bin/sh`, `cmd.exe` on Windows) as the agent's user, usually root; its output goes to the
+  *VM Manager: Guest Commands* output channel. With the balloon driver in the guest, the memory chart shows what the guest
+  itself uses rather than what the hypervisor holds on the host; the chart says which.
   **Add Machines to SSH Config…** and **Remove Machines from SSH Config…** let you choose which machines
   have an entry, so they work with plain `ssh <name>` and in Remote - SSH's host list.
 * **Delete** removes the machine, and its disks if you choose so.
@@ -122,12 +127,14 @@ QEMU only, through the QEMU provider:
 | Details page, live CPU / memory / disk charts | ✓ | ✓ | ✓ | ✓ |
 | Guest IP addresses | ✓ *(integration services)* | ✓ *(guest agent)* | ✓ *(guest agent)* | ✓ *(DHCP leases, guest agent)* |
 | Change or eject ISO | ✓ | ✓ | – | ✓ |
+| Run commands and copy files in the guest | – | ✓ *(guest agent)* | – | ✓ *(guest agent)* |
+| Memory used inside the guest | – | ✓ *(balloon driver)* | – | ✓ *(balloon driver)* |
 | **Protect and copy** | | | | |
 | Snapshots | ✓ *(checkpoints)* | ✓ *(disks only, qcow2)* | ✓ *(disks only)* | ✓ *(with memory when running; not for UEFI with a raw nvram)* |
 | Clone | ✓ *(export and import)* | ✓ | ✓ *(full copy)* | – |
 | Templates | ✓ *(marked in the notes)* | ✓ | ✓ *(one way)* | – |
 | **Network and devices** | | | | |
-| Port forwards | – | ✓ | – | – |
+| Port forwards | – | ✓ | – | ✓ *(user-mode networking, this computer)* |
 | Host device passthrough | experimental *(PCI, DDA)* | experimental *(USB; PCI on Linux)* | – | – |
 | Connect with Remote-SSH | via address | via forward or address | via address | via address |
 | **Sign-in** | Windows account | – | API token, password, OpenID Connect | SSH key or agent (for SSH hosts) |

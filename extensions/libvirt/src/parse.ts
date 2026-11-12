@@ -178,6 +178,17 @@ export function parseDomain(xml: string): DomainInfo {
 	};
 }
 
+/**
+ * Memory the guest itself uses, in MB: `balloon.available` (MemTotal) minus `balloon.usable` (MemAvailable),
+ * both KiB. Undefined until the balloon driver reported (needs a statistics period on the domain).
+ */
+export function guestMemoryUsedMB(s: Record<string, string>): number | undefined {
+	const available = Number(s['balloon.available']);
+	const usable = Number(s['balloon.usable']);
+	if (!s['balloon.available'] || !s['balloon.usable'] || !(available > 0) || !(usable >= 0) || usable > available) return undefined;
+	return Math.round((available - usable) / 1024);
+}
+
 export function toDiskDevices(domain: DomainInfo, capacities: Map<string, number>): DiskDevice[] {
 	return domain.disks.map((disk) => ({
 		id: disk.target,

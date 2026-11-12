@@ -16,6 +16,7 @@ import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, log, showError } from '../util/log';
 import * as snapshotFlow from '../snapshots/flow';
 import { addSshForward, addToSshConfig, connectSsh, removeFromSshConfig } from '../ssh/connect';
+import { copyFileFromGuest, copyFileToGuest, runCommandInGuest } from '../guest/commands';
 import { deleteVmDetail } from '../../shared/deleteDetail';
 import { withDelayedProgress } from '../util/progress';
 import { matchesQuery } from '../../shared/vmSearch';
@@ -317,6 +318,24 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	async function forwardSsh(arg: Arg): Promise<void> {
 		const location = await resolveVm(arg, 'Select a virtual machine to forward SSH for', (l) => !!l.cluster.connection?.capabilities.forwards);
 		if (location) await addSshForward(manager, location);
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Guest (through the guest agent)
+	// -----------------------------------------------------------------------------------------
+
+	async function guest(arg: Arg, what: 'run' | 'to' | 'from'): Promise<void> {
+		const capable = (l: VmLocation) => l.vm.state === 'running' && !!(what === 'run' ? l.cluster.connection?.capabilities.guestExec : l.cluster.connection?.capabilities.guestFiles);
+		const placeholder = { run: 'Select a running virtual machine to run a command in', to: 'Select a running virtual machine to copy a file to', from: 'Select a running virtual machine to copy a file from' }[what];
+		const location = await resolveVm(arg, placeholder, capable);
+		if (!location) return;
+		if (location.vm.state !== 'running') {
+			void vscode.window.showInformationMessage(`"${location.vm.name}" is not running.`);
+			return;
+		}
+		if (what === 'run') await runCommandInGuest(context, manager, location);
+		else if (what === 'to') await copyFileToGuest(context, manager, location);
+		else await copyFileFromGuest(context, manager, location);
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -833,6 +852,9 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register('vmm.changeMedia', (arg) => changeMedia(arg)),
 		register('vmm.connectSsh', (arg) => connectWithSsh(arg)),
 		register('vmm.addSshForward', (arg) => forwardSsh(arg)),
+		register('vmm.runInGuest', (arg) => guest(arg, 'run')),
+		register('vmm.copyToGuest', (arg) => guest(arg, 'to')),
+		register('vmm.copyFromGuest', (arg) => guest(arg, 'from')),
 		register('vmm.addSshConfigEntries', () => addToSshConfig(manager, context.globalState)),
 		register('vmm.removeSshConfigEntries', () => removeFromSshConfig()),
 		register('vmm.cloneVm', (arg) => cloneVm(arg)),

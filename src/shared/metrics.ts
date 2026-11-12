@@ -13,6 +13,8 @@ export interface MetricPoint {
 	t: number;
 	cpu: number | null;
 	memoryUsedMB: number | null;
+	/** `guest`: used inside the guest; `host`: what the hypervisor process holds (see VmStats.memorySource). */
+	memorySource: 'guest' | 'host' | null;
 	memoryMB: number | null;
 	readBps: number | null;
 	writeBps: number | null;
@@ -61,6 +63,7 @@ export function derivePoint(previous: VmStats | undefined, current: VmStats): Me
 		t: current.timestamp / 1000,
 		cpu: current.cpuUsage ?? null,
 		memoryUsedMB: current.memoryUsedMB ?? null,
+		memorySource: current.memorySource ?? null,
 		memoryMB: current.memoryMB ?? null,
 		readBps: null,
 		writeBps: null,
@@ -117,7 +120,7 @@ export function trimWindow(points: MetricPoint[], windowSeconds = WINDOW_SECONDS
 }
 
 /** Column-major data for uPlot: `[times, ...series]`. */
-export function column(points: MetricPoint[], keys: Array<keyof Omit<MetricPoint, 't'>>): Array<Array<number | null>> {
+export function column(points: MetricPoint[], keys: Array<keyof Omit<MetricPoint, 't' | 'memorySource'>>): Array<Array<number | null>> {
 	return [points.map((p) => p.t), ...keys.map((key) => points.map((p) => p[key]))];
 }
 

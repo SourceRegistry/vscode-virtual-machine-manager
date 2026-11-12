@@ -206,6 +206,24 @@
         "icon": "$(plug)"
       },
       {
+        "command": "vmm.runInGuest",
+        "title": "Run Command in Guest…",
+        "category": "VM",
+        "icon": "$(terminal-cmd)"
+      },
+      {
+        "command": "vmm.copyToGuest",
+        "title": "Copy File to Guest…",
+        "category": "VM",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "vmm.copyFromGuest",
+        "title": "Copy File from Guest…",
+        "category": "VM",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "vmm.addSshConfigEntries",
         "title": "Add Machines to SSH Config…",
         "category": "VM",
@@ -437,6 +455,18 @@
         },
         {
           "command": "vmm.addSshForward",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.runInGuest",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.copyToGuest",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.copyFromGuest",
           "when": "vmm.hasVms"
         },
         {
@@ -721,6 +751,21 @@
           "group": "2_connect@4"
         },
         {
+          "command": "vmm.runInGuest",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bguestexec;/",
+          "group": "2_guest@1"
+        },
+        {
+          "command": "vmm.copyToGuest",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bguestfiles;/",
+          "group": "2_guest@2"
+        },
+        {
+          "command": "vmm.copyFromGuest",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bguestfiles;/",
+          "group": "2_guest@3"
+        },
+        {
           "command": "vmm.ejectMedia",
           "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bejectable;/",
           "group": "2_media@1"
@@ -923,6 +968,21 @@
           "command": "vmm.connectSsh",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\bdetails;/",
           "group": "2_connect@4"
+        },
+        {
+          "command": "vmm.runInGuest",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\bguestexec;/",
+          "group": "2_guest@1"
+        },
+        {
+          "command": "vmm.copyToGuest",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\bguestfiles;/",
+          "group": "2_guest@2"
+        },
+        {
+          "command": "vmm.copyFromGuest",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\bguestfiles;/",
+          "group": "2_guest@3"
         },
         {
           "command": "vmm.ejectMedia",

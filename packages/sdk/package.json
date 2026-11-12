@@ -9,6 +9,6 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./provisioning": "./src/provisioning/index.ts"
+    "./*": "./src/*/index.ts"
   }
 }

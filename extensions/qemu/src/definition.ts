@@ -201,6 +201,8 @@ export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvi
 	} else {
 		args.push('-serial', 'none');
 	}
+	// Memory balloon: no ballooning is done, its driver reports what the guest uses (VmStats.memorySource 'guest').
+	args.push('-device', 'virtio-balloon-pci,id=balloon0');
 	if (runtime.agentPort) {
 		// Guest agent channel: lets the host ask a cooperative guest for a clean shutdown/reboot.
 		args.push('-device', 'virtio-serial-pci');
