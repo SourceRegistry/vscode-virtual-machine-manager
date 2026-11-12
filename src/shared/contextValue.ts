@@ -14,6 +14,37 @@ import type { Capabilities, PowerAction, VmInfo } from '@vmm/sdk';
 import { allowedDuring } from './operations';
 import type { ClusterStatus } from './protocol';
 
+/**
+ * What at least one connected cluster can do, as `vmm.can.<feature>` context keys. The command palette shows a VM
+ * command only when some connected provider supports it (the context menus check the VM's own flags instead).
+ */
+export const FEATURES = ['start', 'shutdown', 'reboot', 'stop', 'graphical', 'serial', 'external', 'details', 'media', 'snapshots', 'guestexec', 'guestfiles', 'clone', 'templates', 'edit', 'delete', 'adopt', 'forwards'] as const;
+export type Feature = (typeof FEATURES)[number];
+
+export function featureFlags(capabilities: Capabilities[]): Record<Feature, boolean> {
+	const any = (test: (caps: Capabilities) => boolean | undefined) => capabilities.some((caps) => !!test(caps));
+	return {
+		start: any((c) => c.power.includes('start')),
+		shutdown: any((c) => c.power.includes('shutdown')),
+		reboot: any((c) => c.power.includes('reboot')),
+		stop: any((c) => c.power.includes('stop')),
+		graphical: any((c) => c.consoles.includes('vnc') || c.consoles.includes('rdp') || c.preview),
+		serial: any((c) => c.consoles.includes('serial')),
+		external: any((c) => c.external),
+		details: any((c) => c.details || c.stats),
+		media: any((c) => c.media),
+		snapshots: any((c) => c.snapshots),
+		guestexec: any((c) => c.guestExec),
+		guestfiles: any((c) => c.guestFiles),
+		clone: any((c) => c.clone),
+		templates: any((c) => c.templates),
+		edit: any((c) => c.edit),
+		delete: any((c) => c.delete),
+		adopt: any((c) => c.adopt),
+		forwards: any((c) => c.forwards)
+	};
+}
+
 export function clusterContextValue(status: ClusterStatus, caps?: Capabilities): string {
 	return `cluster;status=${status};${status === 'connected' && caps?.signOut ? 'signout;' : ''}${caps?.consoles.includes('rdp') ? 'rdp;' : ''}`;
 }

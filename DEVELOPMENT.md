@@ -16,6 +16,7 @@ packages/sdk/         @vmm/sdk — provider API shared by core and providers;
                       (any packages/sdk/src/<name>/index.ts is importable as @vmm/sdk/<name>)
 extensions/hyperv/    Hyper-V provider extension
 extensions/libvirt/   libvirt provider extension
+extensions/nutanix/   Nutanix (Prism Central v3) provider extension
 extensions/proxmox/   Proxmox VE provider extension
 extensions/qemu/      QEMU provider extension
 vendor/ironrdp/       vendored IronRDP web client (WebAssembly) for the RDP console
@@ -181,7 +182,7 @@ Optional parts a provider can add for the core's features: `Capabilities.shutdow
 
 ## Using VM Manager from another extension
 
-The core's API also has `vms` (core 0.12+), for extensions that want to drive machines rather than
+The core's API also has `vms` (core 0.13+), for extensions that want to drive machines rather than
 provide them, for example to start a test VM before running tests against it:
 
 ```ts

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-libvirt-v1.3.0...vm-manager-libvirt-v1.3.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **libvirt:** serial console echoed guest output back and leaked threads ([195d9bb](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/195d9bb0a246f99f725f98811588722b2ab7b6a0))
+
 # [1.3.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-libvirt-v1.2.0...vm-manager-libvirt-v1.3.0) (2026-11-12)
 
 

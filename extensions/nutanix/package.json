@@ -1,0 +1,49 @@
+{
+  "name": "vm-manager-nutanix",
+  "displayName": "VM Manager – Nutanix",
+  "description": "Manage Nutanix AHV virtual machines through Prism Central from VS Code: power, snapshots, clones and metrics.",
+  "version": "1.0.0",
+  "publisher": "sourceregistry",
+  "icon": "media/icon.png",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SourceRegistry/vscode-virtual-machine-manager.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "nutanix",
+    "ahv",
+    "prism",
+    "virtual machine",
+    "vm-manager-provider"
+  ],
+  "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "sourceregistry.vm-manager"
+  ],
+  "activationEvents": [],
+  "contributes": {
+    "vmManager.providers": [
+      {
+        "id": "nutanix",
+        "displayName": "Nutanix",
+        "description": "Nutanix AHV clusters through Prism Central (v3 API) over HTTPS",
+        "apiVersion": 1
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "cd ../.. && node esbuild.mjs --only nutanix"
+  },
+  "dependencies": {
+    "@vmm/sdk": "*",
+    "ws": "^8.22.1"
+  }
+}

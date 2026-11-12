@@ -660,7 +660,7 @@ export interface VmManagerApi {
 	/** Available in core versions that provide shared browser sign-in. */
 	browserLogin?<T>(options: BrowserLoginOptions<T>): Promise<T>;
 	/**
-	 * Machines for other extensions (core 0.12+; check that it is there). Read-only views and power actions on the
+	 * Machines for other extensions (core 0.13+; check that it is there). Read-only views and power actions on the
 	 * clusters the user added; connecting may ask the user to sign in. Not meant for providers.
 	 */
 	readonly vms?: VmControlApi;

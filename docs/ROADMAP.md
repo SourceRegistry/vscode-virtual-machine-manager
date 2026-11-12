@@ -62,7 +62,7 @@ Value = how much it moves "best VM extension for VS Code", weighed against effor
 | 9 | 18 | `feat/dev-ux` | Countdown, notifications, logs, API; cheap polish, wide effect | yes | built, manual check open |
 | 10 | 15 | `feat/disk-management` | Resize/convert/export; useful, not a differentiator | yes | todo |
 | 11 | 17 | `feat/qemu-network-v2` | NIC editor, bridge/vmnet; privileges make it costly on macOS | partly | todo |
-| 12 | 20 | `feat/more-providers` | VMware, VirtualBox, Parallels, XCP-ng, Nutanix; big but each is its own project | mostly no | todo |
+| 12 | 20 | `feat/more-providers` | VMware, VirtualBox, Parallels, XCP-ng, Nutanix; big but each is its own project | mostly no | Nutanix built (`feat/nutanix-provider`), rest todo |
 | 13 | 21 | `feat/mcp` | VMs as tools for AI agents (Copilot agent mode, Claude, any MCP client): list, start, stop, IP, run in guest | yes | todo |
 
 Phase numbers stay stable (they name sections and branches); the rank is the build order. Phases 5-7 and 10 are built but their leftovers sit in their own sections.
@@ -356,7 +356,10 @@ Order by demand; each is its own extension and its own release line.
 - [ ] VMware: Fusion/Workstation via `vmrun` (**local on a Mac with Fusion**), ESXi/vSphere via REST (not local)
 - [ ] VirtualBox via `VBoxManage` (VirtualBox for Apple Silicon exists, arm64 guests only; check before starting)
 - [ ] Parallels via `prlctl` (needs a paid license on the Mac)
-- [ ] XCP-ng, Nutanix: remote APIs only, mocks + a real server later
+- [x] Nutanix: `extensions/nutanix`, Prism Central v3 REST (clusters as nodes, create from image/ISO with cloud-init, edit, power, recovery points as snapshots, clone, stats via `groups`, VNC through Prism's proxy). Sign-in with a password (in memory unless saved) or a Prism Central API key. Tested against a fake Prism API; `test/live.e2e.test.ts` is an opt-in read-only run against a real Prism Central (still to do). Open: v4-only features (templates)
+- [x] Nutanix fake Prism Central for manual testing and CI (`extensions/nutanix/scripts/fake-prism.mjs`, `test/fakePrism.test.ts`)
+- [ ] Backlog: test Nutanix against Community Edition (x86_64 host with VT-x/AMD-V, 64 GB RAM, three disks; not possible on the Apple Silicon dev Mac) and Prism Central deployed from it; Test Drive needs its web sign-in cookie (live test supports `VMM_E2E_NUTANIX_COOKIE`)
+- [ ] XCP-ng: remote API only, mocks + a real server later
 - [ ] Any new provider must pass the SDK conformance tests (add them first, using the fake provider as reference)
 
 ### Phase 21: `feat/mcp`  (Local: yes)

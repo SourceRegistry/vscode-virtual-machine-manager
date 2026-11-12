@@ -17,6 +17,7 @@ import { VmActivity } from './activity/VmActivity';
 import { VmMarksStore } from './tree/VmMarksStore';
 import { VmControl } from './api/VmControl';
 import { VmTaskProvider } from './tasks/VmTaskProvider';
+import { REMOTE_SSH_ID } from './ssh/connect';
 
 export function activate(context: vscode.ExtensionContext): VmManagerApi {
 	initLog(context);
@@ -61,6 +62,12 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 		void vscode.commands.executeCommand('setContext', 'vmm.hasProviders', registry.available().length > 0);
 	context.subscriptions.push(registry.onDidChange(updateProviderContext));
 	updateProviderContext();
+
+	// "Connect with Remote-SSH" is only offered while the Remote - SSH extension is installed.
+	const updateRemoteSshContext = () =>
+		void vscode.commands.executeCommand('setContext', 'vmm.remoteSshInstalled', !!vscode.extensions.getExtension(REMOTE_SSH_ID));
+	context.subscriptions.push(vscode.extensions.onDidChange(updateRemoteSshContext));
+	updateRemoteSshContext();
 
 	if (context.extensionMode === vscode.ExtensionMode.Development) {
 		context.subscriptions.push(registry.register(new FakeProvider()));

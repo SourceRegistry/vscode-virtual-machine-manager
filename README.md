@@ -29,10 +29,11 @@ them, change their settings and work in their consoles in an editor tab, next to
    |---|---|
    | [VM Manager – Hyper-V](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-hyperv) | Hyper-V on this Windows machine |
    | [VM Manager – libvirt](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-libvirt) | libvirt (KVM/QEMU) domains on this computer or over SSH |
+   | [VM Manager – Nutanix](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-nutanix) | Nutanix AHV clusters through Prism Central |
    | [VM Manager – Proxmox VE](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-proxmox) | Remote Proxmox VE clusters over HTTPS |
    | [VM Manager – QEMU](https://marketplace.visualstudio.com/items?itemName=sourceregistry.vm-manager-qemu) | QEMU machines on Windows, Linux and macOS |
 
-   XCP-ng, VMware and Nutanix are planned. **VM: Install Hypervisor Providers** lists the providers you can install.
+   XCP-ng and VMware are planned. **VM: Install Hypervisor Providers** lists the providers you can install.
 2. Open the **Virtual Machines** view in the activity bar and click **Add Cluster**.
 3. Your machines appear in the view. Right-click one for everything you can do with it.
 
