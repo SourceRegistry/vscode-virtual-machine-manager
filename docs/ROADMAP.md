@@ -16,7 +16,7 @@ Done when: phase 11 has no open box we can close on this Mac, and a new user can
 
 The "done when" flow (cloud image → snapshot → Remote-SSH) is built for QEMU. libvirt has all three steps, but cannot snapshot its UEFI domains while their variable store is a raw file (a libvirt limit, see `extensions/libvirt/README.md`); some manual checks are still open (phases 11-14).
 
-Merged: phases 1-7, 9, 10, 12, 13, 14; most of 19; the first slice of 16. Phase 11 stays open (manual checks).
+Merged: phases 1-7, 9, 10, 12 (also Hyper-V and Proxmox, untested there), 13, 14; most of 19; the first slice of 16. Phase 11 stays open (manual checks).
 Next on this Mac: **phase 18** (dev UX), then 21 (MCP), 15, 17.
 
 ## Ground rules
@@ -266,7 +266,7 @@ Status: **merged** (PR #3, 2026-11-10). QEMU snapshots work end to end on this M
 - [ ] Snapshot size, and a snapshot tree/"current" marker (qcow2 does not track the current one)
 - [x] Clone (full copy): `VM: Clone…`, `cloneVm`, `Capabilities.clone` / `cloneNeedsStopped`. `qemu-img convert` per disk (compact, drops the source's snapshots), copy of `efivars.fd`, new MAC, forwards / passed-through devices / imported marker not copied (`extensions/qemu/src/clone.ts`). Stopped VMs only; attached VMs refused. Unit tests plus an e2e on real QEMU (data copied, independent, no snapshots, new MAC, running VM refused, name clash refused). Not yet clicked through by hand
 - [ ] Linked clone (`qemu-img create -b`): deferred on purpose. The clone depends on the original's disk staying untouched, and nothing stops the original from being started and corrupting it. Needs a template concept (a read-only base) first, see phase 14
-- [ ] Hyper-V (checkpoints) and Proxmox (snapshot API) map onto the same SDK: **not local**, write against docs + mocks
+- [x] Hyper-V (checkpoints) and Proxmox (snapshot API) on the same SDK, with clone and templates (PR #6, merged with PR #7 on 2026-11-10). **Not local**: written against docs and mocks, never run on a real Hyper-V host or Proxmox server
 - [ ] Revert for a running VM without powering off (needs memory snapshots)
 
 ### Phase 13: `feat/remote-ssh-connect`  (Local: yes)
@@ -396,6 +396,7 @@ Versions are core first, then the provider extensions that were released with it
 2026-11-10  phases 11, 12   feat/snapshots (PR #3)             core 0.6.0; qemu 0.6.0; hyperv, proxmox 0.5.0
 2026-11-10  phase 14        feat/provisioning (PR #5)          core 0.7.0; qemu 0.7.0; hyperv, proxmox 0.6.0
 2026-11-10  phases 9, 13    feat/remote-ssh-connect (PR #4)    core 0.7.0 (same release as PR #5)
+2026-11-10  phase 12        feat/provider-snapshots (PR #6)    merged through PR #7 (stacked)            Hyper-V and Proxmox snapshots, clone, templates; opt-in Proxmox sessions
 2026-11-10  phase 19        feat/libvirt-provider (PR #7)      core 0.8.0; libvirt 1.0.0; qemu 0.8.0; hyperv, proxmox 0.7.0
 2026-11-10  phase 19        docs/libvirt-logo-feature-table (PR #8)  core 0.9.0; libvirt 1.1.0
 2026-11-12  phase 19        feat/libvirt-create-vm (PR #9)     core 0.10.0; libvirt 1.2.0; qemu 0.8.1; hyperv, proxmox 0.7.1   create from ISO / cloud image, port forwards
