@@ -7,6 +7,7 @@ import type { ProviderRegistry } from '../registry/ProviderRegistry';
 import { errorMessage, log, scopedLogger } from '../util/log';
 import { OPERATION_LABEL, OPERATION_STATE, allowedDuring } from '../../shared/operations';
 import { VanishedVms, type GoneVm, type ObservedNode } from '../../shared/vanished';
+import { FEATURES, featureFlags } from '../../shared/contextValue';
 
 /** A VM that disappeared. `expected`: the user powered it off from here, so there is nothing to tell them. */
 export interface VanishedVm {
@@ -485,7 +486,15 @@ export class ConnectionManager implements vscode.Disposable {
 		void vscode.commands.executeCommand('setContext', 'vmm.hasVms', this.allVms().length > 0);
 		// Remembered console credentials only exist for providers that open RDP consoles (Hyper-V).
 		void vscode.commands.executeCommand('setContext', 'vmm.hasRdpClusters', this.clusters().some((rt) => rt.connection?.capabilities.consoles.includes('rdp')));
+		// Commands no connected provider supports are left out of the command palette.
+		const flags = featureFlags(this.clusters().flatMap((rt) => (rt.connection ? [rt.connection.capabilities] : [])));
+		for (const feature of FEATURES) {
+			if (this.featureContext.get(feature) === flags[feature]) continue;
+			this.featureContext.set(feature, flags[feature]);
+			void vscode.commands.executeCommand('setContext', `vmm.can.${feature}`, flags[feature]);
+		}
 	}
+	private readonly featureContext = new Map<string, boolean>();
 
 	dispose(): void {
 		if (this.timer) clearInterval(this.timer);

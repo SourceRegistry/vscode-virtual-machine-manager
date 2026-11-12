@@ -435,110 +435,110 @@
         },
         {
           "command": "vmm.openVmDashboard",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.details"
         },
         {
           "command": "vmm.editVm",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.edit"
         },
         {
           "command": "vmm.ejectMedia",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.media"
         },
         {
           "command": "vmm.changeMedia",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.media"
         },
         {
           "command": "vmm.connectSsh",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.details && vmm.remoteSshInstalled"
         },
         {
           "command": "vmm.addSshForward",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.forwards"
         },
         {
           "command": "vmm.runInGuest",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.guestexec"
         },
         {
           "command": "vmm.copyToGuest",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.guestfiles"
         },
         {
           "command": "vmm.copyFromGuest",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.guestfiles"
         },
         {
           "command": "vmm.addSshConfigEntries",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.details"
         },
         {
           "command": "vmm.removeSshConfigEntries"
         },
         {
           "command": "vmm.cloneVm",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.clone"
         },
         {
           "command": "vmm.convertToTemplate",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.templates"
         },
         {
           "command": "vmm.convertToVm",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.templates"
         },
         {
           "command": "vmm.createFromTemplate",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.templates"
         },
         {
           "command": "vmm.takeSnapshot",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.snapshots"
         },
         {
           "command": "vmm.revertSnapshot",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.snapshots"
         },
         {
           "command": "vmm.deleteSnapshot",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.snapshots"
         },
         {
           "command": "vmm.deleteVm",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.delete"
         },
         {
           "command": "vmm.detachVm",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.adopt"
         },
         {
           "command": "vmm.start",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.start"
         },
         {
           "command": "vmm.shutdown",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.shutdown"
         },
         {
           "command": "vmm.reboot",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.reboot"
         },
         {
           "command": "vmm.stop",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.stop"
         },
         {
           "command": "vmm.connectGraphical",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.graphical"
         },
         {
           "command": "vmm.connectSerial",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.serial"
         },
         {
           "command": "vmm.openExternal",
-          "when": "vmm.hasVms"
+          "when": "vmm.hasVms && vmm.can.external"
         },
         {
           "command": "vmm.copyId",
@@ -747,7 +747,7 @@
         },
         {
           "command": "vmm.connectSsh",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bdetails;/",
+          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bdetails;/ && vmm.remoteSshInstalled",
           "group": "2_connect@4"
         },
         {
@@ -966,7 +966,7 @@
         },
         {
           "command": "vmm.connectSsh",
-          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\bdetails;/",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;state=running;.*\\bdetails;/ && vmm.remoteSshInstalled",
           "group": "2_connect@4"
         },
         {
