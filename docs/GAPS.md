@@ -9,7 +9,7 @@ Claims about other tools are from memory and were not re-checked.
 |---|-----|-------|---|
 | 1 | Unverified code: Hyper-V, VFIO, DDA and Windows paths never ran on real hardware; many "manual check" boxes open; Proxmox status unclear | 11 | Open. Proxmox status is written down (mocked API only); Hyper-V, VFIO, DDA still need hardware |
 | 2 | Remote hosts: Hyper-V over WinRM/SSH and QEMU over SSH are `todo` | 8, 9 | QEMU over SSH done (9); Hyper-V remote open (8) |
-| 3 | Missing hypervisors: libvirt/KVM, VMware, VirtualBox, Parallels, XCP-ng, Nutanix | 19, 20 | libvirt done (19, edit / clone / pools / networks open); the rest open (20) |
+| 3 | Missing hypervisors: libvirt/KVM, VMware, VirtualBox, Parallels, XCP-ng, Nutanix | 19, 20 | libvirt done (19, edit / clone / pools / networks open); Nutanix provider built (20, tested against a fake Prism API only); the rest open (20) |
 | 4 | Snapshots, clones, templates: absent | 12, 14 | Done for QEMU, Hyper-V (untested), Proxmox; libvirt has snapshots, no clone or templates |
 | 5 | Networking: no NIC editor, no bridge/vmnet, no network chart, guest IP needs an agent | 17 | Open |
 

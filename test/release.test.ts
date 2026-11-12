@@ -8,7 +8,7 @@ const qemu = findPackage('qemu');
 describe('release packages', () => {
 	it('lists the core first, then every provider', () => {
 		expect(packages[0].id).toBe('core');
-		expect(packages.map((p: { id: string }) => p.id).sort()).toEqual(['core', 'hyperv', 'libvirt', 'proxmox', 'qemu']);
+		expect(packages.map((p: { id: string }) => p.id).sort()).toEqual(['core', 'hyperv', 'libvirt', 'nutanix', 'proxmox', 'qemu']);
 	});
 
 	it('gives every package its own tag format', () => {
