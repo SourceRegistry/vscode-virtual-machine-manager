@@ -23,6 +23,8 @@ import {
 	type ExternalVmInfo,
 	type FieldSchema,
 	type FieldValues,
+	type GuestCommand,
+	type GuestCommandResult,
 	type HypervisorProvider,
 	type ImportCandidate,
 	type ImportOptions,
@@ -34,6 +36,7 @@ import {
 	type PortForward,
 	type SecretBag,
 	type Snapshot,
+	type TransferProgress,
 	type PowerAction,
 	type ProviderContext,
 	type VmConfig,
@@ -45,7 +48,9 @@ import {
 import { ARCHS, ARCH_LABEL, acceleratorsFor, archFromName, guestArch, hostArch, isNative, normalizeHardware, type Arch } from './arch';
 import { buildArgs, usableAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
 import { detectQemu, type ArchInstallation, type QemuInstallation } from './detect';
+import { copyFromGuest, copyToGuest, explainAgentError, runInGuest, type AgentCall } from '@vmm/sdk/guest';
 import { GuestAgentClient } from './GuestAgent';
+import { balloonUsedMB } from './balloon';
 import { QmpClient, type QmpEvent } from './QmpClient';
 import { freeLocalPort, LocalHost, type Host } from './host';
 import { SshHost, validateSshTarget } from './sshHost';
@@ -366,7 +371,9 @@ export class QemuConnection implements ClusterConnection {
 		adopt: true,
 		passthrough: true,
 		importFolder: true,
-		stats: true
+		stats: true,
+		guestExec: true,
+		guestFiles: true
 	};
 	private readonly startQueue = new SerialQueue();
 	private readonly cpuSamples = new Map<string, CpuSample>();
@@ -1016,7 +1023,64 @@ export class QemuConnection implements ClusterConnection {
 			cpuUsage = next.usage;
 			this.cpuSamples.set(vmId, next.sample);
 		}
-		return { timestamp: at, cpuUsage, memoryUsedMB: process_?.rssMB, memoryMB: def.memoryMB, disks };
+		const guestMB = await this.guestMemoryMB(vmId, runtime).catch(() => undefined);
+		return guestMB !== undefined
+			? { timestamp: at, cpuUsage, memoryUsedMB: guestMB, memorySource: 'guest', memoryMB: def.memoryMB, disks }
+			: { timestamp: at, cpuUsage, memoryUsedMB: process_?.rssMB, memorySource: 'host', memoryMB: def.memoryMB, disks };
+	}
+
+	/** Runs (pid) whose balloon was asked to report guest statistics. */
+	private readonly balloonPolling = new Set<string>();
+
+	/**
+	 * Memory the guest uses (total minus available), from the balloon driver's statistics; undefined when
+	 * the VM has no balloon (started before it existed, attached from outside) or the guest has no driver.
+	 */
+	private async guestMemoryMB(vmId: string, runtime: VmRuntime): Promise<number | undefined> {
+		const client = await this.client(vmId, runtime);
+		const path = '/machine/peripheral/balloon0';
+		const key = `${vmId}:${runtime.pid}`;
+		if (!this.balloonPolling.has(key)) {
+			await client.execute('qom-set', { path, property: 'guest-stats-polling-interval', value: 2 });
+			this.balloonPolling.add(key);
+			return undefined;
+		}
+		const { stats, 'last-update': updated } = await client.execute<{ stats: Record<string, number>; 'last-update': number }>('qom-get', { path, property: 'guest-stats' });
+		return balloonUsedMB(stats, updated);
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Guest agent: commands and files
+	// -----------------------------------------------------------------------------------------
+
+	/** Runs `use` with a call into the guest agent of a running VM, over one connection. */
+	private async withAgent<T>(vmId: string, use: (call: AgentCall) => Promise<T>): Promise<T> {
+		const runtime = await this.runtime(vmId);
+		if (!runtime) throw new ProviderError('Start the machine first.', 'invalid');
+		if (!runtime.agentPort) throw new ProviderError('This machine has no guest agent channel: it was started outside VM Manager or by an older version. Restart it from here.', 'unsupported');
+		let agent: GuestAgentClient;
+		try {
+			agent = await GuestAgentClient.over(await this.host.connect(runtime.agentPort), 2000);
+		} catch (error) {
+			throw explainAgentError(error);
+		}
+		try {
+			return await use(<R,>(command: string, args?: Record<string, unknown>, timeoutMs?: number) => agent.execute<R>(command, args, timeoutMs ?? 10_000));
+		} finally {
+			agent.close();
+		}
+	}
+
+	runInGuest(_nodeId: string, vmId: string, command: GuestCommand): Promise<GuestCommandResult> {
+		return this.withAgent(vmId, (call) => runInGuest(call, command));
+	}
+
+	copyToGuest(_nodeId: string, vmId: string, localPath: string, guestPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void> {
+		return this.withAgent(vmId, (call) => copyToGuest(call, localPath, guestPath, { onProgress }));
+	}
+
+	copyFromGuest(_nodeId: string, vmId: string, guestPath: string, localPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void> {
+		return this.withAgent(vmId, (call) => copyFromGuest(call, guestPath, localPath, { onProgress }));
 	}
 
 	async ejectMedia(_nodeId: string, vmId: string, deviceId: string): Promise<void> {

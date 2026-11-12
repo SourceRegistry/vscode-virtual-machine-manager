@@ -17,6 +17,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -112,6 +113,39 @@ describe.skipIf(!image)('QEMU guest agent against a real Linux guest', () => {
 		expect(addresses.length, 'guest agent never reported an address').toBeGreaterThan(0);
 		expect(addresses.some((a) => a.startsWith('10.0.2.'))).toBe(true);
 	}, 12 * 60_000);
+
+	it('runs commands, copies files both ways, and reports the guest\'s own memory use', async () => {
+		if (!seedIso) return;
+		const uname = await connection.runInGuest!('local', vmId, { command: 'uname -s; echo err >&2; exit 3', shell: true });
+		expect(uname).toMatchObject({ stdout: 'Linux\n', stderr: 'err\n', exitCode: 3, timedOut: false });
+		expect((await connection.runInGuest!('local', vmId, { command: '/bin/cat', input: 'hello' })).stdout).toBe('hello');
+
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmm-guest-copy-'));
+		try {
+			const up = path.join(dir, 'up.bin');
+			const data = Buffer.from(Array.from({ length: 3 * 1024 * 1024 + 17 }, (_, i) => (i * 7) % 256));
+			fs.writeFileSync(up, data);
+			await connection.copyToGuest!('local', vmId, up, '/tmp/vmm-up.bin');
+			expect((await connection.runInGuest!('local', vmId, { command: 'sha256sum /tmp/vmm-up.bin', shell: true })).stdout.split(' ')[0]).toBe(createHash('sha256').update(data).digest('hex'));
+			const down = path.join(dir, 'down.bin');
+			await connection.copyFromGuest!('local', vmId, '/tmp/vmm-up.bin', down);
+			expect(fs.readFileSync(down).equals(data)).toBe(true);
+			await expect(connection.copyFromGuest!('local', vmId, '/no/such/file', path.join(dir, 'x'))).rejects.toThrow(/No such file/);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+
+		// The balloon reports after its polling interval: the first call only turns it on.
+		let stats = await connection.getVmStats!('local', vmId);
+		const deadline = Date.now() + 30_000;
+		while (stats.memorySource !== 'guest' && Date.now() < deadline) {
+			await new Promise((r) => setTimeout(r, 2500));
+			stats = await connection.getVmStats!('local', vmId);
+		}
+		expect(stats.memorySource).toBe('guest');
+		expect(stats.memoryUsedMB).toBeGreaterThan(30);
+		expect(stats.memoryUsedMB).toBeLessThan(2048);
+	}, 120_000);
 
 	it('is reachable over SSH through a port forward chosen from its real details, by plain ssh and the written config', async () => {
 		if (!seedIso) return;
