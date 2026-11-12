@@ -50,6 +50,9 @@ describe('buildDomainXml', () => {
 		expect(xml).toContain("<source file='/pool/web-cidata.iso'/><target dev='sda' bus='sata'/><readonly/></disk>");
 		expect(xml).not.toContain("<boot order='1'/>");
 	});
+	it('turns on the balloon statistics, so the guest reports its own memory use', () => {
+		expect(buildDomainXml({ ...base, host: x86 })).toContain("<memballoon model='virtio'><stats period='5'/></memballoon>");
+	});
 	it('refuses what the host cannot boot', () => {
 		expect(() => buildDomainXml({ ...base, host: { ...arm, efi: false } })).toThrow(/UEFI/);
 		expect(() => buildDomainXml({ ...base, diskBus: 'sata', host: arm })).toThrow(/SATA/);

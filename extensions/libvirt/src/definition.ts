@@ -88,7 +88,8 @@ export function buildDomainXml(d: NewDomain): string {
 		"    <graphics type='vnc' autoport='yes' listen='127.0.0.1'/>",
 		`    <video><model type='${arm ? 'virtio' : 'vga'}'/></video>`,
 		arm ? "    <input type='keyboard' bus='usb'/>\n    <input type='tablet' bus='usb'/>" : "    <input type='tablet' bus='usb'/>",
-		"    <memballoon model='virtio'/>",
+		// The statistics period makes the balloon driver report the guest's own memory use (domstats balloon.usable).
+		"    <memballoon model='virtio'><stats period='5'/></memballoon>",
 		'  </devices>',
 		'</domain>',
 		''

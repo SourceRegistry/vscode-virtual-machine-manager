@@ -7,16 +7,17 @@ import { setTimeout as delay } from 'node:timers/promises';
 import {
 	ProviderError, type Capabilities, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions,
 	type DiskStats, type FieldSchema, type FieldValues, type HypervisorProvider, type Logger, type NodeInfo, type PowerAction, type ProviderContext,
-	type CreateProgress, type PortForward, type SecretBag, type Snapshot, type VmConfig, type VmDetails, type VmInfo, type VmStats
+	type CreateProgress, type GuestCommand, type GuestCommandResult, type PortForward, type SecretBag, type TransferProgress, type Snapshot, type VmConfig, type VmDetails, type VmInfo, type VmStats
 } from '@vmm/sdk';
 import {
 	buildIso, cloudFields, cloudInitProblem, ensureImage, findImage, hostnameFor, localImageHost, metaData, parseKeys, sha512Crypt, SOURCE_ISO, userData, type Arch, type DownloadProgress
 } from '@vmm/sdk/provisioning';
+import { copyFromGuest, copyToGuest, explainAgentError, runInGuest, type AgentCall } from '@vmm/sdk/guest';
 import { openEndpoint, openPty } from './consoles';
 import { activeForwards, checkHmp, forwardsMetadata, hostfwdKey, hostfwdRule, METADATA_URI, normalizeForward, parseForwardsMetadata, sameHostPort, userNetdev } from './forwards';
 import { buildDomainXml, DISK_BUSES, NAME, parseDomainCapabilities, type DiskBus } from './definition';
 import {
-	blockStats, netStats, parseDomain, parseDomifaddr, parseDomstats, parseNodeinfo, parseSnapshot, parseVersion, parseVncDisplay, stateOf, toDiskDevices, toNicDevices, UUID,
+	blockStats, guestMemoryUsedMB, netStats, parseDomain, parseDomifaddr, parseDomstats, parseNodeinfo, parseSnapshot, parseVersion, parseVncDisplay, stateOf, toDiskDevices, toNicDevices, UUID,
 	type DomainInfo
 } from './parse';
 import { sampleProcesses, type QemuProcess } from './process';
@@ -24,6 +25,14 @@ import { buildUri, isLocalUri, remoteLabel, sshTarget } from './uri';
 import { execRunner, findVirsh, Virsh, type Runner } from './virsh';
 
 const NODE_ID = 'host';
+/**
+ * Bytes per `guest-file-write` through libvirt. A request to the agent of about 8 KB or more arrives cut
+ * short ("JSON parse error", then the agent stops answering for a while): found on libvirt 12.9 / QEMU 11.1
+ * (macOS session), where 5 KiB worked and 6 KiB did not. QEMU's own agent socket takes 1 MiB.
+ */
+const AGENT_WRITE_CHUNK = 4 * 1024;
+/** Bytes per `guest-file-read`: answers come back on virsh's stdout, which has no such limit. */
+const AGENT_READ_CHUNK = 1024 * 1024;
 const SNAPSHOT_NAME = /^[A-Za-z0-9][\w.-]{0,63}$/;
 const DISK_TARGET = /^[a-z0-9]{1,16}$/;
 
@@ -132,7 +141,8 @@ export class LibvirtConnection implements ClusterConnection {
 		create: true, edit: false, delete: true,
 		power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[],
 		consoles: ['vnc', 'serial'] as ConsoleKind[],
-		preview: false, external: false, media: true, details: true, stats: true, snapshots: true, remotePaths: false
+		preview: false, external: false, media: true, details: true, stats: true, snapshots: true, remotePaths: false,
+		guestExec: true, guestFiles: true
 	};
 	private readonly local: boolean;
 	private readonly ssh;
@@ -270,6 +280,40 @@ export class LibvirtConnection implements ClusterConnection {
 	}
 
 	// -----------------------------------------------------------------------------------------
+	// Guest agent: commands and files (virsh qemu-agent-command; libvirt notes the domain as tainted)
+	// -----------------------------------------------------------------------------------------
+
+	/**
+	 * A call into the guest agent of a running domain: one virsh process per call, the request JSON as an argument.
+	 */
+	private async agent(vmId: string): Promise<AgentCall> {
+		const id = assertId(vmId);
+		if ((await this.virsh.exec(['domstate', id])).trim() !== 'running') throw new ProviderError('Start the machine first.', 'invalid');
+		return async <T,>(command: string, args?: Record<string, unknown>, timeoutMs = 10_000): Promise<T> => {
+			const request = JSON.stringify(args ? { execute: command, arguments: args } : { execute: command });
+			let output: string;
+			try {
+				output = await this.virsh.exec(['qemu-agent-command', id, request, '--timeout', String(Math.max(1, Math.ceil(timeoutMs / 1000)))], timeoutMs + 10_000);
+			} catch (error) {
+				throw explainAgentError(error);
+			}
+			return (JSON.parse(output) as { return: T }).return;
+		};
+	}
+
+	async runInGuest(_nodeId: string, vmId: string, command: GuestCommand): Promise<GuestCommandResult> {
+		return runInGuest(await this.agent(vmId), command);
+	}
+
+	async copyToGuest(_nodeId: string, vmId: string, localPath: string, guestPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void> {
+		await copyToGuest(await this.agent(vmId), localPath, guestPath, { chunkSize: AGENT_WRITE_CHUNK, onProgress });
+	}
+
+	async copyFromGuest(_nodeId: string, vmId: string, guestPath: string, localPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void> {
+		await copyFromGuest(await this.agent(vmId), guestPath, localPath, { chunkSize: AGENT_READ_CHUNK, onProgress });
+	}
+
+	// -----------------------------------------------------------------------------------------
 	// Port forwards (user-mode networking; see forwards.ts)
 	// -----------------------------------------------------------------------------------------
 
@@ -341,7 +385,10 @@ export class LibvirtConnection implements ClusterConnection {
 		if (state !== 'running' && state !== 'paused') { this.cpuSamples.delete(id); return { timestamp: at, memoryMB }; }
 		const vcpus = (this.domains.get(name)?.domain.vcpus) ?? Number(s['vcpu.current'] ?? 1) ?? 1;
 		let cpuUsage: number | undefined;
-		let memoryUsedMB = s['balloon.rss'] && Number(s['balloon.rss']) > 0 ? Math.round(Number(s['balloon.rss']) / 1024) : undefined;
+		const guestMB = guestMemoryUsedMB(s);
+		if (guestMB === undefined && state === 'running') await this.enableBalloonStats(id);
+		let memoryUsedMB = guestMB ?? (s['balloon.rss'] && Number(s['balloon.rss']) > 0 ? Math.round(Number(s['balloon.rss']) / 1024) : undefined);
+		const memorySource = guestMB !== undefined ? ('guest' as const) : ('host' as const);
 		let uptimeSeconds: number | undefined;
 		const cpuNs = Number(s['cpu.time'] ?? 0);
 		if (cpuNs > 0) {
@@ -360,7 +407,18 @@ export class LibvirtConnection implements ClusterConnection {
 		}
 		const blocks = blockStats(s).filter((b) => !b.name.startsWith('-'));
 		const disks: DiskStats[] = blocks.map((b) => ({ id: b.name, readBytes: b.readBytes, writeBytes: b.writeBytes, readOps: b.readOps, writeOps: b.writeOps, readTimeNs: b.readTimeNs, writeTimeNs: b.writeTimeNs, flushOps: b.flushOps, flushTimeNs: b.flushTimeNs }));
-		return { timestamp: at, uptimeSeconds, cpuUsage, memoryUsedMB, memoryMB, disks, network: netStats(s) };
+		return { timestamp: at, uptimeSeconds, cpuUsage, memoryUsedMB, memorySource, memoryMB, disks, network: netStats(s) };
+	}
+
+	/** When each domain was last asked for balloon statistics; a domain without the driver is asked again after a minute. */
+	private readonly balloonAsked = new Map<string, number>();
+
+	/** Turns on the balloon driver's statistics for a running domain (domains made elsewhere have no period). */
+	private async enableBalloonStats(id: string): Promise<void> {
+		const asked = this.balloonAsked.get(id);
+		if (asked !== undefined && Date.now() - asked < 60_000) return;
+		this.balloonAsked.set(id, Date.now());
+		await this.virsh.exec(['dommemstat', id, '--period', '5', '--live'], 10_000).catch(() => undefined);
 	}
 
 	// -----------------------------------------------------------------------------------------

@@ -297,6 +297,36 @@ describe('LibvirtProvider', () => {
 			await expect(bridged.connection.addPortForward!('host', UUID, { protocol: 'tcp', hostPort: 2222, guestPort: 22 })).rejects.toMatchObject({ code: 'unsupported' });
 		});
 	});
+	describe('guest agent and guest memory', () => {
+		it('runs a command through qemu-agent-command and decodes its output', async () => {
+			// One answer for both calls: guest-exec reads `pid`, guest-exec-status the rest.
+			const answer = JSON.stringify({ return: { pid: 1, exited: true, exitcode: 0, 'out-data': Buffer.from('1000\n').toString('base64') } });
+			const { connection, calls } = await connect({ domstate: 'running\n', 'qemu-agent-command': answer });
+			expect(await connection.runInGuest('host', UUID, { command: '/usr/bin/id', args: ['-u'] })).toMatchObject({ exitCode: 0, stdout: '1000\n', timedOut: false });
+			const [exec, status] = calls.filter((c) => c[0] === 'qemu-agent-command');
+			expect(exec!.slice(0, 2)).toEqual(['qemu-agent-command', UUID]);
+			expect(JSON.parse(exec![2]!)).toEqual({ execute: 'guest-exec', arguments: { path: '/usr/bin/id', arg: ['-u'], 'capture-output': true } });
+			expect(exec!.slice(3)).toEqual(['--timeout', '10']);
+			expect(JSON.parse(status![2]!)).toEqual({ execute: 'guest-exec-status', arguments: { pid: 1 } });
+		});
+		it('asks for a running machine, and explains a missing agent', async () => {
+			const stopped = await connect({ domstate: 'shut off\n' });
+			await expect(stopped.connection.runInGuest('host', UUID, { command: 'x', shell: true })).rejects.toMatchObject({ code: 'invalid' });
+			const silent = await connect({ domstate: 'running\n', 'qemu-agent-command': new Error('error: Guest agent is not responding: QEMU guest agent is not connected') });
+			await expect(silent.connection.runInGuest('host', UUID, { command: 'x' })).rejects.toMatchObject({ code: 'unavailable', message: expect.stringContaining('qemu-guest-agent') });
+		});
+		it('reports guest memory from the balloon, else the host figure, and turns the statistics on once', async () => {
+			const stats = fixture('domstats.txt');
+			const withGuest = await connect({ domstats: stats.replace('balloon.rss=0', 'balloon.rss=0\n  balloon.available=2015232\n  balloon.usable=1490944\n  balloon.last-update=1700000000') });
+			expect(await withGuest.connection.getVmStats('host', UUID)).toMatchObject({ memoryUsedMB: 512, memorySource: 'guest' });
+			expect(withGuest.calls.some((c) => c[0] === 'dommemstat')).toBe(false);
+			const without = await connect({ domstats: stats });
+			const first = await without.connection.getVmStats('host', UUID);
+			await without.connection.getVmStats('host', UUID);
+			if (first.memoryUsedMB !== undefined) expect(first.memorySource).toBe('host');
+			expect(without.calls.filter((c) => c[0] === 'dommemstat')).toEqual([['dommemstat', UUID, '--period', '5', '--live']]);
+		});
+	});
 	it('says so when the display port refuses the connection', async () => {
 		const { connection } = await connect({ domstate: 'running\n', dumpxml: XML.replace("port='5900'", "port='1'") });
 		await expect(connection.openConsole('host', UUID, 'vnc')).rejects.toMatchObject({ code: 'unavailable' });
