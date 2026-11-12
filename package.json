@@ -1351,6 +1351,37 @@
             "type": "boolean",
             "default": false,
             "markdownDescription": "Let AI agents (agent mode in VS Code and MCP clients) power off or reset machines and revert or delete snapshots. Each call is still confirmed. Off: those calls are refused."
+          },
+          "vmm.agent.screenControl": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "askEveryTime",
+              "allow",
+              "deny"
+            ],
+            "enumDescriptions": [
+              "Ask at the first key or click; allowed for 15 minutes or until the agent hands it back.",
+              "Ask for every key or mouse call.",
+              "Never ask.",
+              "Refuse keyboard and mouse control."
+            ],
+            "default": "ask",
+            "markdownDescription": "Whether AI agents may use a machine's keyboard and mouse (`vmm_send_keys`, `vmm_mouse`). Screenshots are not affected. Per machine: `#vmm.agent.screenControlPerMachine#`."
+          },
+          "vmm.agent.screenControlPerMachine": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "askEveryTime",
+                "allow",
+                "deny"
+              ]
+            },
+            "default": {},
+            "markdownDescription": "Per machine, by name or `cluster/name`: `ask`, `askEveryTime`, `allow` or `deny`, overriding `#vmm.agent.screenControl#`. **Always Allow This Machine** in the question adds `allow` here."
           }
         }
       },
@@ -2064,7 +2095,7 @@
         "canBeReferencedInPrompt": true,
         "icon": "$(keyboard)",
         "userDescription": "Type on a virtual machine's keyboard",
-        "modelDescription": "Types text and/or presses keys on a running machine's display, as if on its keyboard. text is typed character by character (US layout); keys are combinations pressed after it, in order, such as \"enter\", \"ctrl+alt+delete\", \"alt+f4\", \"shift+tab\", \"f2\". For a command line in the guest prefer vmm_run_in_guest. The user allows keyboard and mouse control once per machine, for 15 minutes.",
+        "modelDescription": "Types text and/or presses keys on a running machine's display, as if on its keyboard. text is typed character by character (US layout); keys are combinations pressed after it, in order, such as \"enter\", \"ctrl+alt+delete\", \"alt+f4\", \"shift+tab\", \"f2\". For a command line in the guest prefer vmm_run_in_guest. The user allows keyboard and mouse control per machine (usually once for 15 minutes); call vmm_release_control when done.",
         "tags": [
           "vm-manager",
           "virtual-machines"
@@ -2105,7 +2136,7 @@
         "canBeReferencedInPrompt": true,
         "icon": "$(pointer)",
         "userDescription": "Use a virtual machine's mouse",
-        "modelDescription": "Moves, clicks, drags or scrolls the mouse on a running machine's display. x and y are pixels of the latest vmm_screenshot (0,0 is the top left). Take a screenshot first to know where things are. The user allows keyboard and mouse control once per machine, for 15 minutes.",
+        "modelDescription": "Moves, clicks, drags or scrolls the mouse on a running machine's display. x and y are pixels of the latest vmm_screenshot (0,0 is the top left). Take a screenshot first to know where things are. The user allows keyboard and mouse control per machine (usually once for 15 minutes); call vmm_release_control when done.",
         "tags": [
           "vm-manager",
           "virtual-machines"
@@ -2174,6 +2205,32 @@
             "action",
             "x",
             "y"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "vmm_release_control",
+        "displayName": "Hand back a virtual machine's keyboard and mouse",
+        "toolReferenceName": "vm_release_control",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(debug-stop)",
+        "userDescription": "Hand back a virtual machine's keyboard and mouse",
+        "modelDescription": "Ends keyboard and mouse control of a machine when the task on its screen is done: the user sees that the agent stopped, and the next vmm_send_keys or vmm_mouse asks the user again. Always call it when finished with vmm_send_keys / vmm_mouse.",
+        "tags": [
+          "vm-manager",
+          "virtual-machines"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "vm": {
+              "type": "string",
+              "description": "The machine: its name, \"cluster/name\" when names repeat across clusters, or its id from vmm_list_vms."
+            }
+          },
+          "required": [
+            "vm"
           ],
           "additionalProperties": false
         }

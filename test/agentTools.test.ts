@@ -31,6 +31,7 @@ function backend(overrides: Partial<AgentBackend> = {}): AgentBackend {
 		screenshot: vi.fn().mockResolvedValue({ png: Buffer.from('png'), width: 1280, height: 720, screen: { width: 1920, height: 1080 } }),
 		sendKeys: vi.fn(),
 		mouse: vi.fn(),
+		releaseControl: vi.fn().mockResolvedValue({ released: true }),
 		...overrides
 	};
 }
@@ -187,5 +188,35 @@ describe('screen tools', () => {
 
 	it('lists the screen among what a machine with a VNC display can do', async () => {
 		expect(await run('vmm_get_vm', { vm: 'web-01' }, backend())).toMatchObject({ can: expect.arrayContaining(['screen']) });
+	});
+});
+
+describe('handing back the keyboard and mouse', () => {
+	it('is a tool that needs no question and tells the backend', async () => {
+		const tool = findTool('vmm_release_control')!;
+		expect(tool.risk({})).toBe('read');
+		const b = backend();
+		expect(await tool.run({ vm: 'web-01' }, b)).toEqual({ released: true });
+		expect(b.releaseControl).toHaveBeenCalledWith('web-01');
+		for (const name of ['vmm_send_keys', 'vmm_mouse']) expect(findTool(name)!.description).toContain('vmm_release_control');
+	});
+});
+
+import { screenControlMode } from '../src/extension/agent/control';
+
+describe('keyboard and mouse permission per machine', () => {
+	const vm = { name: 'Web-01', cluster: 'Lab' };
+	it('uses cluster/name, then the name, then the default, ignoring case and unknown values', () => {
+		expect(screenControlMode(vm, undefined, undefined)).toBe('ask');
+		expect(screenControlMode(vm, 'allow', {})).toBe('allow');
+		expect(screenControlMode(vm, 'ask', { 'web-01': 'askEveryTime' })).toBe('askEveryTime');
+		expect(screenControlMode(vm, 'ask', { 'web-01': 'allow', 'lab/WEB-01': 'deny' })).toBe('deny');
+		expect(screenControlMode(vm, 'bogus', { 'web-01': 'sometimes' })).toBe('ask');
+	});
+	it('declares the settings with ask as the default', () => {
+		const settings = Object.assign({}, ...pkg.contributes.configuration.map((g: { properties: object }) => g.properties));
+		expect(settings['vmm.agent.screenControl'].default).toBe('ask');
+		expect(settings['vmm.agent.screenControl'].enum).toEqual(['ask', 'askEveryTime', 'allow', 'deny']);
+		expect(settings['vmm.agent.screenControlPerMachine'].default).toEqual({});
 	});
 });

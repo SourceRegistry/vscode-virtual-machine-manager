@@ -76,6 +76,8 @@ export interface AgentBackend {
 	screenshot(vm: string, options?: { settleMs?: number }): Promise<Screenshot>;
 	sendKeys(vm: string, strokes: readonly KeyStroke[]): Promise<void>;
 	mouse(vm: string, action: MouseAction): Promise<void>;
+	/** Hands the keyboard and mouse back: the next key or click asks the user again. */
+	releaseControl(vm: string): Promise<{ released: boolean }>;
 }
 
 export interface AgentTool<I = Record<string, unknown>> {
@@ -362,7 +364,7 @@ export const TOOLS: AgentTool<any>[] = [
 	{
 		name: 'vmm_send_keys',
 		title: 'Type on a virtual machine\'s keyboard',
-		description: 'Types text and/or presses keys on a running machine\'s display, as if on its keyboard. text is typed character by character (US layout); keys are combinations pressed after it, in order, such as "enter", "ctrl+alt+delete", "alt+f4", "shift+tab", "f2". For a command line in the guest prefer vmm_run_in_guest. The user allows keyboard and mouse control once per machine, for 15 minutes.',
+		description: 'Types text and/or presses keys on a running machine\'s display, as if on its keyboard. text is typed character by character (US layout); keys are combinations pressed after it, in order, such as "enter", "ctrl+alt+delete", "alt+f4", "shift+tab", "f2". For a command line in the guest prefer vmm_run_in_guest. The user allows keyboard and mouse control per machine (usually once for 15 minutes); call vmm_release_control when done.',
 		inputSchema: {
 			type: 'object',
 			properties: {
@@ -392,7 +394,7 @@ export const TOOLS: AgentTool<any>[] = [
 	{
 		name: 'vmm_mouse',
 		title: 'Use a virtual machine\'s mouse',
-		description: 'Moves, clicks, drags or scrolls the mouse on a running machine\'s display. x and y are pixels of the latest vmm_screenshot (0,0 is the top left). Take a screenshot first to know where things are. The user allows keyboard and mouse control once per machine, for 15 minutes.',
+		description: 'Moves, clicks, drags or scrolls the mouse on a running machine\'s display. x and y are pixels of the latest vmm_screenshot (0,0 is the top left). Take a screenshot first to know where things are. The user allows keyboard and mouse control per machine (usually once for 15 minutes); call vmm_release_control when done.',
 		inputSchema: {
 			type: 'object',
 			properties: {
@@ -426,6 +428,15 @@ export const TOOLS: AgentTool<any>[] = [
 			const done = { done: input.action, at: { x: input.x, y: input.y } };
 			return input.screenshotAfter ? screenshotOutput(await backend.screenshot(input.vm, { settleMs: SETTLE_MS }), done) : done;
 		}
+	},
+	{
+		name: 'vmm_release_control',
+		title: 'Hand back a virtual machine\'s keyboard and mouse',
+		description: 'Ends keyboard and mouse control of a machine when the task on its screen is done: the user sees that the agent stopped, and the next vmm_send_keys or vmm_mouse asks the user again. Always call it when finished with vmm_send_keys / vmm_mouse.',
+		inputSchema: { type: 'object', properties: { vm: vmParam }, required: ['vm'], additionalProperties: false },
+		risk: () => 'read',
+		describe: (input: { vm: string }) => `Hand back the keyboard and mouse of ${input.vm}`,
+		run: async (input: { vm: string }, backend) => backend.releaseControl(input.vm)
 	}
 ];
 

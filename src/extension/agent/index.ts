@@ -18,6 +18,7 @@ import { DisplaySessions } from './display';
 import { startMcpServer, type McpServerHandle, type McpToolInfo, type McpToolResult } from './mcpServer';
 import { TOOLS, ToolOutput, findTool, refusal, validateInput, type AgentBackend, type AgentTool } from './tools';
 import { vmHandle } from '../../shared/vmLookup';
+import { screenControlMode, type ScreenControlMode } from './control';
 
 const TOKEN_SECRET = 'vmm.mcp.token';
 const log = scopedLogger('agent');
@@ -68,6 +69,17 @@ class ControlGrants implements vscode.Disposable {
 	allow(key: string, location: VmLocation): void {
 		this.grants.set(key, { name: location.vm.name, until: Date.now() + CONTROL_MINUTES * 60_000, location });
 		this.update();
+	}
+
+	/** Ends one machine's permission; false when it had none. */
+	release(key: string, why: string): boolean {
+		const grant = this.grants.get(key);
+		if (!grant) return false;
+		this.grants.delete(key);
+		this.closeDisplay(key);
+		this.onRevoke(grant.location, why);
+		this.update();
+		return true;
 	}
 
 	revokeAll(why: string): number {
@@ -121,12 +133,37 @@ export function registerAgentTools(context: vscode.ExtensionContext, manager: Co
 		const location = await control.resolve(String((input as { vm?: unknown })?.vm ?? ''));
 		return { location, key: vmHandle(location.ref) };
 	};
-	const allow = (location: VmLocation, key: string, via: string) => {
+	const allow = (location: VmLocation, key: string, via: string, always = false) => {
 		grants.allow(key, location);
-		activity.record(location.ref, `Keyboard and mouse control allowed to AI agents for ${CONTROL_MINUTES} minutes (asked by ${via})`);
+		activity.record(location.ref, always ? `Keyboard and mouse used by AI agents (always allowed for this machine; asked by ${via})` : `Keyboard and mouse control allowed to AI agents for ${CONTROL_MINUTES} minutes (asked by ${via})`);
+	};
+	for (const backend of [chatBackend, mcpBackend]) backend.onRelease = (location, key, via) => grants.release(key, `Keyboard and mouse handed back by ${via}`);
+
+	/** What the user chose for this machine's keyboard and mouse. */
+	const modeOf = (location: VmLocation): ScreenControlMode => {
+		const config = vscode.workspace.getConfiguration('vmm.agent');
+		return screenControlMode({ name: location.vm.name, cluster: location.cluster.cluster.name }, config.get('screenControl'), config.get('screenControlPerMachine'));
+	};
+	const denied = (name: string) =>
+		new Error(`Keyboard and mouse control of ${name} is turned off for AI agents (settings vmm.agent.screenControl and vmm.agent.screenControlPerMachine).`);
+	/** No question needed: control already allowed, always allowed, or refused (the call then fails). */
+	const settled = (mode: ScreenControlMode, key: string) => mode === 'allow' || mode === 'deny' || (mode === 'ask' && grants.has(key));
+	const ALWAYS = 'Always Allow This Machine';
+	const alwaysAllow = async (location: VmLocation) => {
+		const config = vscode.workspace.getConfiguration('vmm.agent');
+		const current = config.get<Record<string, string>>('screenControlPerMachine') ?? {};
+		await config.update('screenControlPerMachine', { ...current, [location.vm.name]: 'allow' }, vscode.ConfigurationTarget.Global);
 	};
 	const controlQuestion = (name: string) => `Let AI agents use the keyboard and mouse of ${name}?`;
-	const controlDetail = `For ${CONTROL_MINUTES} minutes, without asking again for each key or click. The status bar shows it; click there to take control back.`;
+	const controlDetail = (mode: ScreenControlMode) =>
+		mode === 'askEveryTime'
+			? 'Asked for every call on this machine (vmm.agent.screenControlPerMachine).'
+			: `For ${CONTROL_MINUTES} minutes or until the agent hands it back, without asking again for each key or click. The status bar shows it; click there to take control back.`;
+	/** After the user allowed a call in agent mode, or before one needing no question. */
+	const afterAllowed = (mode: ScreenControlMode, location: VmLocation, key: string, via: string) => {
+		if (mode === 'deny') throw denied(location.vm.name);
+		if (mode !== 'askEveryTime' && !grants.has(key)) allow(location, key, via, mode === 'allow');
+	};
 
 	// Language model tools: declared in package.json `languageModelTools`, implemented here.
 	if (vscode.lm?.registerTool) {
@@ -139,8 +176,9 @@ export function registerAgentTools(context: vscode.ExtensionContext, manager: Co
 						if (risk === 'read') return { invocationMessage: what };
 						if (risk === 'control') {
 							const { location, key } = await target(options.input);
-							if (grants.has(key)) return { invocationMessage: what };
-							return { invocationMessage: what, confirmationMessages: { title: controlQuestion(location.vm.name), message: new vscode.MarkdownString(`${what}\n\n${controlDetail}`) } };
+							const mode = modeOf(location);
+							if (settled(mode, key)) return { invocationMessage: what };
+							return { invocationMessage: what, confirmationMessages: { title: controlQuestion(location.vm.name), message: new vscode.MarkdownString(`${what}\n\n${controlDetail(mode)}`) } };
 						}
 						const warning = risk === 'destructive' ? '\n\n**This cannot be undone.**' : '';
 						return { invocationMessage: what, confirmationMessages: { title: tool.title, message: new vscode.MarkdownString(`${what}${warning}`) } };
@@ -150,7 +188,7 @@ export function registerAgentTools(context: vscode.ExtensionContext, manager: Co
 							// Getting here means the user allowed it in VS Code's confirmation.
 							if (tool.risk(options.input as never) === 'control') {
 								const { location, key } = await target(options.input);
-								if (!grants.has(key)) allow(location, key, 'an AI agent in VS Code');
+								afterAllowed(modeOf(location), location, key, 'an AI agent in VS Code');
 							}
 							const result = await runTool(tool, options.input, chatBackend, allowDestructive());
 							// Image parts are newer than the types this extension builds against (1.95).
@@ -181,11 +219,16 @@ export function registerAgentTools(context: vscode.ExtensionContext, manager: Co
 		if (risk === 'read') return;
 		if (risk === 'control') {
 			const { location, key } = await target(input);
-			if (grants.has(key)) return;
-			const choice = await vscode.window.showWarningMessage(controlQuestion(location.vm.name), { modal: true, detail: `An MCP client wants to: ${tool.describe(input as never)}.\n\n${controlDetail}` }, `Allow for ${CONTROL_MINUTES} Minutes`);
+			const mode = modeOf(location);
+			if (settled(mode, key)) return afterAllowed(mode, location, key, 'an MCP client');
+			const once = mode === 'ask' ? `Allow for ${CONTROL_MINUTES} Minutes` : 'Allow';
+			const choice = await vscode.window.showWarningMessage(controlQuestion(location.vm.name), { modal: true, detail: `An MCP client wants to: ${tool.describe(input as never)}.\n\n${controlDetail(mode)}` }, once, ALWAYS);
 			if (!choice) throw new Error('The user declined keyboard and mouse control of this machine.');
-			allow(location, key, 'an MCP client');
-			return;
+			if (choice === ALWAYS) {
+				await alwaysAllow(location);
+				return afterAllowed('allow', location, key, 'an MCP client');
+			}
+			return afterAllowed(mode, location, key, 'an MCP client');
 		}
 		const choice = await vscode.window.showWarningMessage(
 			`An MCP client wants to: ${tool.describe(input as never)}`,

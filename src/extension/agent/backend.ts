@@ -215,6 +215,16 @@ export class ExtensionAgentBackend implements AgentBackend {
 		await this.displays.keys(key, open, strokes);
 	}
 
+	/** Set by the agent's index: ends the user's permission for the machine (and its screen connection). */
+	onRelease?: (location: VmLocation, key: string, via: string) => boolean;
+
+	async releaseControl(query: string): Promise<{ released: boolean }> {
+		const location = await this.control.resolve(query);
+		const key = vmHandle(location.ref);
+		this.displays.close(key);
+		return { released: this.onRelease?.(location, key, this.via) ?? false };
+	}
+
 	async mouse(query: string, action: MouseAction): Promise<void> {
 		const { key, open } = await this.display(query);
 		await this.displays.mouse(key, open, action);
