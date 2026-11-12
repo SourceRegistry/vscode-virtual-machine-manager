@@ -336,7 +336,7 @@
 					<Card>
 						<LineChart
 							title="Memory"
-							subtitle="of {formatMemory(vm.memoryMB)}"
+							subtitle="of {formatMemory(vm.memoryMB)}{latest?.memorySource === 'guest' ? ' · used by the guest' : latest?.memorySource === 'host' ? ' · held on the host (no balloon driver in the guest)' : ''}"
 							series={[{ key: 'memory', label: 'Used' }]}
 							data={memoryData}
 							format={(v) => (v === null ? '–' : formatBytes(v * 1024 * 1024))}

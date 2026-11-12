@@ -44,6 +44,15 @@ function commandsFor(menu: string, contextValue: string, { inline = false } = {}
 const vm = (state: VmState): VmInfo => ({ id: 'v', name: 'vm', state });
 
 describe.each(['view/item/context', 'webview/context'])('%s menu', (menu) => {
+	it('offers guest commands and copies only for a running VM whose provider has a guest agent path', () => {
+		const guestCaps = { ...caps, guestExec: true, guestFiles: true };
+		const running = commandsFor(menu, vmContextValue(vm('running'), guestCaps));
+		expect(running).toEqual(expect.arrayContaining(['vmm.runInGuest', 'vmm.copyToGuest', 'vmm.copyFromGuest']));
+		expect(commandsFor(menu, vmContextValue(vm('stopped'), guestCaps)).filter((c) => /Guest$/.test(c))).toEqual([]);
+		expect(commandsFor(menu, vmContextValue(vm('running'), { ...caps, guestExec: true })).filter((c) => /Guest$/.test(c))).toEqual(['vmm.runInGuest']);
+		expect(commandsFor(menu, vmContextValue(vm('running'), caps)).filter((c) => /Guest$/.test(c))).toEqual([]);
+	});
+
 	it('contains no control characters', () => {
 		expect(JSON.stringify(menus[menu])).not.toMatch(/\\u00|\\b(?![a-z])/);
 		for (const item of menus[menu]) expect([...item.when].every((c) => c.charCodeAt(0) >= 32)).toBe(true);
