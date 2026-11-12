@@ -1,5 +1,19 @@
 # Changelog
 
+# [0.13.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.12.0...v0.13.0) (2026-11-12)
+
+
+### Bug Fixes
+
+* **tree:** drag machines from Clusters into a group ([18f7b3d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/18f7b3df0692cae818b9f413342cb73435c60d24))
+
+
+### Features
+
+* Groups view with Favorites and user-defined groups ([fd3920b](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/fd3920b69110d753d7337fb48363598f497de7ae))
+* machine logs, state notifications, shutdown countdown, favorites and tags, vm tasks and an API ([a331a4f](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/a331a4fdd4b2b477e898b6c8c6c93dc768c4525f))
+* **sdk:** shutdown timeout, emulated guests, hypervisor logs, and an API for other extensions ([8a78690](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/8a78690cf601899ee5ad925714920f05f86a1df9))
+
 # [0.12.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.11.0...v0.12.0) (2026-11-12)
 
 
