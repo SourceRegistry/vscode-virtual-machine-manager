@@ -1,7 +1,8 @@
 // Renders the Marketplace icons (256×256 PNG; the Marketplace does not accept SVG icons) from
 // media/marketplace/icon.svg (512×512). Provider icons are the same artwork with a badge holding the
 // platform's logo (media/marketplace/<provider>.svg, see BADGES), so the extensions read as one
-// family. Run after changing the artwork or adding a provider: `node scripts/render-icons.mjs`.
+// family. It also writes the provider logos of the walkthrough (media/walkthrough/logos/<provider>.svg).
+// Run after changing the artwork or adding a provider: `node scripts/render-icons.mjs`.
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +19,7 @@ const BADGE = { cx: 418, cy: 418, r: 80, ring: 12, ringColor: '#101B2E' };
  * `scale` is the logo's box relative to the badge radius: keep its corners inside the badge where the
  * artwork reaches them.
  */
-function badge(file, scale) {
+function logo(file) {
 	const source = artwork(file);
 	const open = /<svg\b[^>]*>/.exec(source)?.[0];
 	// Editor metadata (Inkscape) needs namespaces declared on the outer element, which nesting drops: it is not artwork.
@@ -29,11 +30,31 @@ function badge(file, scale) {
 	const viewBox =
 		/viewBox="([^"]+)"/.exec(open)?.[1] ??
 		`0 0 ${/width="([\d.]+)"/.exec(open)?.[1] ?? 64} ${/height="([\d.]+)"/.exec(open)?.[1] ?? 64}`;
+	return { inner, viewBox };
+}
+
+function badge(file, scale) {
+	const { inner, viewBox } = logo(file);
 	const size = BADGE.r * scale;
 	return `
   <circle cx="${BADGE.cx}" cy="${BADGE.cy}" r="${BADGE.r + BADGE.ring}" fill="${BADGE.ringColor}"/>
   <circle cx="${BADGE.cx}" cy="${BADGE.cy}" r="${BADGE.r}" fill="#ffffff"/>
   <svg xmlns:xlink="http://www.w3.org/1999/xlink" x="${BADGE.cx - size / 2}" y="${BADGE.cy - size / 2}" width="${size}" height="${size}" viewBox="${viewBox}">${inner}</svg>`;
+}
+
+/**
+ * The logo on a white rounded tile with its own size, for the walkthrough: its markdown cannot size
+ * images, and the white tile keeps dark logos readable in dark themes. Same `scale` as the badge.
+ */
+export function walkthroughLogo(file, scale) {
+	const { inner, viewBox } = logo(file);
+	// Same share of the tile as of the badge's diameter (r·scale of 2r).
+	const size = Math.min(32 * scale, 58);
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 64 64">
+  <rect x="0.5" y="0.5" width="63" height="63" rx="12" fill="#ffffff" stroke="#00000022"/>
+  <svg xmlns:xlink="http://www.w3.org/1999/xlink" x="${32 - size / 2}" y="${32 - size / 2}" width="${size}" height="${size}" viewBox="${viewBox}">${inner}</svg>
+</svg>
+`;
 }
 
 const withBadge = (file, scale) => base.replace(/<\/svg>\s*$/, `${badge(file, scale)}\n</svg>\n`);
@@ -65,6 +86,11 @@ function icons() {
 }
 
 async function render() {
+	for (const [id, { file, scale }] of Object.entries(BADGES)) {
+		const out = path.join('media', 'walkthrough', 'logos', `${id}.svg`);
+		writeFileSync(path.join(root, out), walkthroughLogo(file, scale));
+		console.log(out);
+	}
 	const { Resvg } = await import('@resvg/resvg-js');
 	for (const { out, svg } of icons()) {
 		const png = new Resvg(svg, { fitTo: { mode: 'width', value: 256 } }).render().asPng();

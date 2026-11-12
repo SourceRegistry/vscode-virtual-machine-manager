@@ -1341,12 +1341,12 @@
       {
         "id": "gettingStarted",
         "title": "Get Started with VM Manager",
-        "description": "Manage Hyper-V, QEMU and other hypervisors without leaving VS Code.",
+        "description": "Manage Hyper-V, QEMU, libvirt, Proxmox VE and Nutanix machines without leaving VS Code: consoles, snapshots, Remote-SSH and more.",
         "steps": [
           {
             "id": "installProvider",
             "title": "Install a hypervisor provider",
-            "description": "Each hypervisor is supported by its own small extension, so it can be updated independently.\n[Install Providers](command:vmm.installProviders)",
+            "description": "Each hypervisor has its own small provider extension: Hyper-V, QEMU, libvirt, Proxmox VE and Nutanix AHV. Install the ones you use.\n[Install Providers](command:vmm.installProviders)",
             "media": {
               "markdown": "media/walkthrough/providers.md"
             },
@@ -1355,9 +1355,20 @@
             ]
           },
           {
+            "id": "capabilities",
+            "title": "See what each provider can do",
+            "description": "Consoles, snapshots, clones, templates, cloud images and guest commands differ per hypervisor. The table shows what you get with each one.",
+            "media": {
+              "markdown": "media/walkthrough/capabilities.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
             "id": "addCluster",
             "title": "Add your first cluster",
-            "description": "A cluster is one hypervisor installation, for example ``Local (Hyper-V)``. It contains nodes (hosts) which run your virtual machines.\n[Add Cluster](command:vmm.addCluster)",
+            "description": "A cluster is one hypervisor you connect to, for example ``Local (Hyper-V)``, a libvirt host over SSH or a Proxmox VE or Prism Central server. It contains nodes (hosts) which run your virtual machines.\n[Add Cluster](command:vmm.addCluster)",
             "media": {
               "svg": "media/walkthrough/hierarchy.svg",
               "altText": "Cluster, node and virtual machine hierarchy"
@@ -1368,8 +1379,8 @@
           },
           {
             "id": "createVm",
-            "title": "Create or pick a virtual machine",
-            "description": "Right-click a node to create a virtual machine, or use the actions next to an existing one to start, shut down, reboot or stop it.\n[Create Virtual Machine](command:vmm.createVm)",
+            "title": "Create and manage machines",
+            "description": "Right-click a node to create a machine from an ISO or a cloud image, or use the actions next to an existing one to start, shut it down, change its settings or show its details.\n[Create Virtual Machine](command:vmm.createVm)",
             "media": {
               "markdown": "media/walkthrough/power.md"
             },
@@ -1380,7 +1391,7 @@
           {
             "id": "connect",
             "title": "Connect to a console",
-            "description": "Graphical consoles use noVNC and serial consoles use xterm, right inside an editor tab. Use **Open in New Window** in the editor toolbar to pop a console out.\n[Connect Graphical Console](command:vmm.connectGraphical)",
+            "description": "The machine's screen (RDP or VNC) or its serial console, right inside an editor tab. Use **Open in New Window** in the editor toolbar to pop a console out.\n[Connect Graphical Console](command:vmm.connectGraphical)",
             "media": {
               "markdown": "media/walkthrough/consoles.md"
             },
@@ -1390,14 +1401,43 @@
             ]
           },
           {
+            "id": "protect",
+            "title": "Snapshots, clones and templates",
+            "description": "Save a machine's state before you try something and go back to it, copy a machine, or turn one into a template for new ones. Right-click a machine to find them.",
+            "media": {
+              "markdown": "media/walkthrough/protect.md"
+            },
+            "completionEvents": [
+              "onCommand:vmm.takeSnapshot",
+              "onCommand:vmm.cloneVm",
+              "onCommand:vmm.createFromTemplate"
+            ]
+          },
+          {
+            "id": "guest",
+            "title": "Work inside the machine",
+            "description": "Open a machine in a Remote-SSH window, run commands and copy files through the guest agent, forward ports, and start machines from tasks before you debug. Right-click a running machine to find them.",
+            "media": {
+              "markdown": "media/walkthrough/guest.md"
+            },
+            "completionEvents": [
+              "onCommand:vmm.connectSsh",
+              "onCommand:vmm.runInGuest",
+              "onCommand:vmm.copyToGuest",
+              "onCommand:vmm.copyFromGuest"
+            ]
+          },
+          {
             "id": "overview",
-            "title": "See everything at a glance",
-            "description": "The overview shows every cluster, node and virtual machine with its state and resources.\n[Open Overview](command:vmm.openOverview)",
+            "title": "Find your way around",
+            "description": "The Overview shows every cluster, node and machine with its state and resources. Favorites, groups, search and a log per machine keep many machines manageable.\n[Open Overview](command:vmm.openOverview)",
             "media": {
               "markdown": "media/walkthrough/overview.md"
             },
             "completionEvents": [
-              "onCommand:vmm.openOverview"
+              "onCommand:vmm.openOverview",
+              "onCommand:vmm.searchVms",
+              "onCommand:vmm.groupBy"
             ]
           },
           {
