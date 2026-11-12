@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -163,6 +163,19 @@ export class LibvirtConnection implements ClusterConnection {
 		this.capabilities.remotePaths = !this.local;
 		// A forward listens on the libvirt host: only on this computer is that where Remote-SSH connects.
 		this.capabilities.forwards = this.local;
+		this.capabilities.shutdownTimeoutSeconds = shutdownTimeoutSeconds;
+	}
+
+	/**
+	 * libvirt's log of a domain (QEMU's command line and output), which libvirt keeps on its own host: readable
+	 * here for a connection on this computer, the session's in ~/.cache, the system's in /var/log (often root only).
+	 */
+	async readVmLog(_nodeId: string, vmId: string): Promise<string | undefined> {
+		if (!this.local) return undefined;
+		const name = this.byId.get(vmId);
+		if (!name || name.includes('/')) return undefined;
+		const dir = this.uri.includes('/session') ? join(homedir(), '.cache', 'libvirt', 'qemu', 'log') : '/var/log/libvirt/qemu';
+		return readFile(join(dir, `${name}.log`), 'utf8').catch(() => undefined);
 	}
 
 	dispose(): void { this.domains.clear(); this.byId.clear(); this.addresses.clear(); this.cpuSamples.clear(); }
@@ -218,7 +231,8 @@ export class LibvirtConnection implements ClusterConnection {
 				...(domain.nics.some((n) => n.mac) ? { macAddresses: domain.nics.flatMap((n) => (n.mac ? [n.mac] : [])) } : {}),
 				...(domain.arch ? { os: domain.arch } : {}),
 				consoles: this.consolesOf(domain),
-				mediaInserted: domain.disks.some((d) => d.device === 'cdrom' && !!d.path)
+				mediaInserted: domain.disks.some((d) => d.device === 'cdrom' && !!d.path),
+				...(domain.virtType === 'qemu' ? { emulated: true } : {})
 			} satisfies VmInfo;
 		}));
 		for (const [uuid, name] of this.byId) if (!seen.has(uuid)) { this.byId.delete(uuid); this.domains.delete(name); this.addresses.delete(uuid); this.cpuSamples.delete(uuid); }

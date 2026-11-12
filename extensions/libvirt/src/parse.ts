@@ -124,6 +124,8 @@ export interface DomainInfo {
 	vcpus?: number;
 	memoryMB?: number;
 	arch?: string;
+	/** `<domain type>`: `kvm`, `hvf`… run accelerated; `qemu` is software emulation (TCG). */
+	virtType?: string;
 	disks: DomainDisk[];
 	nics: DomainNic[];
 	graphics: DomainGraphics[];
@@ -174,6 +176,7 @@ export function parseDomain(xml: string): DomainInfo {
 		vcpus: Number(textOf(domain, 'vcpu')) || undefined,
 		memoryMB: memoryMB(child(domain, 'memory')),
 		arch: child(child(domain, 'os'), 'type')?.attrs.arch,
+		virtType: domain.attrs.type,
 		disks, nics, graphics, serial, agent
 	};
 }

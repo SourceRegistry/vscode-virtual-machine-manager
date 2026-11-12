@@ -43,6 +43,10 @@ describe('domain XML from real libvirt output', () => {
 	it('offers a pty serial port before it has a path (stopped domain)', () => {
 		expect(parseDomain("<domain><name>x</name><uuid>u</uuid><devices><serial type='pty'/></devices></domain>").serial).toEqual({ kind: 'pty' });
 	});
+	it('reads how the domain runs: accelerated, or emulated (type qemu)', () => {
+		expect(parseDomain(fixture('dumpxml.xml')).virtType).toBe('hvf');
+		expect(parseDomain("<domain type='qemu'><name>x</name><uuid>u</uuid><devices/></domain>").virtType).toBe('qemu');
+	});
 	it('maps to SDK devices', () => {
 		const disks = toDiskDevices(domain, new Map([['vda', 4294967296]]));
 		expect(disks[0]).toMatchObject({ id: 'vda', kind: 'disk', sizeBytes: 4294967296, format: 'qcow2', removable: false });
