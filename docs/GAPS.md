@@ -32,7 +32,7 @@ Claims about other tools are from memory and were not re-checked.
 | 13 | Disk management and export | 15 | Open |
 | 14 | Public API for other extensions, tasks, groups, favorites | 18 | Built on `feat/dev-ux` (`api.vms`, `vm` task, favorites, groups, group by) |
 | 15 | Notifications, per-VM log, shutdown countdown | 18 | Built on `feat/dev-ux` |
-| 16 | AI agents cannot see or drive VMs (language model tools / MCP) | 21 | Open |
+| 16 | AI agents cannot see or drive VMs (language model tools / MCP) | 21 | Built on `feat/mcp` (15 tools, agent mode + MCP server, actions confirmed, destructive opt-in) |
 
 ## Quality and release hygiene
 
@@ -57,4 +57,4 @@ Claims about other tools are from memory and were not re-checked.
 | 10 | 15 | Disk management | Open |
 | 11 | 17 | Network v2 | Open |
 | 12 | 20 | More providers | Open |
-| 13 | 21 | MCP / language model tools | Open |
+| 13 | 21 | MCP / language model tools | Built; Copilot agent mode check open |

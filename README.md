@@ -145,6 +145,24 @@ The power commands take a machine's name as argument, for keybindings:
 Other extensions get the same through the API: `vscode.extensions.getExtension('sourceregistry.vm-manager').exports.vms`
 (`list`, `get`, `power`, `waitForState`, `address`, `onDidChangeState`).
 
+### Let AI agents work with your machines
+
+AI agents can list your machines, read their details, usage, snapshots and addresses, and (when you allow
+it) start and shut them down, take snapshots, run commands in a guest, copy files and forward ports.
+
+* **Agent mode in VS Code** (Copilot chat and other chat participants): the tools are there without setup;
+  reference them with `#vm_list_vms` and the like, or let the agent pick them. VS Code asks before every
+  action.
+* **Agents outside VS Code** (Claude Code, any MCP client): turn on `vmm.mcp.enabled`, then
+  **VM: Copy MCP Server Setup** copies a `claude mcp add …` command or a JSON entry for other clients.
+  The server listens on `127.0.0.1` only, needs the access token in that setup (kept in Secret Storage;
+  **VM: Reset MCP Access Token** makes a new one), refuses web pages, and VS Code asks you before every
+  action it is sent.
+
+Reading runs without asking. Power off, hard reset, reverting and deleting snapshots are refused until you
+turn on `vmm.agent.allowDestructive`, and still asked about then. What an agent did shows up in the
+machine's log (**VM: Show Log**). Results never contain cluster settings, passwords or tokens.
+
 ### Bring in machines you already have
 
 QEMU only, through the QEMU provider:
@@ -237,6 +255,9 @@ When a console does ask for a password, **VM: Forget Console Sign-in** removes t
 | `vmm.ssh.addConfigEntry` | `true` | Offer to add an ssh config entry before connecting. Turn off to connect by address without touching the file. |
 | `vmm.notifications.stateChanges` | `outside` | Notify when a machine starts, stops, pauses or resumes: `outside` only for changes VS Code did not ask for, `all`, or `off`. Each machine's log has them either way. |
 | `vmm.tree.groupBy` | `cluster` | Group the Clusters view by `cluster`, `group` or `state`. Favorites and your groups also have their own view below it. |
+| `vmm.mcp.enabled` | `false` | Run the MCP server for AI agents outside VS Code on `127.0.0.1`. |
+| `vmm.mcp.port` | `7254` | Its port (`http://127.0.0.1:<port>/mcp`). |
+| `vmm.agent.allowDestructive` | `false` | Let AI agents power off, reset, revert or delete snapshots (each call still asked). |
 
 Providers add their own settings, for example `vmm.qemu.path`.
 

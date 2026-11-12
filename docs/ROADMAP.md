@@ -364,13 +364,17 @@ Order by demand; each is its own extension and its own release line.
 
 ### Phase 21: `feat/mcp`  (Local: yes)
 
+Status: **built** on `feat/mcp` (2026-11-12); unit tests, the VS Code smoke test (every tool registered, MCP off by default), and a round trip from Claude Code against the dev window (libvirt `test-vm2`).
+
 Let AI agents in VS Code (Copilot agent mode, Claude Code, any MCP client) see and drive VMs through the same providers. Builds on phase 18's public API (`api.vms`) and phase 16's guest exec.
-- [ ] Decide the surface: **language model tools** (`contributes.languageModelTools` + `vscode.lm.registerTool`, used by agent mode inside VS Code) and/or an **MCP server** VS Code registers itself (`contributes.mcpServerDefinitionProviders` + `vscode.lm.registerMcpServerDefinitionProvider`, VS Code 1.101+, so it reaches external agents too). Both need `engines.vscode` raised from `^1.95.0`; check the API is stable (not proposed) at that version first
-- [ ] Read-only tools first: list clusters / VMs with state, VM details (disks, NICs, addresses, forwards), stats, snapshots
-- [ ] Actions behind a confirmation in VS Code (`prepareInvocation` / tool confirmation): start, shut down, snapshot, forward a port, run a command in the guest (phase 16), copy files. Destructive ones (power off, delete, revert) off by default, a setting to allow them
-- [ ] An MCP server runs in the extension host (stdio launched by VS Code, or local HTTP on a random loopback port with a token); never exposed beyond the machine; secrets (Proxmox tokens, passwords) never in tool results
-- [ ] Opt-in setting (`vmm.mcp.enabled`), off by default
-- [ ] Tests: tool schemas, confirmation gating, an MCP client round trip against the fake provider; manual check in Copilot agent mode and from Claude Code
+- [x] Surface: both. **Language model tools** (`contributes.languageModelTools` + `vscode.lm.registerTool`, stable at `engines.vscode` ^1.95, so no raise) for agent mode, and an **MCP server** in the extension host for agents outside VS Code (Streamable HTTP, plain JSON replies, no sessions). One tool definition (`src/extension/agent/tools.ts`, no `vscode` import) serves both. `registerMcpServerDefinitionProvider` (1.101+) not used: VS Code's own agents already get the tools
+- [x] Read-only tools: `vmm_list_clusters`, `vmm_list_vms` (filter by state / cluster / name), `vmm_get_vm` (details: disks, NICs, forwards, and what can be done), `vmm_get_vm_stats`, `vmm_list_snapshots`, `vmm_get_vm_address` (SSH banner probe, can wait), `vmm_wait_for_state`
+- [x] Actions, confirmed in VS Code (`prepareInvocation` in agent mode, a modal dialog for MCP calls): `vmm_power_vm` (start / shutdown / reboot), `vmm_take_snapshot`, `vmm_run_in_guest` (output cut at 64 KB per stream), `vmm_copy_to_guest`, `vmm_copy_from_guest` (absolute local paths only), `vmm_add_port_forward`. Destructive (`stop`, `reset`, `vmm_revert_snapshot`, `vmm_delete_snapshot`) refused unless `vmm.agent.allowDestructive`, and still confirmed then. Agent calls go to the machine's log ("asked by an MCP client")
+- [x] MCP server on 127.0.0.1 (`vmm.mcp.port`, default 7254), bearer token in Secret Storage compared in constant time, requests with a non-local `Origin` refused (DNS rebinding), 1 MB request limit. **VM: Copy MCP Server Setup** (Claude Code command or JSON), **VM: Reset MCP Access Token**. Results carry machine facts only, never cluster settings or secrets
+- [x] Opt-in `vmm.mcp.enabled`, off by default. The core now also activates `onStartupFinished`, so an enabled server is up without opening the view
+- [x] Tests: input validation, risk and refusal, tool results against a fake backend, manifest ↔ tool definitions, an HTTP round trip (initialize, tools/list, tools/call, errors, batch, auth, origin); smoke test checks every tool is registered. By hand from Claude Code (2026-11-12): list, details, SSH address, `uname -a` in the guest after Allow, `stop` refused
+- [ ] Manual check in Copilot agent mode (confirmation UI of `prepareInvocation`)
+- [ ] Not done: a client that disconnects does not cancel its call yet (the server signals it, the tools ignore it; an open confirmation stays open); MCP resources (a machine's log), progress notifications for long waits, server-sent events, a status bar item while the server runs
 
 ## What we can build and test on this Mac now
 
