@@ -24,7 +24,40 @@ export type TreeNode =
 /** The id of the Favorites group in the Groups view. */
 export const FAVORITES = 'favorites';
 
-const DRAG_MIME = ['application/vnd.code.tree.vmm.clusters', 'application/vnd.code.tree.vmm.groups'];
+/**
+ * Dragged machines, as JSON text: VS Code only hands objects to a drop in the view they came from, so text is
+ * what reaches the Groups view from Clusters. A drop from another view also holds an empty placeholder of the
+ * same type (set when the drag starts), so every item of the type is read; the last drag is kept as well,
+ * both views living in this extension host.
+ */
+const DRAG_MIME = 'application/vnd.vmm.vms+json';
+let lastDrag: { text: string; at: number } | undefined;
+
+async function draggedText(dataTransfer: vscode.DataTransfer): Promise<string | undefined> {
+	const items: vscode.DataTransferItem[] = [];
+	dataTransfer.forEach((item, mime) => {
+		if (mime === DRAG_MIME) items.push(item);
+	});
+	for (const item of items) {
+		const text = await item.asString();
+		if (text) return text;
+	}
+	// Seen: only the placeholder arrives. A drop follows its drag within a minute.
+	return items.length && lastDrag && Date.now() - lastDrag.at < 60_000 ? lastDrag.text : undefined;
+}
+
+type DraggedVm = { clusterId: string; nodeId: string; vmId: string; parent?: string };
+
+function parseDragged(text: string): DraggedVm[] {
+	try {
+		const value: unknown = JSON.parse(text);
+		return Array.isArray(value)
+			? value.filter((v): v is DraggedVm => !!v && typeof v.clusterId === 'string' && typeof v.nodeId === 'string' && typeof v.vmId === 'string')
+			: [];
+	} catch {
+		return [];
+	}
+}
 
 export function groupBySetting(): GroupBy {
 	const value = vscode.workspace.getConfiguration('vmm').get<string>('tree.groupBy', 'cluster');
@@ -71,8 +104,8 @@ export function stateLabel(state: VmState): string {
 }
 
 export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode.TreeDragAndDropController<TreeNode>, vscode.Disposable {
-	readonly dragMimeTypes: string[];
-	readonly dropMimeTypes = DRAG_MIME;
+	readonly dragMimeTypes = [DRAG_MIME];
+	readonly dropMimeTypes = [DRAG_MIME];
 	private readonly emitter = new vscode.EventEmitter<TreeNode | undefined>();
 	readonly onDidChangeTreeData = this.emitter.event;
 	private readonly view: vscode.TreeView<TreeNode>;
@@ -88,7 +121,6 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 		/** `groups`: the Groups view under the main one: Favorites, then the user's own groups. */
 		private readonly mode: 'clusters' | 'groups' = 'clusters'
 	) {
-		this.dragMimeTypes = [mode === 'groups' ? DRAG_MIME[1] : DRAG_MIME[0]];
 		this.view = vscode.window.createTreeView(mode === 'groups' ? 'vmm.groups' : 'vmm.clusters', {
 			treeDataProvider: this,
 			dragAndDropController: this,
@@ -401,24 +433,25 @@ export class VmTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode
 	handleDrag(source: readonly TreeNode[], dataTransfer: vscode.DataTransfer): void {
 		const vms = source.filter((n) => n.kind === 'vm');
 		if (!vms.length) return;
-		dataTransfer.set(this.dragMimeTypes[0], new vscode.DataTransferItem(vms));
+		const dragged: DraggedVm[] = vms.map(({ clusterId, nodeId, vmId, parent }) => ({ clusterId, nodeId, vmId, parent }));
+		lastDrag = { text: JSON.stringify(dragged), at: Date.now() };
+		dataTransfer.set(DRAG_MIME, new vscode.DataTransferItem(lastDrag.text));
 	}
 
 	async handleDrop(target: TreeNode | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
 		const into = target?.kind === 'group' ? target.id : target?.kind === 'vm' ? target.parent : undefined;
 		if (!into || (into !== FAVORITES && !this.groupName(into))) return;
-		for (const mime of DRAG_MIME) {
-			const value = dataTransfer.get(mime)?.value as TreeNode[] | undefined;
-			const vms = (value ?? []).filter((n): n is TreeNode & { kind: 'vm' } => n.kind === 'vm' && n.parent !== into);
-			if (!vms.length) continue;
-			const refs = vms.map(({ clusterId, nodeId, vmId }) => ({ clusterId, nodeId, vmId }));
-			if (into === FAVORITES) await this.marks.setFavorite(refs, true);
-			else await this.marks.addToGroup(refs, this.groupName(into)!);
-			// Out of one of the user's groups into another: a move.
-			for (const vm of vms) {
-				const from = vm.parent && into !== FAVORITES ? this.groupName(vm.parent) : undefined;
-				if (from) await this.marks.removeFromGroup([{ clusterId: vm.clusterId, nodeId: vm.nodeId, vmId: vm.vmId }], from);
-			}
+		const text = await draggedText(dataTransfer);
+		lastDrag = undefined;
+		const vms = text ? parseDragged(text).filter((vm) => vm.parent !== into) : [];
+		if (!vms.length) return;
+		const refs = vms.map(({ clusterId, nodeId, vmId }) => ({ clusterId, nodeId, vmId }));
+		if (into === FAVORITES) await this.marks.setFavorite(refs, true);
+		else await this.marks.addToGroup(refs, this.groupName(into)!);
+		// Out of one of the user's groups into another: a move.
+		for (const vm of vms) {
+			const from = vm.parent && into !== FAVORITES ? this.groupName(vm.parent) : undefined;
+			if (from) await this.marks.removeFromGroup([{ clusterId: vm.clusterId, nodeId: vm.nodeId, vmId: vm.vmId }], from);
 		}
 	}
 
