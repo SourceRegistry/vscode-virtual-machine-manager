@@ -16,6 +16,7 @@ packages/sdk/         @vmm/sdk — provider API shared by core and providers;
                       (any packages/sdk/src/<name>/index.ts is importable as @vmm/sdk/<name>)
 extensions/hyperv/    Hyper-V provider extension
 extensions/libvirt/   libvirt provider extension
+extensions/nutanix/   Nutanix (Prism Central v3) provider extension
 extensions/proxmox/   Proxmox VE provider extension
 extensions/qemu/      QEMU provider extension
 vendor/ironrdp/       vendored IronRDP web client (WebAssembly) for the RDP console
