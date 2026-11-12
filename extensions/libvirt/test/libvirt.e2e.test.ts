@@ -1,7 +1,9 @@
 /**
  * End to end against a real libvirt (`VMM_E2E_LIBVIRT=1`): defines a throw-away domain in `qemu:///session`,
  * then drives the provider through virsh. Written for Apple Silicon (HVF, aarch64 `virt`); other hosts skip it.
- * `VMM_E2E_GUEST_IMAGE` (a qcow2) adds a disk, so the snapshot steps have something to snapshot.
+ * `VMM_E2E_GUEST_IMAGE` (a qcow2) adds a disk, so the snapshot steps have something to snapshot. When it is
+ * a cloud image (debian-*-genericcloud-arm64.qcow2), a domain is also created from it with cloud-init and
+ * booted until the guest agent cloud-init installs answers (needs internet in the guest, a few minutes).
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -165,4 +167,33 @@ describe.skipIf(!enabled)('libvirt provider against real libvirt', () => {
 			try { v('undefine', name, '--nvram', '--managed-save', '--storage', 'vda'); } catch { /* gone */ }
 		}
 	}, 120_000);
+	it.runIf(!!image && /cloud/.test(image ?? ''))('creates a domain from a cloud image, cloud-init sets it up, and deletes it with its volumes', async () => {
+		const name = `${NAME}-cloud`;
+		const schema = await connection.getCreateSchema('host');
+		const pool = String(schema.find((f) => f.key === 'pool')!.default || 'default');
+		try {
+			const vm = await connection.createVm('host', {
+				name, source: 'cloud', cloudImage: 'custom', cloudImageFile: image, ciUser: 'vmm', ciPassword: 'vmm-e2e', ciAgent: true,
+				cpus: 2, memoryMB: 1024, diskGB: 6, network: 'user', pool
+			});
+			const volumes = v('vol-list', '--pool', pool);
+			expect(volumes).toContain(`${name}.qcow2`);
+			expect(volumes).toContain(`${name}-cidata.iso`);
+			expect(v('vol-dumpxml', '--pool', pool, `${name}.qcow2`)).toContain(`<capacity unit='bytes'>${6 * 1024 ** 3}</capacity>`);
+			await connection.power('host', vm.id, 'start');
+			// The agent only runs when cloud-init read the seed and installed it: proof the user-data was applied.
+			await until(async () => { try { v('qemu-agent-command', name, '{"execute":"guest-ping"}'); return true; } catch { return false; } }, 'the guest agent', 6 * 60_000);
+			const hostname = JSON.parse(v('qemu-agent-command', name, '{"execute":"guest-get-host-name"}')).return['host-name'];
+			expect(hostname).toBe(name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+			await connection.power('host', vm.id, 'stop');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'stopped', 'stopped');
+			await connection.deleteVm('host', vm.id, { deleteDisks: true });
+			const after = v('vol-list', '--pool', pool);
+			expect(after).not.toContain(`${name}.qcow2`);
+			expect(after).not.toContain(`${name}-cidata.iso`);
+		} finally {
+			try { v('destroy', name); } catch { /* not running */ }
+			try { v('undefine', name, '--nvram', '--managed-save', '--remove-all-storage'); } catch { /* gone */ }
+		}
+	}, 8 * 60_000);
 });

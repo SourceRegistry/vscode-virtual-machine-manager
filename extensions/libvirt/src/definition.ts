@@ -33,11 +33,15 @@ export interface NewDomain {
 	name: string;
 	cpus: number;
 	memoryMB: number;
-	/** Absolute path of the system disk (a qcow2 volume). */
+	/** Absolute path of the system disk. */
 	diskPath: string;
+	/** The disk's image format; a new volume is qcow2, a custom cloud image can be raw. */
+	diskFormat?: 'qcow2' | 'raw';
 	diskBus: DiskBus;
-	/** Absolute path of an installer image on the libvirt host. */
+	/** Absolute path of an installer image on the libvirt host; the machine boots from it first. */
 	iso?: string;
+	/** Absolute path of a cloud-init `cidata` image: a CD the guest reads, never boots from. */
+	seed?: string;
 	uefi: boolean;
 	/** `user` for QEMU's built-in networking, else the name of a libvirt network. */
 	network: string;
@@ -55,7 +59,8 @@ export function buildDomainXml(d: NewDomain): string {
 	// A CD-ROM needs an IDE, SATA, SCSI or USB bus; virtio cannot carry one.
 	const cdBus = arm || d.diskBus === 'scsi' ? 'scsi' : 'sata';
 	const target = (bus: string, index: number) => `${bus === 'virtio' ? 'vd' : 'sd'}${String.fromCharCode(97 + index)}`;
-	const needsScsi = d.diskBus === 'scsi' || (!!d.iso && cdBus === 'scsi');
+	const cd = d.iso ?? d.seed;
+	const needsScsi = d.diskBus === 'scsi' || (!!cd && cdBus === 'scsi');
 	const lines = [
 		`<domain type='${escape(d.host.domain)}'>`,
 		`  <name>${escape(d.name)}</name>`,
@@ -69,8 +74,8 @@ export function buildDomainXml(d: NewDomain): string {
 		d.host.hostCpu ? "  <cpu mode='host-passthrough'/>" : '',
 		"  <clock offset='utc'/>",
 		'  <devices>',
-		`    <disk type='file' device='disk'><driver name='qemu' type='qcow2' discard='unmap'/><source file='${escape(d.diskPath)}'/><target dev='${target(d.diskBus, 0)}' bus='${d.diskBus}'/><boot order='2'/></disk>`,
-		d.iso ? `    <disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='${escape(d.iso)}'/><target dev='${target(cdBus, d.diskBus === cdBus ? 1 : 0)}' bus='${cdBus}'/><readonly/><boot order='1'/></disk>` : '',
+		`    <disk type='file' device='disk'><driver name='qemu' type='${d.diskFormat ?? 'qcow2'}' discard='unmap'/><source file='${escape(d.diskPath)}'/><target dev='${target(d.diskBus, 0)}' bus='${d.diskBus}'/><boot order='2'/></disk>`,
+		cd ? `    <disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='${escape(cd)}'/><target dev='${target(cdBus, d.diskBus === cdBus ? 1 : 0)}' bus='${cdBus}'/><readonly/>${d.iso ? "<boot order='1'/>" : ''}</disk>` : '',
 		// The ARM `virt` machine has no USB unless asked; the keyboard and tablet below need it.
 		arm ? "    <controller type='usb' model='qemu-xhci'/>" : '',
 		needsScsi ? "    <controller type='scsi' model='virtio-scsi'/>" : '',

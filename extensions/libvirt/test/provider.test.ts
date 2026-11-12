@@ -1,7 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
 import type { ClusterConfig, ProviderContext } from '@vmm/sdk';
-import { LibvirtProvider } from '../src/LibvirtProvider';
+import { LibvirtProvider, parseVolumeXml } from '../src/LibvirtProvider';
 import type { Runner } from '../src/virsh';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
@@ -146,6 +148,113 @@ describe('LibvirtProvider', () => {
 		const system = await connect({ domcapabilities: caps, 'pool-list --type dir --name': '' }, { connection: 'ssh', sshHost: 'lab' });
 		expect((await system.connection.getCreateSchema()).find((f) => f.key === 'pool')!.options).toMatchObject([{ label: 'New pool in /var/lib/libvirt/images' }]);
 		expect(remote.connection.capabilities.remotePaths).toBe(true);
+	});
+	describe('from a cloud image', () => {
+		const scratch = mkdtempSync(join(tmpdir(), 'vmm-libvirt-test-'));
+		afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+		// A qcow2 header is all the provider reads of the image; the upload itself is virsh's.
+		const image = join(scratch, 'my.qcow2');
+		writeFileSync(image, Buffer.concat([Buffer.from([0x51, 0x46, 0x49, 0xfb]), Buffer.alloc(1020)]));
+		const raw = join(scratch, 'my.raw');
+		writeFileSync(raw, Buffer.alloc(2048));
+		const caps = fixture('domcapabilities.xml');
+		const volXml = (format: string, gb: number) => `<volume><capacity unit='bytes'>${gb * 1024 ** 3}</capacity><target><format type='${format}'/></target></volume>`;
+		const key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKey me@host';
+		const values = { name: 'lvprobe', source: 'cloud', cloudImage: 'custom', cloudImageFile: image, ciUser: 'me', ciSshKey: key, cpus: 2, memoryMB: 1024, diskGB: 10, network: 'user', pool: 'default' };
+		const answers = (extra: Record<string, string | Error> = {}) => ({
+			domcapabilities: caps, 'pool-list --type dir --name': 'default\n', 'list --all --name': '',
+			'vol-dumpxml --pool default lvprobe.qcow2': volXml('qcow2', 3), 'vol-path --pool default lvprobe.qcow2': '/pool/lvprobe.qcow2\n', 'vol-path --pool default lvprobe-cidata.iso': '/pool/lvprobe-cidata.iso\n',
+			...extra
+		});
+		/** Connects with a virsh that also keeps the domain XML handed to `define`. */
+		const connectKeepingXml = async (extra?: Record<string, string | Error>) => {
+			const fake = fakeVirsh(answers(extra));
+			const defined: string[] = [];
+			const run: Runner = async (file, args, options) => {
+				if (args[2] === 'define') defined.push(readFileSync(args[3]!, 'utf8'));
+				return fake.run(file, args, options);
+			};
+			const connection = await new LibvirtProvider(run, () => '/usr/bin/virsh').connect(cluster(), {}, { ...context, storagePath: scratch });
+			return { connection, calls: fake.calls, defined };
+		};
+
+		it('offers the cloud fields and hides the ISO for them', async () => {
+			const { connection } = await connect({ domcapabilities: caps, 'pool-list --type dir --name': 'default\n' });
+			const schema = await connection.getCreateSchema();
+			expect(schema.find((f) => f.key === 'source')!.options!.map((o) => o.value)).toEqual(['iso', 'cloud']);
+			expect(schema.find((f) => f.key === 'iso')!.showWhen).toMatchObject({ key: 'source', equals: 'iso' });
+			// Only images the host can run (the fixture is an ARM host), plus a file.
+			const images = schema.find((f) => f.key === 'cloudImage')!.options!.map((o) => o.value);
+			expect(images).toContain('debian-13@aarch64');
+			expect(images.some((i) => i.endsWith('@x86_64'))).toBe(false);
+			expect(images.at(-1)).toBe('custom');
+			expect(schema.map((f) => f.key)).toEqual(expect.arrayContaining(['ciUser', 'ciSshKey', 'ciPassword', 'ciAgent', 'ciUserData']));
+		});
+
+		it('uploads the image as the disk, enlarges it, adds a cidata seed and defines the domain', async () => {
+			const { connection, calls, defined } = await connectKeepingXml();
+			const progress: number[] = [];
+			const vm = await connection.createVm('host', values, (u) => u.fraction !== undefined && progress.push(u.fraction));
+			expect(vm.name).toBe('lvprobe');
+			const commands = calls.map((c) => c.join(' '));
+			const order = [
+				'vol-create-as default lvprobe.qcow2 1024b --format raw',
+				`vol-upload --pool default lvprobe.qcow2 ${image}`,
+				'pool-refresh default',
+				'vol-resize --pool default lvprobe.qcow2 10G'
+			].map((c) => commands.indexOf(c));
+			expect(order.every((i) => i >= 0)).toBe(true);
+			expect([...order].sort((a, b) => a - b)).toEqual(order);
+			const seedUpload = calls.find((c) => c[0] === 'vol-upload' && c[3] === 'lvprobe-cidata.iso')!;
+			expect(seedUpload).toBeDefined();
+			expect(defined).toHaveLength(1);
+			expect(defined[0]).toContain("<source file='/pool/lvprobe.qcow2'/>");
+			expect(defined[0]).toMatch(/<source file='\/pool\/lvprobe-cidata\.iso'\/><target dev='sda' bus='scsi'\/><readonly\/><\/disk>/);
+			expect(defined[0]).not.toContain("<boot order='1'/>");
+			expect(progress.at(-1)).toBe(1);
+		});
+
+		it('never shrinks an image larger than the asked size', async () => {
+			const { connection, calls } = await connectKeepingXml({ 'vol-dumpxml --pool default lvprobe.qcow2': volXml('qcow2', 20) });
+			await connection.createVm('host', values);
+			expect(calls.some((c) => c[0] === 'vol-resize')).toBe(false);
+		});
+
+		it('keeps a raw image raw', async () => {
+			const { connection, calls, defined } = await connectKeepingXml({ 'vol-dumpxml --pool default lvprobe.img': volXml('raw', 20), 'vol-path --pool default lvprobe.img': '/pool/lvprobe.img\n' });
+			await connection.createVm('host', { ...values, cloudImageFile: raw });
+			expect(calls.map((c) => c.join(' '))).toContain('vol-create-as default lvprobe.img 2048b --format raw');
+			expect(defined[0]).toContain("<driver name='qemu' type='raw' discard='unmap'/><source file='/pool/lvprobe.img'/>");
+		});
+
+		it('removes both new volumes when the definition fails', async () => {
+			const { connection, calls } = await connectKeepingXml({ define: new Error('error: boom') });
+			await expect(connection.createVm('host', values)).rejects.toBeTruthy();
+			const commands = calls.map((c) => c.join(' '));
+			expect(commands).toContain('vol-delete --pool default lvprobe.qcow2');
+			expect(commands).toContain('vol-delete --pool default lvprobe-cidata.iso');
+		});
+
+		it('refuses before touching storage: no way to sign in, a missing file, an image for another architecture', async () => {
+			const { connection, calls } = await connectKeepingXml();
+			await expect(connection.createVm('host', { ...values, ciSshKey: '' })).rejects.toMatchObject({ code: 'invalid', message: expect.stringContaining('SSH public key or a password') });
+			await expect(connection.createVm('host', { ...values, cloudImageFile: join(scratch, 'nope.qcow2') })).rejects.toMatchObject({ code: 'invalid' });
+			await expect(connection.createVm('host', { ...values, cloudImage: 'debian-13@x86_64' })).rejects.toMatchObject({ code: 'invalid', message: expect.stringContaining('x86_64') });
+			expect(calls.some((c) => c[0] === 'vol-create-as' || c[0] === 'pool-define-as')).toBe(false);
+		});
+
+		it('deletes the seed volume with the disks', async () => {
+			const xml = XML.replace("<source index='1'/>", "<source file='/pool/lvprobe-cidata.iso' index='1'/>");
+			const { connection, calls } = await connect({ dumpxml: xml });
+			await connection.deleteVm('host', UUID, { deleteDisks: true });
+			const undefine = calls.find((c) => c[0] === 'undefine')!;
+			expect(undefine.at(-1)!.split(',')).toEqual(expect.arrayContaining(['sda']));
+		});
+
+		it('reads format and capacity of a volume', () => {
+			expect(parseVolumeXml(volXml('qcow2', 3))).toEqual({ format: 'qcow2', capacity: 3 * 1024 ** 3 });
+			expect(parseVolumeXml('<volume/>')).toEqual({});
+		});
 	});
 	it('says so when the display port refuses the connection', async () => {
 		const { connection } = await connect({ domstate: 'running\n', dumpxml: XML.replace("port='5900'", "port='1'") });

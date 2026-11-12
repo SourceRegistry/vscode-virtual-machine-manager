@@ -43,6 +43,13 @@ describe('buildDomainXml', () => {
 		expect(xml).toContain("<source network='br&amp;0'/>");
 		expect(xml).toContain('/it&apos;s &lt;a&gt;.iso');
 	});
+	it('attaches a cloud-init seed as a CD that is never booted, and a raw disk as raw', () => {
+		const xml = buildDomainXml({ ...base, seed: '/pool/web-cidata.iso', diskFormat: 'raw', host: x86 });
+		expect(() => parseXml(xml)).not.toThrow();
+		expect(xml).toContain("<driver name='qemu' type='raw' discard='unmap'/><source file='/pool/web.qcow2'/>");
+		expect(xml).toContain("<source file='/pool/web-cidata.iso'/><target dev='sda' bus='sata'/><readonly/></disk>");
+		expect(xml).not.toContain("<boot order='1'/>");
+	});
 	it('refuses what the host cannot boot', () => {
 		expect(() => buildDomainXml({ ...base, host: { ...arm, efi: false } })).toThrow(/UEFI/);
 		expect(() => buildDomainXml({ ...base, diskBus: 'sata', host: arm })).toThrow(/SATA/);

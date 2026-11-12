@@ -1,4 +1,6 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -7,6 +9,9 @@ import {
 	type DiskStats, type FieldSchema, type FieldValues, type HypervisorProvider, type Logger, type NodeInfo, type PowerAction, type ProviderContext,
 	type CreateProgress, type SecretBag, type Snapshot, type VmConfig, type VmDetails, type VmInfo, type VmStats
 } from '@vmm/sdk';
+import {
+	buildIso, cloudFields, cloudInitProblem, ensureImage, findImage, hostnameFor, localImageHost, metaData, parseKeys, sha512Crypt, SOURCE_ISO, userData, type Arch, type DownloadProgress
+} from '@vmm/sdk/provisioning';
 import { openEndpoint, openPty } from './consoles';
 import { buildDomainXml, DISK_BUSES, NAME, parseDomainCapabilities, type DiskBus } from './definition';
 import {
@@ -20,6 +25,50 @@ import { execRunner, findVirsh, Virsh, type Runner } from './virsh';
 const NODE_ID = 'host';
 const SNAPSHOT_NAME = /^[A-Za-z0-9][\w.-]{0,63}$/;
 const DISK_TARGET = /^[a-z0-9]{1,16}$/;
+
+/** The cloud-init seed volume of a domain made from a cloud image (see createFromCloudImage). */
+const isSeed = (file: string | undefined): boolean => !!file && /-cidata\.iso$/.test(file);
+
+/** `qcow2` when the file starts with the qcow2 magic, else `raw` (the formats cloud images ship in). */
+async function imageFormat(file: string): Promise<'qcow2' | 'raw'> {
+	const handle = await open(file, 'r');
+	try {
+		const magic = Buffer.alloc(4);
+		await handle.read(magic, 0, 4, 0);
+		return magic.equals(Buffer.from([0x51, 0x46, 0x49, 0xfb])) ? 'qcow2' : 'raw';
+	} finally {
+		await handle.close();
+	}
+}
+
+async function statSize(file: string): Promise<number> {
+	const handle = await open(file, 'r');
+	try {
+		return (await handle.stat()).size;
+	} finally {
+		await handle.close();
+	}
+}
+
+/** Format and capacity (bytes) from `vol-dumpxml`. */
+export function parseVolumeXml(xml: string): { format?: string; capacity?: number } {
+	const format = /<target>[\s\S]*?<format type='([^']+)'/.exec(xml)?.[1];
+	const capacity = /<capacity unit='bytes'>(\d+)<\/capacity>/.exec(xml)?.[1];
+	return { ...(format ? { format } : {}), ...(capacity ? { capacity: Number(capacity) } : {}) };
+}
+
+/** Download progress as create progress between `from` and `to`. */
+function downloadProgress(label: string, from: number, to: number, progress?: (update: CreateProgress) => void) {
+	return (p: DownloadProgress) => {
+		const fraction = p.done !== undefined && p.total ? from + ((to - from) * p.done) / p.total : undefined;
+		const message =
+			p.phase === 'download' ? `Downloading ${label}${p.total && p.done !== undefined ? ` — ${Math.round((100 * p.done) / p.total)}%` : ''}`
+			: p.phase === 'verify' ? 'Verifying the checksum'
+			: p.phase === 'checksum' ? 'Checking for the latest image'
+			: 'Using the downloaded image';
+		progress?.({ message, fraction });
+	};
+}
 
 function assertId(vmId: string): string {
 	if (!UUID.test(vmId)) throw new ProviderError('Invalid domain id.', 'invalid');
@@ -68,7 +117,7 @@ export class LibvirtProvider implements HypervisorProvider {
 			throw new ProviderError('virsh was not found. Install libvirt (macOS: `brew install libvirt`; Debian/Ubuntu: `apt install libvirt-clients`; Fedora: `dnf install libvirt-client`) or set the path to virsh in the cluster settings.', 'unavailable');
 		}
 		const timeout = Number(cluster.config.shutdownTimeout ?? 30);
-		const connection = new LibvirtConnection(new Virsh(binary, uri, this.runner), uri, context.log, Number.isFinite(timeout) ? timeout : 30);
+		const connection = new LibvirtConnection(new Virsh(binary, uri, this.runner), uri, context.log, Number.isFinite(timeout) ? timeout : 30, join(context.storagePath, 'images'));
 		// Connecting is the first real call: a wrong URI, a stopped daemon or a refused login shows now.
 		await connection.listNodes();
 		return connection;
@@ -92,7 +141,11 @@ export class LibvirtConnection implements ClusterConnection {
 	private readonly addresses = new Map<string, { at: number; byMac: Map<string, string[]> }>();
 	private readonly cpuSamples = new Map<string, { at: number; cpuNs: number }>();
 
-	constructor(private readonly virsh: Virsh, private readonly uri: string, private readonly log: Logger, private readonly shutdownTimeoutSeconds = 30) {
+	/**
+	 * @param imageDirectory Cloud images are downloaded and verified here, on this computer, and uploaded
+	 *   into a storage pool through libvirt (over its own SSH connection for a remote host).
+	 */
+	constructor(private readonly virsh: Virsh, private readonly uri: string, private readonly log: Logger, private readonly shutdownTimeoutSeconds = 30, private readonly imageDirectory = join(tmpdir(), 'vmm-libvirt-images')) {
 		this.local = isLocalUri(uri);
 		this.ssh = sshTarget(uri);
 		// Installer images are read by libvirt on its own host: from another computer a file dialog here would pick the wrong file.
@@ -253,27 +306,39 @@ export class LibvirtConnection implements ClusterConnection {
 	}
 
 	async getCreateSchema(_nodeId?: string): Promise<FieldSchema[]> {
-		const [pools, networks, host, [node]] = await Promise.all([
+		const [pools, networks, host, [node], cached] = await Promise.all([
 			this.names(['pool-list', '--type', 'dir', '--name']),
 			this.names(['net-list', '--name']),
 			this.hostCapabilities(),
-			this.listNodes()
+			this.listNodes(),
+			readdir(this.imageDirectory).then((files) => new Set(files.filter((f) => f.endsWith('.verified')).map((f) => f.slice(0, -'.verified'.length))), () => new Set<string>())
 		]);
+		// Catalog images exist for the two architectures libvirt hosts usually run; another host gets a file only.
+		const installed: Arch[] = host.arch === 'x86_64' || host.arch === 'aarch64' ? [host.arch] : [];
 		const arm = host.arch === 'aarch64';
 		const poolPath = this.newPoolPath();
 		const canMakePool = !!poolPath && !pools.length;
 		const bus = (value: DiskBus, label: string, description: string) => ({ value, label, description });
 		return [
 			{ key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'my-vm', description: 'Letters, digits, "." "_" and "-"; it starts with a letter or digit.' },
+			{
+				key: 'source', label: 'Set up from', type: 'select', required: true, default: 'iso',
+				options: [
+					{ value: 'iso', label: 'An installer ISO', description: 'Install the operating system yourself' },
+					{ value: 'cloud', label: 'A cloud image (cloud-init)', description: this.local ? 'Debian or Ubuntu, ready in a minute: no installer' : 'Debian or Ubuntu: downloaded here, uploaded to the host through libvirt' }
+				]
+			},
 			{ key: 'cpus', label: 'Processors', type: 'number', unit: 'cores', min: 1, max: node?.cpus ?? 64, default: Math.min(2, node?.cpus ?? 2), required: true },
 			{ key: 'memoryMB', label: 'Memory', type: 'number', unit: 'MB', min: 128, default: 2048, required: true },
 			{ key: 'diskGB', label: 'Disk size', type: 'number', unit: 'GB', min: 1, max: 16384, default: 32, required: true, description: 'A thin qcow2 volume: it only takes the space the guest uses.' },
-			{ key: 'iso', label: 'Installation media (ISO)', type: 'file', remotePath: !this.local, filters: { 'Disk images': ['iso', 'img'] }, description: this.local ? undefined : 'The path on the libvirt host.' },
+			{ key: 'iso', label: 'Installation media (ISO)', type: 'file', remotePath: !this.local, showWhen: SOURCE_ISO, filters: { 'Disk images': ['iso', 'img'] }, description: this.local ? undefined : 'The path on the libvirt host.' },
 			{
 				key: 'pool', label: 'Storage pool', type: 'select', required: !canMakePool, default: pools.includes('default') ? 'default' : (pools[0] ?? ''),
 				options: pools.length ? pools.map((p) => ({ value: p, label: p })) : canMakePool ? [{ value: '', label: `New pool in ${poolPath}`, description: 'This connection has no directory pool yet.' }] : [],
 				description: pools.length || canMakePool ? 'Where the disk is created.' : 'This libvirt has no directory storage pool: create one on the host (virsh pool-define-as) first.'
 			},
+			// The image file is on this computer whichever host libvirt runs on: it is uploaded into the pool.
+			...cloudFields({ installed, remote: false, cached }),
 			{
 				key: 'network', label: 'Network', type: 'select', required: true, default: networks.includes('default') ? 'default' : 'user',
 				options: [...networks.map((n) => ({ value: n, label: `Network "${n}"` })), { value: 'user', label: 'User-mode (NAT, no setup)', description: 'The guest reaches out; nothing reaches the guest.' }]
@@ -327,7 +392,8 @@ export class LibvirtConnection implements ClusterConnection {
 		return name;
 	}
 
-	async createVm(_nodeId: string, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo> {
+	/** What every new domain needs, checked before anything is created. */
+	private async newDomainBasics(values: FieldValues) {
 		const name = String(values.name ?? '').trim();
 		if (!NAME.test(name)) throw new ProviderError('Use 1–64 letters, digits, "." "_" or "-" for the name, starting with a letter or digit.', 'invalid');
 		const cpus = Number(values.cpus), memoryMB = Number(values.memoryMB), diskGB = Number(values.diskGB);
@@ -335,11 +401,23 @@ export class LibvirtConnection implements ClusterConnection {
 		if (!Number.isFinite(memoryMB) || memoryMB < 128) throw new ProviderError('Give at least 128 MB of memory.', 'invalid');
 		if (!Number.isFinite(diskGB) || diskGB < 1) throw new ProviderError('Give a disk of at least 1 GB.', 'invalid');
 		const diskBus = DISK_BUSES.find((b) => b === values.diskBus) ?? 'virtio';
-		const iso = String(values.iso ?? '').trim();
-		if (iso && !/^(\/|[A-Za-z]:[\\/])/.test(iso)) throw new ProviderError('Give the installation image as an absolute path on the libvirt host.', 'invalid');
 		const network = String(values.network ?? 'user');
+		return { name, cpus, memoryMB, diskGB, diskBus, network };
+	}
+
+	/** The checks that ask libvirt; after the ones that do not, so a typo costs no round trip. */
+	private async checkNewDomain(name: string, network: string): Promise<void> {
 		if (network !== 'user' && !(await this.names(['net-list', '--name'])).includes(network)) throw new ProviderError(`The network "${network}" is not active.`, 'invalid');
 		if ((await this.names(['list', '--all', '--name'])).includes(name)) throw new ProviderError(`A domain named "${name}" already exists.`, 'invalid');
+	}
+
+	async createVm(_nodeId: string, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo> {
+		const basics = this.newDomainBasics(values);
+		if (values.source === 'cloud') return this.createFromCloudImage(await basics, values, progress);
+		const { name, cpus, memoryMB, diskGB, diskBus, network } = await basics;
+		const iso = String(values.iso ?? '').trim();
+		if (iso && !/^(\/|[A-Za-z]:[\\/])/.test(iso)) throw new ProviderError('Give the installation image as an absolute path on the libvirt host.', 'invalid');
+		await this.checkNewDomain(name, network);
 
 		progress?.({ message: 'Reading what the host supports…' });
 		const host = await this.hostCapabilities();
@@ -347,26 +425,114 @@ export class LibvirtConnection implements ClusterConnection {
 		const pool = await this.ensurePool(String(values.pool ?? ''));
 		const volume = `${name}.qcow2`;
 		await this.virsh.exec(['vol-create-as', pool, volume, `${diskGB}G`, '--format', 'qcow2'], 120_000);
-		let dir: string | undefined;
 		try {
 			const diskPath = (await this.virsh.exec(['vol-path', '--pool', pool, volume])).trim();
 			const xml = buildDomainXml({ name, cpus, memoryMB, diskPath, diskBus, iso: iso || undefined, uefi: values.firmware === 'uefi', network, host });
-			// virsh reads the definition on this computer, whichever host the domain lives on.
-			dir = await mkdtemp(join(tmpdir(), 'vmm-libvirt-'));
-			const file = join(dir, 'domain.xml');
-			await writeFile(file, xml, { mode: 0o600 });
 			progress?.({ message: 'Defining the domain…' });
-			await this.virsh.exec(['define', file]);
+			await this.define(xml);
 		} catch (error) {
 			await this.virsh.exec(['vol-delete', '--pool', pool, volume]).catch((e: Error) => this.log.warn(`Could not remove the new disk ${volume}: ${e.message}`));
 			throw error;
-		} finally {
-			if (dir) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 		}
+		return this.defined(name);
+	}
+
+	private async defined(name: string): Promise<VmInfo> {
 		this.domains.clear();
 		const vm = (await this.listVms(NODE_ID)).find((v) => v.name === name);
 		if (!vm) throw new ProviderError('The domain was defined but libvirt does not list it.', 'failed');
 		return vm;
+	}
+
+	/** Defines a domain from XML; virsh reads the file on this computer, whichever host the domain lives on. */
+	private async define(xml: string): Promise<void> {
+		const dir = await mkdtemp(join(tmpdir(), 'vmm-libvirt-'));
+		try {
+			const file = join(dir, 'domain.xml');
+			await writeFile(file, xml, { mode: 0o600 });
+			await this.virsh.exec(['define', file]);
+		} finally {
+			await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+		}
+	}
+
+	/** A new volume in `pool` holding the bytes of a file on this computer (`vol-upload` streams it through libvirt). */
+	private async uploadVolume(pool: string, volume: string, file: string, size: number, created: string[]): Promise<void> {
+		await this.virsh.exec(['vol-create-as', pool, volume, `${size}b`, '--format', 'raw'], 120_000);
+		created.push(volume);
+		await this.virsh.exec(['vol-upload', '--pool', pool, volume, file], 3 * 3600_000);
+	}
+
+	/**
+	 * A domain from a cloud image: the image is downloaded on this computer (checksum verified, cached) or
+	 * taken from a file, uploaded into the pool as the domain's own disk and enlarged; a cloud-init `cidata`
+	 * volume with the user, key and host name becomes its CD drive. The first boot sets everything up.
+	 */
+	private async createFromCloudImage(basics: Awaited<ReturnType<LibvirtConnection['newDomainBasics']>>, values: FieldValues, progress?: (update: CreateProgress) => void): Promise<VmInfo> {
+		const { name, cpus, memoryMB, diskGB, diskBus, network } = basics;
+		const choice = String(values.cloudImage ?? '');
+		const image = choice === 'custom' ? undefined : findImage(choice);
+		if (choice !== 'custom' && !image) throw new ProviderError('Choose a cloud image.', 'invalid');
+		const user = String(values.ciUser ?? '').trim();
+		const hostname = String(values.ciHostname ?? '').trim() || hostnameFor(name);
+		const sshKeys = parseKeys(values.ciSshKey as string | undefined);
+		const password = String(values.ciPassword ?? '');
+		const customUserData = String(values.ciUserData ?? '');
+		const passwordHash = password ? sha512Crypt(password) : undefined;
+		if (!customUserData.trim()) {
+			const problem = cloudInitProblem({ hostname, user, sshKeys, passwordHash });
+			if (problem) throw new ProviderError(problem, 'invalid');
+		}
+		const customFile = String(values.cloudImageFile ?? '').trim();
+		if (!image) {
+			if (!customFile) throw new ProviderError('Enter the path of the disk image.', 'invalid');
+			if (!existsSync(customFile)) throw new ProviderError(`Image not found on this computer: ${customFile}`, 'invalid');
+		}
+		await this.checkNewDomain(name, network);
+
+		progress?.({ message: 'Reading what the host supports…', fraction: 0.01 });
+		const host = await this.hostCapabilities();
+		if (image && image.arch !== host.arch) throw new ProviderError(`${image.label} is for ${image.arch} guests; this libvirt runs ${host.arch} guests.`, 'invalid');
+		const pool = await this.ensurePool(String(values.pool ?? ''));
+		const source = image ? await ensureImage(localImageHost, image, this.imageDirectory, { onProgress: downloadProgress(image.label, 0.02, 0.6, progress) }) : customFile;
+		const format = await imageFormat(source);
+		const volume = `${name}.${format === 'qcow2' ? 'qcow2' : 'img'}`;
+		const seedVolume = `${name}-cidata.iso`;
+		const created: string[] = [];
+		let dir: string | undefined;
+		try {
+			progress?.({ message: this.local ? 'Copying the image into the storage pool…' : 'Uploading the image to the host…', fraction: 0.62 });
+			await this.uploadVolume(pool, volume, source, (await statSize(source)), created);
+			// libvirt reads the format of a file in a directory pool from its header on a refresh.
+			await this.virsh.exec(['pool-refresh', pool], 120_000);
+			const disk = parseVolumeXml(await this.virsh.exec(['vol-dumpxml', '--pool', pool, volume]));
+			if (disk.format !== format) throw new ProviderError(`libvirt reads ${volume} as ${disk.format ?? 'an unknown format'}, not ${format}.`, 'failed');
+			// Never shrink an image: the requested size only applies when it is larger.
+			if (disk.capacity !== undefined && disk.capacity < diskGB * 1024 ** 3) {
+				progress?.({ message: `Enlarging the disk to ${diskGB} GB…`, fraction: 0.9 });
+				await this.virsh.exec(['vol-resize', '--pool', pool, volume, `${diskGB}G`], 120_000);
+			}
+
+			progress?.({ message: 'Writing the cloud-init disk…', fraction: 0.93 });
+			const data = { hostname, user, sshKeys, passwordHash, installAgent: values.ciAgent !== false, customUserData, instanceId: `vmm-${randomUUID()}` };
+			const iso = buildIso([{ name: 'user-data', data: Buffer.from(userData(data), 'utf8') }, { name: 'meta-data', data: Buffer.from(metaData(data), 'utf8') }], { volumeId: 'cidata' });
+			dir = await mkdtemp(join(tmpdir(), 'vmm-libvirt-'));
+			const seedFile = join(dir, 'cidata.iso');
+			await writeFile(seedFile, iso, { mode: 0o600 });
+			await this.uploadVolume(pool, seedVolume, seedFile, iso.length, created);
+
+			const [diskPath, seedPath] = await Promise.all([volume, seedVolume].map(async (v) => (await this.virsh.exec(['vol-path', '--pool', pool, v])).trim()));
+			progress?.({ message: 'Defining the domain…', fraction: 0.97 });
+			await this.define(buildDomainXml({ name, cpus, memoryMB, diskPath: diskPath!, diskFormat: format, diskBus, seed: seedPath, uefi: values.firmware === 'uefi', network, host }));
+		} catch (error) {
+			for (const v of created) await this.virsh.exec(['vol-delete', '--pool', pool, v]).catch((e: Error) => this.log.warn(`Could not remove the new volume ${v}: ${e.message}`));
+			throw error;
+		} finally {
+			if (dir) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+		}
+		this.log.info(`Created ${name} from ${image ? image.label : customFile} in pool ${pool}`);
+		progress?.({ message: 'Done', fraction: 1 });
+		return this.defined(name);
 	}
 	async getVmConfig(): Promise<VmConfig> { throw new ProviderError('Domains are edited with virsh edit, virt-manager or Cockpit.', 'unsupported'); }
 	async updateVm(): Promise<void> { throw new ProviderError('Domains are edited with virsh edit, virt-manager or Cockpit.', 'unsupported'); }
@@ -399,9 +565,11 @@ export class LibvirtConnection implements ClusterConnection {
 		const managed: string[] = [];
 		const loose: string[] = [];
 		if (options.deleteDisks) {
-			for (const disk of domain.disks.filter((d) => d.device === 'disk' && d.path && DISK_TARGET.test(d.target))) {
+			for (const disk of domain.disks.filter((d) => d.path && DISK_TARGET.test(d.target) && (d.device === 'disk' || isSeed(d.path)))) {
 				const isVolume = await this.virsh.exec(['vol-info', '--', disk.path!], 10_000).then(() => true, () => false);
-				(isVolume ? managed : loose).push(isVolume ? disk.target : disk.path!);
+				if (isVolume) managed.push(disk.target);
+				// A cloud-init seed outside a pool was not made here: it stays.
+				else if (disk.device === 'disk') loose.push(disk.path!);
 			}
 			if (loose.length && !this.local) {
 				throw new ProviderError(`libvirt cannot remove ${loose.join(', ')} on the host: it is not in a storage pool. Delete the domain without its disks and remove the files there.`, 'unsupported');
