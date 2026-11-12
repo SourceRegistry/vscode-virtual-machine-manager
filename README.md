@@ -64,7 +64,8 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
 ## Work with machines
 
 * **Create** a machine from a node's context menu: name, processors, memory, disk, installation ISO
-  and network, step by step.
+  and network, step by step. With QEMU and libvirt it can also start from a **cloud image** (Debian,
+  Ubuntu) that sets itself up on first boot with your user, SSH key and the guest agent: no installer.
 * **Settings** opens an editor for the machine's configuration. Some settings can only change while
   the machine is off.
 * **Start, Shut Down, Reboot, Stop (Power Off)**. *Shut Down* asks the guest to shut down cleanly;
@@ -82,13 +83,13 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
   machine's details: a port forward to port 22 (QEMU's NAT address is never offered), or an address the
   computer can reach. It checks that an SSH server answers first, and asks before adding an entry for the
   machine to your ssh config; nothing is written silently. **Forward SSH Port…** sets up the forward.
+  **Add Machines to SSH Config…** and **Remove Machines from SSH Config…** let you choose which machines
+  have an entry, so they work with plain `ssh <name>` and in Remote - SSH's host list.
 * **Run Command in Guest…**, **Copy File to Guest…** and **Copy File from Guest…** work on a running machine through its
   guest agent (`qemu-guest-agent`, installed by the cloud-image setup), without SSH or a network route. The command runs in
   the guest's shell (`/bin/sh`, `cmd.exe` on Windows) as the agent's user, usually root; its output goes to the
   *VM Manager: Guest Commands* output channel. With the balloon driver in the guest, the memory chart shows what the guest
   itself uses rather than what the hypervisor holds on the host; the chart says which.
-  **Add Machines to SSH Config…** and **Remove Machines from SSH Config…** let you choose which machines
-  have an entry, so they work with plain `ssh <name>` and in Remote - SSH's host list.
 * **Delete** removes the machine, and its disks if you choose so.
 
 ### Bring in machines you already have
@@ -111,14 +112,14 @@ QEMU only, through the QEMU provider:
 | **Runs on** | Windows | Windows, Linux, macOS | any (server API) | Linux, macOS (needs `virsh`) |
 | **Where the machines run** | this computer | this computer, or a Linux host over SSH | a Proxmox server | this computer, or a host over SSH (`qemu+ssh://`) |
 | **Machines** | | | | |
-| Create | ✓ | ✓ | ✓ | ✓ *(from an ISO; no cloud images yet)* |
+| Create | ✓ | ✓ | ✓ | ✓ |
 | Edit settings | ✓ | ✓ | ✓ | – |
 | Delete (and its disks) | ✓ | ✓ | ✓ *(disks always go too)* | ✓ |
 | Power: start, shut down, reboot, force stop | ✓ | ✓ | ✓ | ✓ |
 | Reset (hardware reset) | – | – | ✓ | ✓ |
 | Containers (LXC) | – | – | ✓ | – |
 | Attach to running processes, import from a folder | – | ✓ *(attach also over SSH)* | – | – |
-| Create from a cloud image (cloud-init) | – | ✓ | – | – |
+| Create from a cloud image (cloud-init) | – | ✓ | – | ✓ |
 | **Consoles** | | | | |
 | Graphical console in an editor tab | ✓ *(RDP, single sign-on)* | ✓ *(VNC)* | ✓ *(VNC)* | ✓ *(VNC)* |
 | Serial console | ✓ | ✓ | ✓ | ✓ *(pty, socket or TCP; over SSH TCP only)* |
