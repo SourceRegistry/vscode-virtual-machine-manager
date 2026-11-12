@@ -26,6 +26,7 @@ For SSH, `ControlMaster auto` (with `ControlPersist`) in `~/.ssh/config` makes i
 * **Details page**: disks and CD/DVD drives (with sizes), network adapters, and live CPU, memory, disk and network charts.
 * **Consoles**: the VNC display (and its password), and the serial console (a pty on this computer, a unix socket, or a TCP port; over SSH only the TCP port).
 * **Create**: a domain from an installer ISO, or from a **cloud image** with cloud-init (Debian 12/13, Ubuntu 22.04/24.04 for the host's architecture, or a qcow2/raw file): the image is downloaded on this computer with its published checksum verified and cached, uploaded into a directory storage pool as the domain's disk (over libvirt's own connection, so `qemu+ssh://` hosts work too), enlarged to the asked size, and a `cidata` seed volume sets up your user, SSH key or password, host name and the guest agent on first boot. A pool is made in `~/.local/share/libvirt/images` (session) or `/var/lib/libvirt/images` (system) when the connection has none.
+* **Port forwards** (this computer, user-mode networking): forward a port here to a guest port, e.g. SSH for *Connect with Remote-SSH*. They are QEMU `hostfwd` rules added through the monitor (libvirt's own `<portForward>` needs passt, which is Linux only), kept in the domain's `<metadata>` and added again on every start, also when the domain was started with `virsh`. libvirt then lists the domain as *tainted: custom monitor control commands issued*; that is only a note in its log.
 * **Media**: insert and eject an ISO in a CD/DVD drive, on a running domain too.
 * **Snapshots**: take, revert and delete (`virsh snapshot-*`, libvirt's internal snapshots). A snapshot of a running domain includes its memory.
 * **Delete**: removes the domain, its UEFI variables and snapshot metadata, and with *Delete disks* its disks: volumes of a storage pool through libvirt, other files by deleting them (this computer only).
@@ -33,7 +34,7 @@ For SSH, `ControlMaster auto` (with `ControlPersist`) in `~/.ssh/config` makes i
 ## Not included yet
 
 * Editing and cloning domains: use `virt-install`, `virt-manager`, Cockpit or `virsh edit`, and the change shows up here.
-* Templates, port forwards, passthrough, SPICE displays.
+* Templates, passthrough, SPICE displays; port forwards on a remote host (a guest on a libvirt network has its own address instead).
 * Uptime and CPU on macOS come from the QEMU process (libvirt has no cgroups there).
 
 ## Limits worth knowing

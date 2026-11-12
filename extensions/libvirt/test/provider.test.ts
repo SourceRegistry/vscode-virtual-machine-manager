@@ -69,7 +69,9 @@ describe('LibvirtProvider', () => {
 		for (const [action, command] of [['start', 'start'], ['stop', 'destroy'], ['reset', 'reset'], ['reboot', 'reboot']] as const) {
 			calls.length = 0;
 			await connection.power('host', UUID, action);
-			expect(calls).toEqual([[command, UUID]]);
+			// A start also reads the saved port forwards (none here) to add them to the running domain.
+			expect(calls[0]).toEqual([command, UUID]);
+			expect(calls.slice(1).every((c) => c[0] === 'metadata')).toBe(true);
 		}
 	});
 	it('reports a graceful shut down that never finishes as a timeout', async () => {
@@ -254,6 +256,45 @@ describe('LibvirtProvider', () => {
 		it('reads format and capacity of a volume', () => {
 			expect(parseVolumeXml(volXml('qcow2', 3))).toEqual({ format: 'qcow2', capacity: 3 * 1024 ** 3 });
 			expect(parseVolumeXml('<volume/>')).toEqual({});
+		});
+	});
+	describe('port forwards', () => {
+		const USER_XML = XML.includes("<interface type='user'>") ? XML : XML.replace(/<interface type='[^']*'>/, "<interface type='user'>");
+		const INFO_NETWORK = 'net0: index=0,type=nic,model=virtio-net-pci\n \\ hostnet0: index=0,type=user,net=10.0.2.0\n';
+		const saved = `<forwards><forward protocol='tcp' hostAddress='127.0.0.1' hostPort='2222' guestPort='22'/></forwards>`;
+		const hmp = (calls: string[][]) => calls.filter((c) => c[0] === 'qemu-monitor-command').map((c) => c[3]);
+
+		it('adds a forward to the running domain and saves it in the metadata', async () => {
+			const { connection, calls } = await connect({ dumpxml: USER_XML, domstate: 'running\n', [`qemu-monitor-command ${UUID} --hmp info network`]: INFO_NETWORK });
+			expect(connection.capabilities.forwards).toBe(true);
+			await connection.addPortForward!('host', UUID, { protocol: 'tcp', hostPort: 2222, guestPort: 22 });
+			expect(hmp(calls)).toContain('hostfwd_add hostnet0 tcp:127.0.0.1:2222-:22');
+			const set = calls.find((c) => c[0] === 'metadata' && c.includes('--set'))!;
+			expect(set).toEqual(['metadata', UUID, '--uri', 'https://sourceregistry.dev/vm-manager/forwards', '--key', 'vmm', '--set', saved, '--config']);
+		});
+		it('does not save a forward QEMU refused', async () => {
+			const { connection, calls } = await connect({ dumpxml: USER_XML, domstate: 'running\n', [`qemu-monitor-command ${UUID} --hmp info network`]: INFO_NETWORK, [`qemu-monitor-command ${UUID} --hmp hostfwd_add hostnet0 tcp:127.0.0.1:2222-:22`]: "Could not set up host forwarding rule 'tcp:127.0.0.1:2222-:22'" });
+			await expect(connection.addPortForward!('host', UUID, { protocol: 'tcp', hostPort: 2222, guestPort: 22 })).rejects.toMatchObject({ message: expect.stringContaining('in use') });
+			expect(calls.some((c) => c[0] === 'metadata' && c.includes('--set'))).toBe(false);
+		});
+		it('reports saved forwards and adds missing ones to a running domain started elsewhere', async () => {
+			const { connection, calls } = await connect({ dumpxml: USER_XML, domstate: 'running\n', metadata: saved, [`qemu-monitor-command ${UUID} --hmp info network`]: INFO_NETWORK, [`qemu-monitor-command ${UUID} --hmp info usernet`]: 'Hub -1 (hostnet0):\n' });
+			const details = await connection.getVmDetails('host', UUID);
+			expect(details.forwards).toEqual([{ protocol: 'tcp', hostAddress: '127.0.0.1', hostPort: 2222, guestPort: 22 }]);
+			expect(hmp(calls)).toContain('hostfwd_add hostnet0 tcp:127.0.0.1:2222-:22');
+		});
+		it('removes a forward from QEMU and the metadata', async () => {
+			const { connection, calls } = await connect({ dumpxml: USER_XML, domstate: 'running\n', metadata: saved, [`qemu-monitor-command ${UUID} --hmp info network`]: INFO_NETWORK });
+			await connection.removePortForward!('host', UUID, { protocol: 'tcp', hostPort: 2222, guestPort: 22 });
+			expect(hmp(calls)).toContain('hostfwd_remove hostnet0 tcp:127.0.0.1:2222');
+			expect(calls.some((c) => c[0] === 'metadata' && c.includes('--remove'))).toBe(true);
+		});
+		it('refuses forwards on a remote host and on a libvirt network', async () => {
+			const remote = await connect({ dumpxml: USER_XML }, { connection: 'ssh', sshHost: 'lab' });
+			expect(remote.connection.capabilities.forwards).toBe(false);
+			await expect(remote.connection.addPortForward!('host', UUID, { protocol: 'tcp', hostPort: 2222, guestPort: 22 })).rejects.toMatchObject({ code: 'unsupported' });
+			const bridged = await connect({ dumpxml: USER_XML.replace("<interface type='user'>", "<interface type='network'><source network='default'/>") });
+			await expect(bridged.connection.addPortForward!('host', UUID, { protocol: 'tcp', hostPort: 2222, guestPort: 22 })).rejects.toMatchObject({ code: 'unsupported' });
 		});
 	});
 	it('says so when the display port refuses the connection', async () => {

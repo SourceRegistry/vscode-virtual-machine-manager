@@ -7,12 +7,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 import {
 	ProviderError, type Capabilities, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions,
 	type DiskStats, type FieldSchema, type FieldValues, type HypervisorProvider, type Logger, type NodeInfo, type PowerAction, type ProviderContext,
-	type CreateProgress, type SecretBag, type Snapshot, type VmConfig, type VmDetails, type VmInfo, type VmStats
+	type CreateProgress, type PortForward, type SecretBag, type Snapshot, type VmConfig, type VmDetails, type VmInfo, type VmStats
 } from '@vmm/sdk';
 import {
 	buildIso, cloudFields, cloudInitProblem, ensureImage, findImage, hostnameFor, localImageHost, metaData, parseKeys, sha512Crypt, SOURCE_ISO, userData, type Arch, type DownloadProgress
 } from '@vmm/sdk/provisioning';
 import { openEndpoint, openPty } from './consoles';
+import { activeForwards, checkHmp, forwardsMetadata, hostfwdKey, hostfwdRule, METADATA_URI, normalizeForward, parseForwardsMetadata, sameHostPort, userNetdev } from './forwards';
 import { buildDomainXml, DISK_BUSES, NAME, parseDomainCapabilities, type DiskBus } from './definition';
 import {
 	blockStats, netStats, parseDomain, parseDomifaddr, parseDomstats, parseNodeinfo, parseSnapshot, parseVersion, parseVncDisplay, stateOf, toDiskDevices, toNicDevices, UUID,
@@ -150,6 +151,8 @@ export class LibvirtConnection implements ClusterConnection {
 		this.ssh = sshTarget(uri);
 		// Installer images are read by libvirt on its own host: from another computer a file dialog here would pick the wrong file.
 		this.capabilities.remotePaths = !this.local;
+		// A forward listens on the libvirt host: only on this computer is that where Remote-SSH connects.
+		this.capabilities.forwards = this.local;
 	}
 
 	dispose(): void { this.domains.clear(); this.byId.clear(); this.addresses.clear(); this.cpuSamples.clear(); }
@@ -260,7 +263,71 @@ export class LibvirtConnection implements ClusterConnection {
 			if (capacity) capacities.set(disk.target, Number(capacity));
 		}));
 		const addresses = state === 'running' ? await this.guestAddresses(domain) : new Map<string, string[]>();
-		return { disks: toDiskDevices(domain, capacities), nics: toNicDevices(domain, addresses), devices: [], forwards: [] };
+		const forwards = this.local && domain.nics.some((n) => n.type === 'user') ? await this.savedForwards(id) : [];
+		// A domain started outside VS Code (virsh, virt-manager) has none of them yet.
+		if (forwards.length && state === 'running') await this.applyForwards(id, forwards);
+		return { disks: toDiskDevices(domain, capacities), nics: toNicDevices(domain, addresses), devices: [], forwards };
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Port forwards (user-mode networking; see forwards.ts)
+	// -----------------------------------------------------------------------------------------
+
+	private async savedForwards(id: string): Promise<PortForward[]> {
+		// No element yet is an error from virsh: it means no forwards.
+		return parseForwardsMetadata(await this.virsh.exec(['metadata', id, '--uri', METADATA_URI, '--config']).catch(() => ''));
+	}
+
+	private async saveForwards(id: string, forwards: PortForward[]): Promise<void> {
+		if (forwards.length) await this.virsh.exec(['metadata', id, '--uri', METADATA_URI, '--key', 'vmm', '--set', forwardsMetadata(forwards), '--config']);
+		else await this.virsh.exec(['metadata', id, '--uri', METADATA_URI, '--remove', '--config']).catch(() => undefined);
+	}
+
+	private async hmp(id: string, command: string, what: string): Promise<string> {
+		return checkHmp(await this.virsh.exec(['qemu-monitor-command', id, '--hmp', command]), what);
+	}
+
+	/** Adds the saved forwards QEMU does not have yet; a port another program took is logged, not fatal. */
+	private async applyForwards(id: string, forwards: PortForward[]): Promise<void> {
+		const netdev = userNetdev(await this.hmp(id, 'info network', 'Could not read the network'));
+		if (!netdev) return;
+		const active = activeForwards(await this.hmp(id, 'info usernet', 'Could not read the forwards'));
+		for (const f of forwards.filter((f) => !active.some((a) => sameHostPort(a, f)))) {
+			await this.hmp(id, `hostfwd_add ${netdev} ${hostfwdRule(f)}`, `Could not forward ${f.hostPort}`).catch((e: Error) => this.log.warn(e.message));
+		}
+	}
+
+	private async forwardTarget(vmId: string) {
+		const id = assertId(vmId);
+		if (!this.local) throw new ProviderError('Port forwards are only available for domains on this computer.', 'unsupported');
+		const domain = await this.freshDomain(id);
+		if (!domain.nics.some((n) => n.type === 'user')) {
+			throw new ProviderError('Port forwards are for user-mode networking. On a libvirt network the guest has its own address: connect to that.', 'unsupported');
+		}
+		const running = (await this.virsh.exec(['domstate', id])).trim() === 'running';
+		return { id, running, saved: await this.savedForwards(id) };
+	}
+
+	async addPortForward(_nodeId: string, vmId: string, forward: PortForward): Promise<void> {
+		const f = normalizeForward(forward);
+		const { id, running, saved } = await this.forwardTarget(vmId);
+		if (saved.some((s) => sameHostPort(s, f))) throw new ProviderError(`Port ${f.hostPort} is already forwarded.`, 'invalid');
+		if (running) {
+			const netdev = userNetdev(await this.hmp(id, 'info network', 'Could not read the network'));
+			if (!netdev) throw new ProviderError('The running domain has no user-mode network to forward from.', 'unsupported');
+			await this.hmp(id, `hostfwd_add ${netdev} ${hostfwdRule(f)}`, `Could not forward port ${f.hostPort} (is it in use?)`);
+		}
+		await this.saveForwards(id, [...saved, f]);
+	}
+
+	async removePortForward(_nodeId: string, vmId: string, forward: PortForward): Promise<void> {
+		const f = normalizeForward(forward);
+		const { id, running, saved } = await this.forwardTarget(vmId);
+		if (running) {
+			const netdev = userNetdev(await this.hmp(id, 'info network', 'Could not read the network'));
+			if (netdev) await this.hmp(id, `hostfwd_remove ${netdev} ${hostfwdKey(f)}`, `Could not remove the forward of port ${f.hostPort}`).catch((e: Error) => this.log.warn(e.message));
+		}
+		await this.saveForwards(id, saved.filter((s) => !sameHostPort(s, f)));
 	}
 
 	async getVmStats(_nodeId: string, vmId: string): Promise<VmStats> {
@@ -540,7 +607,14 @@ export class LibvirtConnection implements ClusterConnection {
 	async power(_nodeId: string, vmId: string, action: PowerAction): Promise<void> {
 		const id = assertId(vmId);
 		switch (action) {
-			case 'start': await this.virsh.exec(['start', id], 120_000); break;
+			case 'start': {
+				await this.virsh.exec(['start', id], 120_000);
+				if (this.local) {
+					const forwards = await this.savedForwards(id);
+					if (forwards.length) await this.applyForwards(id, forwards).catch((e: Error) => this.log.warn(`Could not add the port forwards: ${e.message}`));
+				}
+				break;
+			}
 			case 'stop': await this.virsh.exec(['destroy', id]); break;
 			case 'reset': await this.virsh.exec(['reset', id]); break;
 			case 'reboot': await this.virsh.exec(['reboot', id]); break;

@@ -8,6 +8,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ClusterConfig, ProviderContext } from '@vmm/sdk';
@@ -185,6 +186,24 @@ describe.skipIf(!enabled)('libvirt provider against real libvirt', () => {
 			await until(async () => { try { v('qemu-agent-command', name, '{"execute":"guest-ping"}'); return true; } catch { return false; } }, 'the guest agent', 6 * 60_000);
 			const hostname = JSON.parse(v('qemu-agent-command', name, '{"execute":"guest-get-host-name"}')).return['host-name'];
 			expect(hostname).toBe(name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+
+			// User-mode networking: SSH is reached through a forward, which comes back after a restart.
+			const port = 20000 + (process.pid % 20000);
+			await connection.addPortForward!('host', vm.id, { protocol: 'tcp', hostPort: port, guestPort: 22 });
+			expect((await connection.getVmDetails('host', vm.id)).forwards).toEqual([{ protocol: 'tcp', hostAddress: '127.0.0.1', hostPort: port, guestPort: 22 }]);
+			const banner = () => new Promise<string>((resolve, reject) => {
+				const socket = connect(port, '127.0.0.1');
+				socket.once('data', (d) => { resolve(d.toString('latin1')); socket.destroy(); });
+				socket.once('error', reject);
+				setTimeout(() => { socket.destroy(); reject(new Error('no SSH banner')); }, 5000);
+			});
+			await until(async () => /^SSH-2\.0-/.test(await banner().catch(() => '')), 'the SSH banner through the forward', 60_000);
+			await connection.power('host', vm.id, 'stop');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'stopped', 'stopped');
+			await connection.power('host', vm.id, 'start');
+			await until(async () => /^SSH-2\.0-/.test(await banner().catch(() => '')), 'the SSH banner after a restart', 3 * 60_000);
+			await connection.removePortForward!('host', vm.id, { protocol: 'tcp', hostPort: port, guestPort: 22 });
+			expect((await connection.getVmDetails('host', vm.id)).forwards).toEqual([]);
 			await connection.power('host', vm.id, 'stop');
 			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'stopped', 'stopped');
 			await connection.deleteVm('host', vm.id, { deleteDisks: true });
@@ -195,5 +214,5 @@ describe.skipIf(!enabled)('libvirt provider against real libvirt', () => {
 			try { v('destroy', name); } catch { /* not running */ }
 			try { v('undefine', name, '--nvram', '--managed-save', '--remove-all-storage'); } catch { /* gone */ }
 		}
-	}, 8 * 60_000);
+	}, 12 * 60_000);
 });
