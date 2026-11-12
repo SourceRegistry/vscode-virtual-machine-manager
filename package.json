@@ -40,7 +40,7 @@
     "build:webview": "vite build",
     "watch:extension": "node esbuild.mjs --watch",
     "watch:webview": "vite build --watch --mode development",
-    "check": "tsc -p tsconfig.json --noEmit && tsc -p extensions/hyperv/tsconfig.json --noEmit && tsc -p extensions/qemu/tsconfig.json --noEmit && tsc -p extensions/proxmox/tsconfig.json --noEmit && tsc -p extensions/libvirt/tsconfig.json --noEmit && svelte-check --tsconfig ./tsconfig.webview.json --threshold error",
+    "check": "node scripts/check.mjs",
     "test": "vitest run",
     "test:integration": "node test/integration/runTest.mjs",
     "package": "npm run build && node scripts/package.mjs",

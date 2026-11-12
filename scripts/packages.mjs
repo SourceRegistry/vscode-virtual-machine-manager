@@ -68,5 +68,23 @@ export function touchesPackage(files, { paths, exclude = [] }) {
 	return files.some((file) => within(file, paths) && !within(file, exclude.filter((p) => p !== '')));
 }
 
-export const vsixPath = (pkg, version) => path.join(root, 'out', `${pkg.name}-${version ?? readManifest(pkg.dir).version}.vsix`);
+/**
+ * The esbuild bundle of every package, keyed by package id. Paths are relative to the repository root;
+ * `main` in each package.json must point at `out`.
+ */
+export function buildTargets() {
+	return Object.fromEntries(
+		packages.map((p) => {
+			const dir = path.relative(root, p.dir);
+			const entry = p.id === 'core' ? 'src/extension/extension.ts' : path.join(dir, 'src', 'extension.ts');
+			return [p.id, { entry: entry.split(path.sep).join('/'), out: path.join(dir, 'dist', 'extension.js').split(path.sep).join('/') }];
+		})
+	);
+}
+
+/** The tsconfig of every package, for the type check (`npm run check`). */
+export const tsconfigs = () =>
+	packages.map((p) => path.join(path.relative(root, p.dir), 'tsconfig.json').split(path.sep).join('/'));
+
+export const vsixPath =(pkg, version) => path.join(root, 'out', `${pkg.name}-${version ?? readManifest(pkg.dir).version}.vsix`);
 export const manifestVersion = (pkg) => readManifest(pkg.dir).version;

@@ -1,13 +1,12 @@
 // Renders the Marketplace icons (256×256 PNG; the Marketplace does not accept SVG icons) from
 // media/marketplace/icon.svg (512×512). Provider icons are the same artwork with a badge holding the
-// platform's logo (media/marketplace/hyperv.svg, qemu.svg, proxmox.svg, libvirt.svg), so the extensions read as one
-// family. Run after changing the artwork: `node scripts/render-icons.mjs`.
-import { Resvg } from '@resvg/resvg-js';
+// platform's logo (media/marketplace/<provider>.svg, see BADGES), so the extensions read as one
+// family. Run after changing the artwork or adding a provider: `node scripts/render-icons.mjs`.
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { packages, root } from './packages.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const artwork = (name) => readFileSync(path.join(root, 'media', 'marketplace', name), 'utf8');
 const base = artwork('icon.svg');
 
@@ -39,18 +38,38 @@ function badge(file, scale) {
 
 const withBadge = (file, scale) => base.replace(/<\/svg>\s*$/, `${badge(file, scale)}\n</svg>\n`);
 
-const icons = [
-	{ out: 'media/icon.png', svg: base },
-	{ out: 'extensions/hyperv/media/icon.png', svg: withBadge('hyperv.svg', 1.4) },
+/**
+ * The badge artwork of every provider, keyed by its directory in extensions/. A new provider must be
+ * added here (the run fails otherwise, and so does test/extensions.test.ts): its logo goes to
+ * media/marketplace/<id>.svg.
+ */
+export const BADGES = {
+	hyperv: { file: 'hyperv.svg', scale: 1.4 },
 	// The QEMU tail reaches the corner of its box: 1.3 keeps the diagonal inside the badge.
-	{ out: 'extensions/qemu/media/icon.png', svg: withBadge('qemu.svg', 1.3) },
-	{ out: 'extensions/proxmox/media/icon.png', svg: withBadge('proxmox.svg', 1.4) },
+	qemu: { file: 'qemu.svg', scale: 1.3 },
+	proxmox: { file: 'proxmox.svg', scale: 1.4 },
 	// The official libvirt square logo (https://libvirt.org/logos/): its tin is rotated, so it needs the same room as the QEMU tail.
-	{ out: 'extensions/libvirt/media/icon.png', svg: withBadge('libvirt.svg', 1.75) }
-];
+	libvirt: { file: 'libvirt.svg', scale: 1.75 }
+};
 
-for (const { out, svg } of icons) {
-	const png = new Resvg(svg, { fitTo: { mode: 'width', value: 256 } }).render().asPng();
-	writeFileSync(path.join(root, out), png);
-	console.log(`${out} (${png.length} bytes)`);
+function icons() {
+	return packages.map((p) => {
+		const out = path.relative(root, path.join(p.dir, 'media', 'icon.png'));
+		if (p.id === 'core') return { out, svg: base };
+		const badge = BADGES[p.id];
+		if (!badge) throw new Error(`No badge artwork for extensions/${p.id}: add it to BADGES in scripts/render-icons.mjs`);
+		return { out, svg: withBadge(badge.file, badge.scale) };
+	});
 }
+
+async function render() {
+	const { Resvg } = await import('@resvg/resvg-js');
+	for (const { out, svg } of icons()) {
+		const png = new Resvg(svg, { fitTo: { mode: 'width', value: 256 } }).render().asPng();
+		writeFileSync(path.join(root, out), png);
+		console.log(`${out} (${png.length} bytes)`);
+	}
+}
+
+// Importable (test/extensions.test.ts reads BADGES) without rendering.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await render();
