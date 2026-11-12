@@ -2,7 +2,7 @@
   "name": "vm-manager-nutanix",
   "displayName": "VM Manager – Nutanix",
   "description": "Manage Nutanix AHV virtual machines through Prism Central from VS Code: power, snapshots, clones and metrics.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "sourceregistry",
   "icon": "media/icon.png",
   "license": "Apache-2.0",
