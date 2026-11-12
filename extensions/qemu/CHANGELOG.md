@@ -1,5 +1,18 @@
 # Changelog
 
+# [0.9.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.8.1...vm-manager-qemu-v0.9.0) (2026-11-12)
+
+
+### Bug Fixes
+
+* **sdk:** a missing file in the guest is not a missing guest agent ([2bbd5a7](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/2bbd5a7315a22bf89a0917eda4adf1bfc664f737))
+
+
+### Features
+
+* **qemu:** commands and files in the guest; guest memory from the balloon ([3405763](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/34057639385c5914986a45312fccab81c348560c))
+* **sdk:** run commands and copy files in a guest through its agent ([02ccf2d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/02ccf2d61dad310cff89b8312ba6db192b8791b6))
+
 ## [0.8.1](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.8.0...vm-manager-qemu-v0.8.1) (2026-11-12)
 
 
