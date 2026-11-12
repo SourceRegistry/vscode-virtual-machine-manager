@@ -51,7 +51,14 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
 ```
 
 * **Virtual Machines view**: state icons, the running count as a badge, and quick actions next to
-  each machine (start, connect, shut down).
+  each machine (start, connect, shut down). A graceful shutdown counts down in the view and the status bar
+  (*Shutting down… 23 s left*) until the hypervisor gives up on the guest.
+* **Favorites and groups**: a **Groups** view under the main one holds **Favorites** (**Add to Favorites**)
+  and groups of your own: **New Group…** in its title bar, then drag machines in from Clusters (dragging
+  between groups moves them) or use **Add to Group…** on a machine. A machine can be in several groups; the
+  ✕ next to it removes it from that group, and a group's menu renames or deletes it (its machines stay).
+  **VM: Group By…** (or `vmm.tree.groupBy`) groups the main view by cluster, group or state. VM Manager
+  keeps favorites and groups itself; the hypervisor never sees them.
 * **Overview** (**VM: Open Overview**): a dashboard of everything you manage.
   * A summary of machines by state (click a state to filter the table) and of the processors and
     memory allocated against what the nodes have, flagged when they are overcommitted.
@@ -61,6 +68,14 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
   * Select several machines to start, shut down or power them off together.
 * **Search** (**VM: Search Virtual Machines…**): jump to a machine by name from the command palette.
 * **Status bar**: the number of running machines; click it to open the Overview.
+* **Show Log** opens a log for one machine: what you asked for from VS Code and how it ended, state changes
+  (also ones made outside VS Code), guest commands, copies, snapshots and media, with the hypervisor's own log
+  for the machine underneath (QEMU's output; libvirt's domain log on this computer). It covers the time since
+  VS Code started.
+* **Notifications** tell you when a machine starts or stops without you asking for it here: the guest shut
+  itself down, another tool started it, it crashed. `vmm.notifications.stateChanges` turns them off or on for
+  every change. They come from the refreshes, so from machines whose view or Overview is visible, or whose
+  provider reports changes (QEMU does).
 
 ## Work with machines
 
@@ -92,6 +107,43 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
   *VM Manager: Guest Commands* output channel. With the balloon driver in the guest, the memory chart shows what the guest
   itself uses rather than what the hypervisor holds on the host; the chart says which.
 * **Delete** removes the machine, and its disks if you choose so.
+
+### Automate with tasks, keybindings and launch configurations
+
+A **`vm` task** starts, shuts down, reboots or powers off a machine and waits for it, for example before a debug
+session. *Tasks: Run Task → VM Manager* also lists a Start and a Shut Down task for every machine.
+
+```jsonc
+// .vscode/tasks.json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start test VM",
+      "type": "vm",
+      "vm": "web-01",          // its name, or "cluster/name" when two clusters have one
+      "action": "start",       // start | shutdown | reboot | stop | reset
+      "waitFor": "ssh",        // state (default) | address | ssh | none
+      "timeout": 300           // seconds
+    }
+  ]
+}
+```
+
+`start` does nothing on a running machine, `shutdown` nothing on one that is off, so the task can run before
+every launch. In `launch.json`, `vmm.getVmAddress` and `vmm.getVmSshPort` give the address to connect to:
+
+```jsonc
+"inputs": [
+  { "id": "vmHost", "type": "command", "command": "vmm.getVmAddress", "args": { "vm": "web-01", "ssh": true } },
+  { "id": "vmPort", "type": "command", "command": "vmm.getVmSshPort", "args": { "vm": "web-01" } }
+]
+```
+
+The power commands take a machine's name as argument, for keybindings:
+`{ "key": "ctrl+alt+s", "command": "vmm.start", "args": "web-01" }`.
+Other extensions get the same through the API: `vscode.extensions.getExtension('sourceregistry.vm-manager').exports.vms`
+(`list`, `get`, `power`, `waitForState`, `address`, `onDidChangeState`).
 
 ### Bring in machines you already have
 
@@ -131,6 +183,8 @@ QEMU only, through the QEMU provider:
 | Change or eject ISO | ✓ | ✓ | – | ✓ |
 | Run commands and copy files in the guest | – | ✓ *(guest agent)* | – | ✓ *(guest agent)* |
 | Memory used inside the guest | – | ✓ *(balloon driver)* | – | ✓ *(balloon driver)* |
+| Hypervisor log in *Show Log* | – | ✓ *(QEMU's output)* | – | ✓ *(domain log, this computer)* |
+| Shutdown countdown | – | ✓ | – | ✓ |
 | **Protect and copy** | | | | |
 | Snapshots | ✓ *(checkpoints)* | ✓ *(disks only, qcow2)* | ✓ *(disks only)* | ✓ *(with memory when running; not for UEFI with a raw nvram)* |
 | Clone | ✓ *(export and import)* | ✓ | ✓ *(full copy)* | – |
@@ -181,6 +235,8 @@ When a console does ask for a password, **VM: Forget Console Sign-in** removes t
 | `vmm.confirmPowerOff` | `true` | Ask before a hard power off (*Stop*). |
 | `vmm.ssh.user` | empty | Account to sign in as in a guest. Empty: your user name on this computer. Remembered per machine. |
 | `vmm.ssh.addConfigEntry` | `true` | Offer to add an ssh config entry before connecting. Turn off to connect by address without touching the file. |
+| `vmm.notifications.stateChanges` | `outside` | Notify when a machine starts, stops, pauses or resumes: `outside` only for changes VS Code did not ask for, `all`, or `off`. Each machine's log has them either way. |
+| `vmm.tree.groupBy` | `cluster` | Group the Clusters view by `cluster`, `group` or `state`. Favorites and your groups also have their own view below it. |
 
 Providers add their own settings, for example `vmm.qemu.path`.
 

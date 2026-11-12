@@ -47,7 +47,8 @@
     "vscode:prepublish": "npm run build"
   },
   "activationEvents": [
-    "onWebviewPanel:vmm.overview"
+    "onWebviewPanel:vmm.overview",
+    "onTaskType:vm"
   ],
   "contributes": {
     "viewsContainers": {
@@ -66,6 +67,13 @@
           "name": "Clusters",
           "icon": "$(vm)",
           "contextualTitle": "Virtual Machines"
+        },
+        {
+          "id": "vmm.groups",
+          "name": "Groups",
+          "icon": "$(folder-library)",
+          "contextualTitle": "Virtual Machines",
+          "when": "vmm.hasGroups"
         }
       ]
     },
@@ -79,6 +87,10 @@
         "view": "vmm.clusters",
         "contents": "No clusters configured. A cluster groups the nodes (hosts) of one hypervisor, for example your local Hyper-V or a Proxmox cluster.\n[$(add) Add Cluster](command:vmm.addCluster)\n[Get Started](command:vmm.showWalkthrough)",
         "when": "vmm.hasProviders && !vmm.hasClusters"
+      },
+      {
+        "view": "vmm.groups",
+        "contents": "No groups yet. Make one, then add machines with Add to Group… on a machine, or drag them here from Clusters.\n[$(new-folder) New Group](command:vmm.newGroup)"
       }
     ],
     "commands": [
@@ -222,6 +234,70 @@
         "title": "Copy File from Guest…",
         "category": "VM",
         "icon": "$(cloud-download)"
+      },
+      {
+        "command": "vmm.showVmLog",
+        "title": "Show Log",
+        "category": "VM",
+        "icon": "$(output)"
+      },
+      {
+        "command": "vmm.addToFavorites",
+        "title": "Add to Favorites",
+        "category": "VM",
+        "icon": "$(star-empty)"
+      },
+      {
+        "command": "vmm.removeFromFavorites",
+        "title": "Remove from Favorites",
+        "category": "VM",
+        "icon": "$(star-full)"
+      },
+      {
+        "command": "vmm.addToGroup",
+        "title": "Add to Group…",
+        "category": "VM",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "vmm.removeFromGroup",
+        "title": "Remove from Group",
+        "category": "VM",
+        "icon": "$(close)"
+      },
+      {
+        "command": "vmm.newGroup",
+        "title": "New Group…",
+        "category": "VM",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "vmm.renameGroup",
+        "title": "Rename Group…",
+        "category": "VM",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "vmm.deleteGroup",
+        "title": "Delete Group",
+        "category": "VM",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "vmm.groupBy",
+        "title": "Group By…",
+        "category": "VM",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "vmm.getVmAddress",
+        "title": "Get Address of a Virtual Machine",
+        "category": "VM"
+      },
+      {
+        "command": "vmm.getVmSshPort",
+        "title": "Get SSH Port of a Virtual Machine",
+        "category": "VM"
       },
       {
         "command": "vmm.addSshConfigEntries",
@@ -575,6 +651,46 @@
         {
           "command": "vmm.console.stop",
           "when": "activeWebviewPanelId =~ /^vmm\\.console\\./"
+        },
+        {
+          "command": "vmm.showVmLog",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.addToFavorites",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.removeFromFavorites",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.addToGroup",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.removeFromGroup",
+          "when": "vmm.hasUserGroups"
+        },
+        {
+          "command": "vmm.renameGroup",
+          "when": "vmm.hasUserGroups"
+        },
+        {
+          "command": "vmm.deleteGroup",
+          "when": "vmm.hasUserGroups"
+        },
+        {
+          "command": "vmm.groupBy",
+          "when": "vmm.hasVms"
+        },
+        {
+          "command": "vmm.getVmAddress",
+          "when": "false"
+        },
+        {
+          "command": "vmm.getVmSshPort",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -607,6 +723,21 @@
           "command": "vmm.showWalkthrough",
           "when": "view == vmm.clusters",
           "group": "9_more@2"
+        },
+        {
+          "command": "vmm.groupBy",
+          "when": "view == vmm.clusters && vmm.hasVms",
+          "group": "1_view@1"
+        },
+        {
+          "command": "vmm.newGroup",
+          "when": "view == vmm.groups",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vmm.newGroup",
+          "when": "view == vmm.clusters && vmm.hasVms",
+          "group": "1_view@2"
         }
       ],
       "view/item/context": [
@@ -687,153 +818,193 @@
         },
         {
           "command": "vmm.start",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
           "group": "inline@1"
         },
         {
           "command": "vmm.connectGraphical",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bgraphical;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bgraphical;/",
           "group": "inline@2"
         },
         {
           "command": "vmm.connectSerial",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bterminal;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bterminal;/",
           "group": "inline@2"
         },
         {
           "command": "vmm.shutdown",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bshutdown;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bshutdown;/",
           "group": "inline@3"
         },
         {
           "command": "vmm.ejectMedia",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bejectable;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bejectable;/",
           "group": "inline@4"
         },
         {
           "command": "vmm.start",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
           "group": "1_power@1"
         },
         {
           "command": "vmm.shutdown",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bshutdown;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bshutdown;/",
           "group": "1_power@2"
         },
         {
           "command": "vmm.reboot",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\breboot;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\breboot;/",
           "group": "1_power@3"
         },
         {
           "command": "vmm.stop",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=(running|paused|starting|stopping|unknown);.*\\bstop;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=(running|paused|starting|stopping|unknown);.*\\bstop;/",
           "group": "1_power@4"
         },
         {
           "command": "vmm.connectGraphical",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bgraphical;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bgraphical;/",
           "group": "2_connect@1"
         },
         {
           "command": "vmm.connectSerial",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bserial;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bserial;/",
           "group": "2_connect@2"
         },
         {
           "command": "vmm.openExternal",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bexternal;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bexternal;/",
           "group": "2_connect@3"
         },
         {
           "command": "vmm.connectSsh",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bdetails;/ && vmm.remoteSshInstalled",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bdetails;/ && vmm.remoteSshInstalled",
           "group": "2_connect@4"
         },
         {
           "command": "vmm.runInGuest",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bguestexec;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bguestexec;/",
           "group": "2_guest@1"
         },
         {
           "command": "vmm.copyToGuest",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bguestfiles;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bguestfiles;/",
           "group": "2_guest@2"
         },
         {
           "command": "vmm.copyFromGuest",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;state=running;.*\\bguestfiles;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bguestfiles;/",
           "group": "2_guest@3"
         },
         {
           "command": "vmm.ejectMedia",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bejectable;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bejectable;/",
           "group": "2_media@1"
         },
         {
           "command": "vmm.changeMedia",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bmedia;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bmedia;/",
           "group": "2_media@2"
         },
         {
           "command": "vmm.takeSnapshot",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bsnapshots;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bsnapshots;/",
           "group": "2_snapshots@1"
         },
         {
           "command": "vmm.revertSnapshot",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bsnapshots;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bsnapshots;/",
           "group": "2_snapshots@2"
         },
         {
           "command": "vmm.deleteSnapshot",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bsnapshots;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bsnapshots;/",
           "group": "2_snapshots@3"
         },
         {
           "command": "vmm.openVmDashboard",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdetails;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bdetails;/",
           "group": "3_manage@0"
         },
         {
           "command": "vmm.editVm",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bedit;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bedit;/",
           "group": "3_manage@1"
         },
         {
           "command": "vmm.cloneVm",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bclone;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bclone;/",
           "group": "3_manage@2"
         },
         {
           "command": "vmm.createFromTemplate",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bistemplate;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bistemplate;/",
           "group": "3_manage@2"
         },
         {
           "command": "vmm.convertToTemplate",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\btotemplate;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\btotemplate;/",
           "group": "3_manage@2"
         },
         {
           "command": "vmm.convertToVm",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bistemplate;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bistemplate;/",
           "group": "3_manage@2"
         },
         {
           "command": "vmm.deleteVm",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdelete;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bdelete;/",
           "group": "3_manage@3"
         },
         {
           "command": "vmm.detachVm",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;.*\\bdetach;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bdetach;/",
           "group": "3_manage@3"
         },
         {
+          "command": "vmm.showVmLog",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;/",
+          "group": "4_log@1"
+        },
+        {
+          "command": "vmm.addToFavorites",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;(?!.*\\bfavorite;)/",
+          "group": "5_marks@1"
+        },
+        {
+          "command": "vmm.removeFromFavorites",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bfavorite;/",
+          "group": "5_marks@1"
+        },
+        {
+          "command": "vmm.addToGroup",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;/",
+          "group": "5_marks@2"
+        },
+        {
           "command": "vmm.copyId",
-          "when": "view == vmm.clusters && viewItem =~ /^vm;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;/",
           "group": "9_copy@1"
+        },
+        {
+          "command": "vmm.removeFromGroup",
+          "when": "view == vmm.groups && viewItem =~ /^vm;/",
+          "group": "inline@9"
+        },
+        {
+          "command": "vmm.newGroup",
+          "when": "view == vmm.groups && viewItem =~ /^group;/",
+          "group": "1_group@1"
+        },
+        {
+          "command": "vmm.renameGroup",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^group;custom;/",
+          "group": "1_group@2"
+        },
+        {
+          "command": "vmm.deleteGroup",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^group;custom;/",
+          "group": "1_group@3"
         }
       ],
       "editor/title": [
@@ -1050,6 +1221,26 @@
           "group": "3_manage@3"
         },
         {
+          "command": "vmm.showVmLog",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;/",
+          "group": "4_log@1"
+        },
+        {
+          "command": "vmm.addToFavorites",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;(?!.*\\bfavorite;)/",
+          "group": "5_marks@1"
+        },
+        {
+          "command": "vmm.removeFromFavorites",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bfavorite;/",
+          "group": "5_marks@1"
+        },
+        {
+          "command": "vmm.addToGroup",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;/",
+          "group": "5_marks@2"
+        },
+        {
           "command": "vmm.copyId",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;/",
           "group": "9_copy@1"
@@ -1091,6 +1282,36 @@
             "type": "boolean",
             "default": true,
             "markdownDescription": "Offer to add an entry for the machine to your ssh config before connecting (it is always shown first and never written silently). Turn off to connect by address without touching the file."
+          },
+          "vmm.notifications.stateChanges": {
+            "type": "string",
+            "enum": [
+              "outside",
+              "all",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Only changes VS Code did not ask for: a guest that shut itself down, a machine started or stopped in another tool, a crash.",
+              "Every change, also the ones you asked for here.",
+              "No notifications; changes are still written to each machine's log (VM: Show Log)."
+            ],
+            "default": "outside",
+            "markdownDescription": "Tell you when a virtual machine starts, stops, pauses or resumes. Changes are noticed while VM Manager refreshes: when the Virtual Machines view or the Overview is visible, or when the provider reports them (QEMU does)."
+          },
+          "vmm.tree.groupBy": {
+            "type": "string",
+            "enum": [
+              "cluster",
+              "group",
+              "state"
+            ],
+            "enumDescriptions": [
+              "Cluster › node › machine.",
+              "Your groups (VM: Add to Group…); a machine in two groups is in both, the rest under Not in a group.",
+              "Running, off, paused, …"
+            ],
+            "default": "cluster",
+            "markdownDescription": "How the Clusters view groups machines. Favorites and your groups also have their own view below it."
           }
         }
       },
@@ -1191,6 +1412,55 @@
             ]
           }
         ]
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "vm",
+        "required": [
+          "vm",
+          "action"
+        ],
+        "properties": {
+          "vm": {
+            "type": "string",
+            "description": "The machine: its name, cluster/name when two clusters have one of that name, or an id from the VM Manager API."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "shutdown",
+              "reboot",
+              "stop",
+              "reset"
+            ],
+            "description": "What to do. start does nothing on a running machine, shutdown and stop nothing on one that is off."
+          },
+          "waitFor": {
+            "type": "string",
+            "enum": [
+              "state",
+              "address",
+              "ssh",
+              "none"
+            ],
+            "enumDescriptions": [
+              "Until the machine is running (start, reboot, reset) or off (shutdown, stop).",
+              "Also until it has an IP address.",
+              "Also until an SSH server answers (a port forward to 22, or its address).",
+              "Not at all once the hypervisor accepted the action."
+            ],
+            "default": "state",
+            "description": "What the task waits for before it ends."
+          },
+          "timeout": {
+            "type": "number",
+            "default": 300,
+            "minimum": 1,
+            "description": "Seconds to wait in all before the task fails."
+          }
+        }
       }
     ]
   },

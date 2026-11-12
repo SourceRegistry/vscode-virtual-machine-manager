@@ -17,7 +17,7 @@ Done when: phase 11 has no open box we can close on this Mac, and a new user can
 The "done when" flow (cloud image → snapshot → Remote-SSH) is built for QEMU. libvirt has all three steps, but cannot snapshot its UEFI domains while their variable store is a raw file (a libvirt limit, see `extensions/libvirt/README.md`); some manual checks are still open (phases 11-14).
 
 Merged: phases 1-7, 9, 10, 12 (also Hyper-V and Proxmox, untested there), 13, 14; most of 19; the first slice of 16. Phase 11 stays open (manual checks).
-Next on this Mac: **phase 18** (dev UX), then 21 (MCP), 15, 17.
+In progress: **phase 18** (dev UX) on `feat/dev-ux`. Next on this Mac: 21 (MCP), 15, 17.
 
 ## Ground rules
 
@@ -59,7 +59,7 @@ Value = how much it moves "best VM extension for VS Code", weighed against effor
 | 6 | 19 | `feat/libvirt-provider` | One provider covers most Linux KVM users | partly | mostly merged (PR #7, #9) |
 | 7 | 8 | `feat/hyperv-remote` | Remote Hyper-V hosts; large Windows audience, but no Windows host to test | no | todo |
 | 8 | 16 | `feat/guest-integration` | Guest memory, run/copy, clipboard; makes VMs feel integrated | partly | first slice merged (PR #10) |
-| 9 | 18 | `feat/dev-ux` | Countdown, notifications, logs, API; cheap polish, wide effect | yes | todo |
+| 9 | 18 | `feat/dev-ux` | Countdown, notifications, logs, API; cheap polish, wide effect | yes | built, manual check open |
 | 10 | 15 | `feat/disk-management` | Resize/convert/export; useful, not a differentiator | yes | todo |
 | 11 | 17 | `feat/qemu-network-v2` | NIC editor, bridge/vmnet; privileges make it costly on macOS | partly | todo |
 | 12 | 20 | `feat/more-providers` | VMware, VirtualBox, Parallels, XCP-ng, Nutanix; big but each is its own project | mostly no | Nutanix built (`feat/nutanix-provider`), rest todo |
@@ -79,7 +79,7 @@ no `acpid`) ignores `system_powerdown`, and there is no timeout or escalation (`
   3. wait N s for `SHUTDOWN` (configurable, default 30)
   4. `timeout` error; core offers "Power Off" (no second confirmation)
   5. force stop: `quit` → SIGTERM → SIGKILL
-- [x] `stopping` no longer waits 10 min: timeout is the cluster setting `shutdownTimeout` (default 30 s). Visible countdown: not done
+- [x] `stopping` no longer waits 10 min: timeout is the cluster setting `shutdownTimeout` (default 30 s). Visible countdown: done in phase 18
 - [x] virtio-serial guest-agent channel (`org.qemu.guest_agent.0`) on newly created VMs
 - [x] Reboot uses the agent when it answers, else `system_reset`
 - [x] Tests: ladder, guest agent client, args; opt-in end-to-end against real QEMU (`VMM_E2E_QEMU=1`)
@@ -223,7 +223,7 @@ QEMU logs `falling back to tcg` and every VM runs in slow software emulation. Th
 - [x] Existing x86_64 VMs untouched; settings show the architecture read-only, and firmware/disk controller/display read-only on ARM
 - [x] Guest agent channel and QMP/VNC/serial wiring unchanged; import of libvirt/`vm.json` and attach read the architecture; unsupported ones (ppc64, riscv…) are refused clearly
 - [x] Tests: argument sets per architecture, accelerator choice per host/guest pair, CPU choice, firmware detection, hardware normalisation; e2e boots an empty ARM64 UEFI VM natively on an arm64 host
-- [~] One-time "emulation is slow" notice: the create form and settings say so and the VM list marks emulated guests, but there is no pop-up
+- [x] One-time "emulation is slow" notice: the create form and settings say so, the VM list marks emulated guests, and the first start of an emulated machine from VS Code shows a one-time notice (phase 18)
 - [ ] Windows on arm64 hosts: out of scope until someone can test it
 - Not verified: a full guest OS install on ARM64 (only firmware boot, devices, CD hot-swap), KVM on arm64 Linux, AAVMF on Debian/Ubuntu (path knowledge only)
 
@@ -324,12 +324,16 @@ Finishes phase 5's deferred item.
 
 ### Phase 18: `feat/dev-ux`  (Local: yes)
 
-- [ ] Shutdown countdown (phase 1 left it undone)
-- [ ] State-change notifications (started, stopped, crashed) with a setting to silence
-- [ ] Per-VM output channel: QEMU stderr, QMP events, provider actions
-- [ ] Tree: favorites, tags, filter box, group by tag or state
-- [ ] Public command API for other extensions and tasks (`vmm.api`: list, start, stop, getIp); `tasks.json` problem-free task type "vm"
-- [ ] One-time "emulation is slow" notice (phase 10 leftover)
+Status: **built** on `feat/dev-ux` (2026-11-12); unit tests, the VS Code smoke test (API exported, task provider registered, every command has a handler); manual check in VS Code open.
+
+- [x] Shutdown countdown: `Capabilities.shutdownTimeoutSeconds` (QEMU, libvirt, Fake), the tree and the status bar show *Shutting down… 23 s left*, then the time so far; slow operations of any provider show their time (`src/shared/countdown.ts`)
+- [x] State-change notifications: the manager compares settled states between listings (`src/shared/stateChanges.ts`: transitional states skipped, first listing silent) and credits VS Code for a change a recent request explains; `vmm.notifications.stateChanges` = `outside` (default) / `all` / `off`. Only seen while something refreshes (view or Overview visible, or provider change events)
+- [x] Per-VM log (**VM: Show Log**): a read-only `vmm-log:` document per machine (power requests and results, state changes, vanishing, guest commands and copies, media, snapshots, clones, creation), last 500 entries since VS Code started, plus the hypervisor's own log via the optional `readVmLog` (QEMU `qemu.log`, also over SSH; libvirt's domain log on this computer). QMP events show up as the state changes they cause, not one by one
+- [x] Tree: a **Groups** view under the main one (shown once there is a favorite or a group): **Favorites** plus the user's own groups (**New Group…**, rename, delete; empty groups kept), machines added by drag and drop (between groups: a move) or **Add to Group…**, removed with an inline ✕; a machine can be in several. `vmm.tree.groupBy` cluster / group / state (**VM: Group By…** in the view's menu); kept by the core in global state, also in the Overview's context menu, `api.vms` summaries carry `favorite` and `groups`. Filter box: VS Code's own tree find (type in the view) already filters by name
+- [x] Public API `api.vms` (`list`, `get`, `power`, `waitForState`, `address` with an SSH banner check, `onDidChangeState`); machines named by name, `cluster/name` or id (`src/shared/vmLookup.ts`); power commands take a name as argument (keybindings); `vmm.getVmAddress` / `vmm.getVmSshPort` for launch.json inputs; task type `vm` (`action`, `waitFor`: state / address / ssh / none, `timeout`), *Run Task* lists Start and Shut Down per machine
+- [x] One-time "emulation is slow" notice (`VmInfo.emulated`: QEMU for another architecture or TCG, libvirt for `<domain type='qemu'>`)
+- [ ] Manual check in VS Code: countdown, a notification for a guest shut down from inside, Show Log with the libvirt and QEMU logs, favorites / groups (drag and drop) / grouping, a `vm` task with `waitFor: ssh` as a preLaunchTask, `vmm.getVmAddress` in launch.json
+- [ ] Not done: logs kept across restarts; groups in the Overview table and its filter; a status bar countdown for a power operation started from the Overview's bulk bar (the tree shows it)
 - [ ] Marketplace page: screenshots, GIFs, a short demo, Proxmox link in the provider table
 
 ### Phase 19: `feat/libvirt-provider`  (Local: partly)
@@ -360,7 +364,7 @@ Order by demand; each is its own extension and its own release line.
 
 ### Phase 21: `feat/mcp`  (Local: yes)
 
-Let AI agents in VS Code (Copilot agent mode, Claude Code, any MCP client) see and drive VMs through the same providers. Builds on phase 18's public API (`vmm.api`) and phase 16's guest exec.
+Let AI agents in VS Code (Copilot agent mode, Claude Code, any MCP client) see and drive VMs through the same providers. Builds on phase 18's public API (`api.vms`) and phase 16's guest exec.
 - [ ] Decide the surface: **language model tools** (`contributes.languageModelTools` + `vscode.lm.registerTool`, used by agent mode inside VS Code) and/or an **MCP server** VS Code registers itself (`contributes.mcpServerDefinitionProviders` + `vscode.lm.registerMcpServerDefinitionProvider`, VS Code 1.101+, so it reaches external agents too). Both need `engines.vscode` raised from `^1.95.0`; check the API is stable (not proposed) at that version first
 - [ ] Read-only tools first: list clusters / VMs with state, VM details (disks, NICs, addresses, forwards), stats, snapshots
 - [ ] Actions behind a confirmation in VS Code (`prepareInvocation` / tool confirmation): start, shut down, snapshot, forward a port, run a command in the guest (phase 16), copy files. Destructive ones (power off, delete, revert) off by default, a setting to allow them

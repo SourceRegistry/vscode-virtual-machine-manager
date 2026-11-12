@@ -13,6 +13,10 @@ import { initLog, log } from './util/log';
 import { ConsoleManager } from './webview/ConsoleManager';
 import { RdpCredentialStore } from './rdp/credentials';
 import { OverviewPanel } from './webview/OverviewPanel';
+import { VmActivity } from './activity/VmActivity';
+import { VmMarksStore } from './tree/VmMarksStore';
+import { VmControl } from './api/VmControl';
+import { VmTaskProvider } from './tasks/VmTaskProvider';
 import { REMOTE_SSH_ID } from './ssh/connect';
 
 export function activate(context: vscode.ExtensionContext): VmManagerApi {
@@ -27,7 +31,12 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 	const registry = new ProviderRegistry();
 	const store = new ClusterStore(context);
 	const manager = new ConnectionManager(context, store, registry);
-	const tree = new VmTreeProvider(manager, registry);
+	const marks = new VmMarksStore(context.globalState);
+	manager.setMarks(marks);
+	const tree = new VmTreeProvider(manager, registry, marks);
+	const groupsTree = new VmTreeProvider(manager, registry, marks, 'groups');
+	const activity = new VmActivity(context, manager);
+	const control = new VmControl(manager, marks);
 	const credentials = new RdpCredentialStore(context.secrets);
 	const consoles = new ConsoleManager(context.extensionUri, manager, credentials);
 	const statusBar = new VmStatusBar(manager);
@@ -38,10 +47,15 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 		store,
 		manager,
 		tree,
+		groupsTree,
 		consoles,
 		statusBar,
+		marks,
+		activity,
+		control,
+		new VmTaskProvider(manager, control),
 		OverviewPanel.registerSerializer(context.extensionUri, manager),
-		...registerCommands({ context, store, registry, manager, tree, consoles, credentials })
+		...registerCommands({ context, store, registry, manager, tree, groupsTree, consoles, credentials, activity, marks, control })
 	);
 
 	const updateProviderContext = () =>
@@ -68,7 +82,8 @@ export function activate(context: vscode.ExtensionContext): VmManagerApi {
 		apiVersion: VMM_API_VERSION,
 		minApiVersion: VMM_MIN_API_VERSION,
 		registerProvider: (provider: HypervisorProvider) => registry.register(provider),
-		browserLogin: (options) => browserLogin.login(options)
+		browserLogin: (options) => browserLogin.login(options),
+		vms: control
 	};
 }
 

@@ -33,11 +33,12 @@ async function run() {
 
 	// Overview right-click menu mirrors the tree menu (same commands, same state rules).
 	const menus = core.packageJSON.contributes.menus;
-	const treeMenu = menus['view/item/context'].filter((m) => !m.group.startsWith('inline'));
+	// Group rows (the user's groups) only exist in the tree.
+	const treeMenu = menus['view/item/context'].filter((m) => !m.group.startsWith('inline') && !m.when.includes('viewItem =~ /^group;'));
 	const webviewMenu = menus['webview/context'];
 	assert.deepEqual(
 		webviewMenu.map((m) => [m.command, m.when.replace('webviewId == vmm.overview && vmmItem', '')]),
-		treeMenu.map((m) => [m.command, m.when.replace('view == vmm.clusters && viewItem', '')]),
+		treeMenu.map((m) => [m.command, m.when.replace(/^view (==|=~) \S+ && viewItem/, '')]),
 		'overview context menu matches tree context menu'
 	);
 
@@ -63,6 +64,15 @@ async function run() {
 		})
 	});
 	disposable.dispose();
+
+	// The API for other extensions (no clusters in this profile, so no machines).
+	assert.ok(api.vms, 'api.vms is exported');
+	assert.deepEqual(await api.vms.list(), [], 'no machines without clusters');
+	assert.equal(await api.vms.get('nope'), undefined, 'an unknown machine is undefined');
+	await assert.rejects(api.vms.power('nope', 'start'), /No virtual machine is called "nope"/);
+
+	// The "vm" task provider answers (no machines, so no tasks). Running one needs a tasks.json: checked by hand.
+	assert.deepEqual(await vscode.tasks.fetchTasks({ type: 'vm' }), [], 'vm task provider is registered');
 
 	// UI surfaces open without throwing.
 	await vscode.commands.executeCommand('vmm.openOverview');

@@ -175,3 +175,28 @@ in Secret Storage by the core), and implements `ClusterConnection`: list nodes a
 actions, and `openConsole()` returning a byte stream (raw RFB for `vnc`, raw bytes for `serial`,
 the raw TCP connection to the RDP endpoint for `rdp` together with `getRdpTarget()`; the core runs
 the RDCleanPath gateway: pre-connection blob, TLS, relaying).
+
+Optional parts a provider can add for the core's features: `Capabilities.shutdownTimeoutSeconds`
+(the tree counts the wait down), `VmInfo.emulated` (a one-time notice that the guest is slow), and
+`readVmLog()` (the hypervisor's own log, shown under **VM: Show Log**).
+
+## Using VM Manager from another extension
+
+The core's API also has `vms` (core 0.13+), for extensions that want to drive machines rather than
+provide them, for example to start a test VM before running tests against it:
+
+```ts
+import { CORE_EXTENSION_ID, type VmManagerApi } from '@vmm/sdk';
+
+const api = await vscode.extensions.getExtension<VmManagerApi>(CORE_EXTENSION_ID)?.activate();
+if (api?.vms) {
+	await api.vms.power('web-01', 'start');                 // a name, "cluster/name" or VmSummary.id
+	await api.vms.waitForState('web-01', 'running');
+	const ssh = await api.vms.address('web-01', { ssh: true, timeoutMs: 120_000 }); // { host, port }
+	api.vms.onDidChangeState((e) => console.log(`${e.vm.name}: ${e.from} → ${e.to} (${e.cause})`));
+}
+```
+
+A `VmSummary` also carries the user's `favorite` and `groups`, for example to act on every machine of a
+group. Connecting to a cluster may ask the user to sign in. The same actions are available without code as
+the `vm` task type and the `vmm.getVmAddress` / `vmm.getVmSshPort` commands (see the README).

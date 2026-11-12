@@ -5,7 +5,7 @@
  *
  *   cluster;status=<status>;[signout;][rdp;]     rdp: the provider opens RDP consoles (remembered credentials)
  *   node;status=<status>;[create;][adopt;][import;]
- *   vm;state=<state>;flag;flag;     flags: power actions, busy, graphical, serial, terminal (serial without a display), external, media, ejectable, snapshots, guestexec, guestfiles, clone, details, edit, delete, istemplate (is a template), totemplate (can become one)
+ *   vm;state=<state>;flag;flag;     flags: power actions, busy, favorite, graphical, serial, terminal (serial without a display), external, media, ejectable, snapshots, guestexec, guestfiles, clone, details, edit, delete, istemplate (is a template), totemplate (can become one)
  *
  * While a power operation runs, `state` is the transitional state and only the actions allowed
  * during it are listed (see operations.ts), plus `busy`.
@@ -53,8 +53,10 @@ export function nodeContextValue(status: string, caps: Capabilities | undefined)
 	return `node;status=${status};${caps?.create ? 'create;' : ''}${caps?.adopt ? 'adopt;' : ''}${caps?.importFolder ? 'import;' : ''}`;
 }
 
-export function vmContextValue(vm: VmInfo & { operation?: PowerAction }, caps: Capabilities | undefined): string {
+export function vmContextValue(vm: VmInfo & { operation?: PowerAction; favorite?: boolean }, caps: Capabilities | undefined): string {
 	const flags: string[] = [];
+	// Marks are the core's own: offered whatever the provider can do.
+	if (vm.favorite) flags.push('favorite');
 	if (caps) {
 		const running = vm.operation;
 		// An attached VM without a control channel cannot be asked to do anything but die.

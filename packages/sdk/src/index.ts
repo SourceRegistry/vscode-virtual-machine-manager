@@ -176,6 +176,11 @@ export interface Capabilities {
 	guestExec?: boolean;
 	/** Implements `copyToGuest` / `copyFromGuest` (through a guest agent). */
 	guestFiles?: boolean;
+	/**
+	 * How long a graceful shut down or reboot waits for the guest before it fails with `timeout`, when the provider
+	 * waits a known time. The core counts it down while the guest shuts down.
+	 */
+	shutdownTimeoutSeconds?: number;
 	/** Implements `getPassthrough` / `planPassthrough` / `changePassthrough`. */
 	passthrough?: boolean;
 	/** Implements `scanExternalVms` / `adoptExternalVm`. */
@@ -227,6 +232,8 @@ export interface VmInfo {
 	template?: boolean;
 	/** `false` for an adopted VM without a control channel: it can only be observed and powered off. */
 	controllable?: boolean;
+	/** Runs in software emulation (another architecture, or no hardware acceleration): much slower than native. */
+	emulated?: boolean;
 }
 
 /** A hypervisor process found on the host that was not started by the extension. */
@@ -596,6 +603,11 @@ export interface ClusterConnection extends Disposable {
 	copyToGuest?(nodeId: string, vmId: string, localPath: string, guestPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void>;
 	/** Copies `guestPath` in the guest to a file on this computer (replacing it once complete). */
 	copyFromGuest?(nodeId: string, vmId: string, guestPath: string, localPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void>;
+	/**
+	 * The hypervisor's own log for a VM (QEMU's output, libvirt's domain log), or its last part. `undefined` when
+	 * there is none or it cannot be read from here; shown under the core's activity log of the machine.
+	 */
+	readVmLog?(nodeId: string, vmId: string): Promise<string | undefined>;
 	/** Lists running VMs that were not started by this extension. */
 	scanExternalVms?(nodeId: string): Promise<ExternalVmInfo[]>;
 	/** Attaches to one of them. `warning` explains a limited attachment (no control channel). */
@@ -647,6 +659,55 @@ export interface VmManagerApi {
 	registerProvider(provider: HypervisorProvider): Disposable;
 	/** Available in core versions that provide shared browser sign-in. */
 	browserLogin?<T>(options: BrowserLoginOptions<T>): Promise<T>;
+	/**
+	 * Machines for other extensions (core 0.13+; check that it is there). Read-only views and power actions on the
+	 * clusters the user added; connecting may ask the user to sign in. Not meant for providers.
+	 */
+	readonly vms?: VmControlApi;
+}
+
+/** A machine as other extensions see it. */
+export interface VmSummary {
+	/** Stable id (`cluster/node/vm`, URI-encoded parts): pass it back to the other calls. Names work there too. */
+	id: string;
+	name: string;
+	cluster: string;
+	node: string;
+	state: VmState;
+	ipAddresses: string[];
+	/** Marked as a favorite in VM Manager. */
+	favorite: boolean;
+	/** The VM Manager groups the user put it in. */
+	groups: string[];
+}
+
+export interface VmStateChangeEvent {
+	vm: VmSummary;
+	from: VmState;
+	to: VmState;
+	/** `vscode`: asked for from VS Code (a command, a task, this API); `outside`: the guest, another tool or a crash. */
+	cause: 'vscode' | 'outside';
+}
+
+/**
+ * `vm` arguments take a `VmSummary.id`, a machine's name (any case) or `cluster/name`; an unknown or ambiguous
+ * name rejects with a message that says so.
+ */
+export interface VmControlApi {
+	/** Every machine of every cluster (connecting to the ones not loaded yet). */
+	list(): Promise<VmSummary[]>;
+	get(vm: string): Promise<VmSummary | undefined>;
+	/** Starts, shuts down, reboots, powers off or resets a machine; resolves when the hypervisor has done it (a shut down when the machine is off). */
+	power(vm: string, action: PowerAction): Promise<void>;
+	/** Resolves once the machine is in `state` (polling), rejects after `timeoutMs` (default 5 minutes). */
+	waitForState(vm: string, state: VmState, timeoutMs?: number): Promise<VmSummary>;
+	/**
+	 * Where to reach the machine: its first IPv4 address (`address`), or with `ssh: true` a `host` and `port` an SSH
+	 * server answers on (a port forward or an address; checked by reading the SSH banner). Waits up to `timeoutMs`
+	 * (default 0: answer now) for one to appear.
+	 */
+	address(vm: string, options?: { ssh?: boolean; timeoutMs?: number }): Promise<{ host: string; port?: number } | undefined>;
+	readonly onDidChangeState: Event<VmStateChangeEvent>;
 }
 
 /** Shape of an entry in `contributes["vmManager.providers"]` of a provider extension. */
