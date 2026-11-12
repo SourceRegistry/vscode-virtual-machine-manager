@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.12.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.11.0...v0.12.0) (2026-11-12)
+
+
+### Features
+
+* offer only commands that can work ([2968f0a](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/2968f0aad4ababe9c8afa266ed393df5d897e0a7))
+
 # [0.11.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.10.0...v0.11.0) (2026-11-12)
 
 
