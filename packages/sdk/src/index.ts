@@ -172,6 +172,10 @@ export interface Capabilities {
 	remotePaths?: boolean;
 	/** Implements `addPortForward` / `removePortForward`. */
 	forwards?: boolean;
+	/** Implements `runInGuest` (through a guest agent; a VM without one answers `unavailable`). */
+	guestExec?: boolean;
+	/** Implements `copyToGuest` / `copyFromGuest` (through a guest agent). */
+	guestFiles?: boolean;
 	/** Implements `getPassthrough` / `planPassthrough` / `changePassthrough`. */
 	passthrough?: boolean;
 	/** Implements `scanExternalVms` / `adoptExternalVm`. */
@@ -309,6 +313,35 @@ export interface HostDevice {
 	description?: string;
 }
 
+/** A program to run in a guest (`runInGuest`). */
+export interface GuestCommand {
+	/** The program; with `shell`, a command line for the guest's shell (`/bin/sh -c`, `cmd.exe /c` on Windows). */
+	command: string;
+	args?: string[];
+	shell?: boolean;
+	/** Given to the program on stdin. */
+	input?: string;
+	/** How long to wait for it to finish (default 60 s). It keeps running in the guest after a timeout. */
+	timeoutMs?: number;
+}
+
+export interface GuestCommandResult {
+	/** Absent when it did not finish in time, or was ended by a signal. */
+	exitCode?: number;
+	signal?: number;
+	stdout: string;
+	stderr: string;
+	/** The agent cut the output short (its limit is a few MB). */
+	truncated: boolean;
+	timedOut: boolean;
+}
+
+/** Progress of a file copy to or from a guest. `total` is absent when the size is unknown. */
+export interface TransferProgress {
+	done: number;
+	total?: number;
+}
+
 export interface PortForward {
 	protocol: 'tcp' | 'udp';
 	hostAddress?: string;
@@ -391,6 +424,11 @@ export interface VmStats {
 	/** 0..1 of the CPU allotted to the VM. */
 	cpuUsage?: number;
 	memoryUsedMB?: number;
+	/**
+	 * Where `memoryUsedMB` comes from: `guest` is what the guest itself uses (balloon driver or agent),
+	 * `host` is the memory the hypervisor process holds on the host, which grows and rarely shrinks.
+	 */
+	memorySource?: 'guest' | 'host';
 	memoryMB?: number;
 	disks?: DiskStats[];
 	network?: { rxBytes: number; txBytes: number };
@@ -552,6 +590,12 @@ export interface ClusterConnection extends Disposable {
 	/** Forwards a host port to a guest port. Works on running VMs and is remembered for the next start. */
 	addPortForward?(nodeId: string, vmId: string, forward: PortForward): Promise<void>;
 	removePortForward?(nodeId: string, vmId: string, forward: PortForward): Promise<void>;
+	/** Runs a program in a running guest through its guest agent and waits for it. */
+	runInGuest?(nodeId: string, vmId: string, command: GuestCommand): Promise<GuestCommandResult>;
+	/** Copies a file on this computer to `guestPath` in the guest (replacing it). */
+	copyToGuest?(nodeId: string, vmId: string, localPath: string, guestPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void>;
+	/** Copies `guestPath` in the guest to a file on this computer (replacing it once complete). */
+	copyFromGuest?(nodeId: string, vmId: string, guestPath: string, localPath: string, onProgress?: (progress: TransferProgress) => void): Promise<void>;
 	/** Lists running VMs that were not started by this extension. */
 	scanExternalVms?(nodeId: string): Promise<ExternalVmInfo[]>;
 	/** Attaches to one of them. `warning` explains a limited attachment (no control channel). */

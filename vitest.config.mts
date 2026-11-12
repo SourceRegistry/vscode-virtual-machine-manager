@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig({
 	resolve: {
 		alias: [
-			{ find: /^@vmm\/sdk\/provisioning$/, replacement: fileURLToPath(new URL('./packages/sdk/src/provisioning/index.ts', import.meta.url)) },
+			// Node-only subpaths (`@vmm/sdk/provisioning`, `@vmm/sdk/guest`): a directory with an index.ts each.
+			{ find: /^@vmm\/sdk\/([\w-]+)$/, replacement: fileURLToPath(new URL('./packages/sdk/src/$1/index.ts', import.meta.url)) },
 			{ find: /^@vmm\/sdk$/, replacement: fileURLToPath(new URL('./packages/sdk/src/index.ts', import.meta.url)) }
 		]
 	},
