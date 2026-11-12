@@ -30,8 +30,8 @@ Claims about other tools are from memory and were not re-checked.
 | 11 | SPICE (audio, USB redirection, clipboard, dynamic resize) | 16 | Open |
 | 12 | Audio | 16 | Open |
 | 13 | Disk management and export | 15 | Open |
-| 14 | Public API for other extensions, tasks, tags, favorites | 18 | Open |
-| 15 | Notifications, per-VM log, shutdown countdown | 18 | Open |
+| 14 | Public API for other extensions, tasks, tags, favorites | 18 | Built on `feat/dev-ux` (`api.vms`, `vm` task, favorites, tags, group by) |
+| 15 | Notifications, per-VM log, shutdown countdown | 18 | Built on `feat/dev-ux` |
 | 16 | AI agents cannot see or drive VMs (language model tools / MCP) | 21 | Open |
 
 ## Quality and release hygiene
@@ -53,7 +53,7 @@ Claims about other tools are from memory and were not re-checked.
 | 6 | 19 | libvirt provider | Mostly merged |
 | 7 | 8 | Hyper-V remote | Open (no Windows host) |
 | 8 | 16 | Guest integration (memory, exec/copy, clipboard, audio, SPICE, shared folders) | Memory, exec, copy merged |
-| 9 | 18 | Dev UX (countdown, notifications, logs, API, tags) | Next |
+| 9 | 18 | Dev UX (countdown, notifications, logs, API, tags) | Built; marketplace page open |
 | 10 | 15 | Disk management | Open |
 | 11 | 17 | Network v2 | Open |
 | 12 | 20 | More providers | Open |
