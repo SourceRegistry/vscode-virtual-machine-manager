@@ -162,8 +162,10 @@ login screen (machines with a VNC display: QEMU, libvirt, Proxmox, Nutanix).
   action it is sent.
 
 Reading runs without asking, screenshots included. Keyboard and mouse are allowed per machine, for 15 minutes
-at a time: the first key or click asks, the status bar then shows **AI controls web-01**, and clicking it takes
-control back. Power off, hard reset, reverting and deleting snapshots are refused until you turn on
+at a time or until the agent hands them back: the first key or click asks, the status bar then shows
+**AI controls web-01**, and clicking it takes control back. `vmm.agent.screenControl` changes that for every
+machine (`ask`, `askEveryTime`, `allow`, `deny`) and `vmm.agent.screenControlPerMachine` per machine;
+**Always Allow This Machine** in the question sets `allow` for it. Power off, hard reset, reverting and deleting snapshots are refused until you turn on
 `vmm.agent.allowDestructive`, and still asked about then. What an agent did shows up in the
 machine's log (**VM: Show Log**). Results never contain cluster settings, passwords or tokens.
 
@@ -262,6 +264,8 @@ When a console does ask for a password, **VM: Forget Console Sign-in** removes t
 | `vmm.mcp.enabled` | `false` | Run the MCP server for AI agents outside VS Code on `127.0.0.1`. |
 | `vmm.mcp.port` | `7254` | Its port (`http://127.0.0.1:<port>/mcp`). |
 | `vmm.agent.allowDestructive` | `false` | Let AI agents power off, reset, revert or delete snapshots (each call still asked). |
+| `vmm.agent.screenControl` | `ask` | AI agents on a machine's keyboard and mouse: `ask` (once per 15 minutes), `askEveryTime`, `allow` or `deny`. |
+| `vmm.agent.screenControlPerMachine` | `{}` | The same per machine, by name or `cluster/name`, e.g. `{ "web-01": "allow" }`. |
 
 Providers add their own settings, for example `vmm.qemu.path`.
 
