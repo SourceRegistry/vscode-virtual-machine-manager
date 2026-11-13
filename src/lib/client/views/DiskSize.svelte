@@ -61,6 +61,9 @@
 	<Section>
 		<Card>
 			<form class="size-form" onsubmit={submit}>
+				{#if ask.note}
+					<p class="muted"><Icon icon="info-circle" margin="right" />{ask.note}</p>
+				{/if}
 				{#if grow && current !== undefined}
 					<p class="now">Now <strong>{formatBytes(current)}</strong>. Disks can only grow.</p>
 				{/if}

@@ -61,7 +61,7 @@ export async function manageDisks(deps: DiskFlowDeps, location: VmLocation, disk
 	const chosen = disk;
 	const actions: Action[] = [];
 	if (now.has('resize') && connection.resizeDisk) {
-		actions.push({ label: '$(arrow-both) Grow…', description: 'Make the disk larger', run: () => growDisk(deps, location, connection, chosen) });
+		actions.push({ label: '$(arrow-both) Grow…', description: 'Make the disk larger', run: () => growDisk(deps, location, connection, chosen, actions.length === 1 ? stopNote : undefined) });
 	}
 	if (now.has('convert') && connection.convertDisk) {
 		if (chosen.format === 'qcow2') actions.push({ label: '$(fold) Compact', description: 'Give space the guest freed back to the host', run: () => convertDisk(deps, location, connection, chosen, 'qcow2') });
@@ -78,6 +78,8 @@ export async function manageDisks(deps: DiskFlowDeps, location: VmLocation, disk
 		void vscode.window.showInformationMessage(stopNote ?? `Nothing can be done to ${chosen.label} here.`);
 		return;
 	}
+	// One thing to do is no choice: go straight to it (the form names what waits for a shut down).
+	if (actions.length === 1) return actions[0]!.run();
 	const action = await vscode.window.showQuickPick(actions, { title: `${chosen.label} of ${vmName} (${diskDescription(chosen)})`, placeHolder: stopNote ?? 'What do you want to do?' });
 	await action?.run();
 }
@@ -113,10 +115,10 @@ async function addDisk(deps: DiskFlowDeps, location: VmLocation, connection: Clu
 	}
 }
 
-async function growDisk(deps: DiskFlowDeps, location: VmLocation, connection: ClusterConnection, disk: DiskDevice): Promise<void> {
+async function growDisk(deps: DiskFlowDeps, location: VmLocation, connection: ClusterConnection, disk: DiskDevice, note?: string): Promise<void> {
 	const vmName = location.vm.name;
 	const current = disk.sizeBytes;
-	const answer = await askDiskSize(deps.extensionUri, { mode: 'grow', vmName, diskLabel: disk.label, currentBytes: current });
+	const answer = await askDiskSize(deps.extensionUri, { mode: 'grow', vmName, diskLabel: disk.label, currentBytes: current, ...(note ? { note } : {}) });
 	if (!answer) return;
 	try {
 		await withDiskProgress(`Growing ${disk.label} of ${vmName}…`, () => connection.resizeDisk!(location.ref.nodeId, location.ref.vmId, disk.id, answer.bytes));

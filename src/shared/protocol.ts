@@ -76,6 +76,8 @@ export interface DiskSizeRequest {
 	currentBytes?: number;
 	/** Adding: the image formats to choose from (the first is the default). */
 	formats?: Array<'qcow2' | 'raw'>;
+	/** Shown above the form, e.g. what else waits for a shut down. */
+	note?: string;
 }
 
 export interface DiskSizeAnswer {
