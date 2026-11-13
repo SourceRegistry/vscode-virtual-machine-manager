@@ -73,6 +73,20 @@ foreach ($item in $items) {
 		expect(await session.run('$null')).toEqual([]);
 	}, 60_000);
 
+	// An AppLocker or WDAC policy starts PowerShell in ConstrainedLanguage mode; switching to it first does the same
+	// without a policy (the machine-wide `__PSLockdownPolicy` switch would need an administrator).
+	it('fails at once with the reason when PowerShell runs in ConstrainedLanguage mode', async () => {
+		const locked = new PowerShellSession('locked', undefined, shell, "$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'");
+		try {
+			const started = Date.now();
+			await expect(locked.run('1 + 1', {}, 30_000)).rejects.toThrow(/ConstrainedLanguage mode/);
+			await expect(locked.run('1 + 1', {}, 30_000)).rejects.toThrow(/ConstrainedLanguage mode/);
+			expect(Date.now() - started).toBeLessThan(20_000);
+		} finally {
+			locked.dispose();
+		}
+	}, 60_000);
+
 	it('turns a thrown error into a rejection and keeps the session usable', async () => {
 		await expect(session.run("throw 'no such VM'")).rejects.toThrow(/no such VM/);
 		expect(await session.run('1 + 1')).toEqual([2]);
