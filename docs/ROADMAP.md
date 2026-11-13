@@ -306,7 +306,8 @@ Status: built on `feat/disk-management` (2026-11-13).
 - [x] Tests: size parsing, menus, helpers; end to end against real QEMU (add with snapshots, SATA limit, grow stopped and running, convert both ways and compact, export to VMDK / VHDX / VDI / raw / compressed qcow2, remove) and real libvirt (add, grow stopped and running, export, remove with and without the file)
 - [ ] Manual check in VS Code (QEMU and libvirt)
 - [ ] Hyper-V (`Resize-VHD`, `New-VHD`) and Proxmox disk API: **not local**, mocks only
-- [ ] Not done: shrinking, growing the guest's partition (cloud-init does it on the next boot of a cloud image), OVA import, live hot-plug
+- [ ] Not done: shrinking, growing the guest's partition (cloud-init does it on the next boot of a cloud image), OVA import
+- [ ] Later, if users ask: more while the machine runs. Export as a point-in-time copy (QEMU `blockdev-backup`, libvirt `backup-begin`), hot-plug a VirtIO disk (needs spare PCIe slots reserved at start), hot-unplug (needs the guest's cooperation), live compact / convert (QEMU `blockdev-mirror` and switch over)
 
 ### Phase 16: `feat/guest-integration`  (Local: partly)
 
