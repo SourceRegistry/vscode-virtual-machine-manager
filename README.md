@@ -95,8 +95,8 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
 * **Eject** and **Change ISO…** swap the installation media, also while the machine runs.
 * **Disks** on the details page (a gear beside each disk, + to add one; or *VM: Disks…* in the Command Palette) adds an empty disk or an existing image file (copied, or used where it is), grows one, converts it between
   qcow2 and raw, compacts it (gives space the guest freed back to the host), exports a copy for another
-  hypervisor (qcow2, raw, VMDK, VHDX, VDI) or removes it, keeping or deleting its file. Sizes are entered in MB or
-  GB in a dialog on the machine's details page. Disks only grow; after
+  hypervisor (qcow2, raw, VMDK, VHDX, VDI) or removes it, keeping or deleting its file. Type sizes as `40 GB` or
+  `512 MB`, or `+10 GB` for that much more. Disks only grow; after
   growing, extend the partition and file system inside the guest. Growing works while the machine runs; the rest
   waits until it is shut down, and the list says so. The details page shows each disk's size and the space it
   takes on the host.
