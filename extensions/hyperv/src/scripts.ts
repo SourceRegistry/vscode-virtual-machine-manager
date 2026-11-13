@@ -18,6 +18,10 @@ $vmHost = Get-VMHost
 }
 `;
 
+/**
+ * Cmdlet versions of the reads the provider now does through CIM (`*_CIM` below). Not used by the provider: kept as the
+ * reference `test/cim.e2e.test.ts` compares the CIM output with, field for field.
+ */
 export const LIST_VMS = String.raw`
 Get-VM | ForEach-Object {
 	$vm = $_
@@ -34,6 +38,229 @@ Get-VM | ForEach-Object {
 		Ips = @($vm.NetworkAdapters | ForEach-Object { $_.IPAddresses } | Where-Object { $_ })
 		ComPort = [string]$vm.ComPort1.Path
 		HasMedia = [bool](@(Get-VMDvdDrive -VM $vm | Where-Object { $_.Path }).Count)
+	}
+}
+`;
+
+/**
+ * Reads through CIM (WMI, `root\virtualization\v2`) instead of the Hyper-V cmdlets. The cmdlets answer from a
+ * cache that WMI events update about 4.5 s late, so a list or the settings right after a change show the old
+ * value; CIM reads the current state. Each class is queried once for all machines and grouped by VM id, the
+ * first GUID in an `InstanceID` (`Microsoft:<vm id>\...`); a checkpoint's settings carry the checkpoint's id
+ * there, so they never mix into the machine's. Output matches the cmdlet scripts field for field.
+ */
+const CIM_COMMON = String.raw`
+$ns = 'root\virtualization\v2'
+$guid = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+function VmOf([string]$instanceId) { if ($instanceId -match "^Microsoft:(?:GuestNetwork\\)?($guid)") { $Matches[1].ToUpperInvariant() } }
+function GroupByVm($items) { $map = @{}; foreach ($i in $items) { $k = VmOf $i.InstanceID; if ($k) { if (-not $map.ContainsKey($k)) { $map[$k] = New-Object System.Collections.ArrayList }; [void]$map[$k].Add($i) } }; $map }
+function First($map, $key) { if ($map.ContainsKey($key)) { $map[$key][0] } }
+function All($map, $key) { if ($map.ContainsKey($key)) { @($map[$key]) } else { @() } }
+function StateName([int]$s) {
+	switch ($s) { 2 { 'Running' } 3 { 'Off' } 6 { 'Saved' } 10 { 'Starting' } 11 { 'Reset' } 32768 { 'Paused' } 32769 { 'Saved' } 32770 { 'Starting' } 32771 { 'Running' } 32773 { 'Saving' } 32774 { 'Stopping' } 32776 { 'Pausing' } 32777 { 'Resuming' } default { 'Other' } }
+}
+function MediaOf($sasd) { [string]@($sasd.HostResource)[0] }
+$dvdDisk = 'Microsoft:Hyper-V:Virtual CD/DVD Disk'
+$hardDisk = 'Microsoft:Hyper-V:Virtual Hard Disk'
+`;
+
+export const LIST_VMS_CIM = CIM_COMMON + String.raw`
+$systems = @(Get-CimInstance -Namespace $ns -ClassName Msvm_ComputerSystem | Where-Object { $_.Name -match "^$guid$" })
+if (-not $systems.Count) { return }
+$vssd = @(Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemSettingData -Filter "VirtualSystemType='Microsoft:Hyper-V:System:Realized'")
+$settings = @{}; foreach ($s in $vssd) { $settings[([string]$s.VirtualSystemIdentifier).ToUpperInvariant()] = $s }
+$summary = @{}
+if ($vssd.Count) {
+	$svc = Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemManagementService
+	# 0 Name (the VM id), 4 NumberOfProcessors, 100 EnabledState, 103 MemoryUsage (MB), 105 UpTime (ms)
+	$r = Invoke-CimMethod -InputObject $svc -MethodName GetSummaryInformation -Arguments @{ SettingData = [CimInstance[]]$vssd; RequestedInformation = [uint32[]](0, 4, 100, 103, 105) }
+	foreach ($i in $r.SummaryInformation) { $summary[([string]$i.Name).ToUpperInvariant()] = $i }
+}
+$memory = GroupByVm (Get-CimInstance -Namespace $ns -ClassName Msvm_MemorySettingData)
+$disks = GroupByVm (Get-CimInstance -Namespace $ns -ClassName Msvm_StorageAllocationSettingData -Filter "ResourceSubType='$dvdDisk'")
+$serial = GroupByVm (Get-CimInstance -Namespace $ns -ClassName Msvm_SerialPortSettingData)
+$guest = GroupByVm (Get-CimInstance -Namespace $ns -ClassName Msvm_GuestNetworkAdapterConfiguration)
+foreach ($cs in $systems) {
+	$id = ([string]$cs.Name).ToUpperInvariant()
+	$s = $settings[$id]
+	$sum = $summary[$id]
+	$com1 = All $serial $id | Where-Object { $_.InstanceID.EndsWith('\0') } | Select-Object -First 1
+	[pscustomobject]@{
+		Id = ([string]$cs.Name).ToLowerInvariant()
+		Name = [string]$cs.ElementName
+		State = StateName $cs.EnabledState
+		Cpus = [int]$sum.NumberOfProcessors
+		MemoryMB = [int64]$sum.MemoryUsage
+		StartupMB = [int64](First $memory $id).VirtualQuantity
+		Uptime = [int64]([int64]$sum.UpTime / 1000)
+		Generation = if ([string]$s.VirtualSystemSubType -match 'SubType:(\d+)$') { [int]$Matches[1] } else { 1 }
+		Notes = (@($s.Notes) -join [string][char]10)
+		Ips = @(All $guest $id | ForEach-Object { $_.IPAddresses } | Where-Object { $_ })
+		ComPort = [string]@($com1.Connection)[0]
+		HasMedia = [bool](@(All $disks $id | Where-Object { MediaOf $_ }).Count)
+	}
+}
+`;
+
+/** Names of the Secure Boot templates Hyper-V ships, by id (`Msvm_VirtualSystemSettingData.SecureBootTemplateId`). */
+const SECURE_BOOT_TEMPLATES = String.raw`
+$templates = @{
+	'1734C6E8-3154-4DDA-BA5F-A874CC483422' = 'MicrosoftWindows'
+	'272E7447-90A4-4563-A4B9-8E4AB00526CE' = 'MicrosoftUEFICertificateAuthority'
+	'4292AE2B-EE2C-42B5-A969-DD8F8689F6F3' = 'OpenSourceShieldedVM'
+}
+`;
+
+export const GET_CONFIG_CIM = CIM_COMMON + SECURE_BOOT_TEMPLATES + String.raw`
+$id = ([string]$p.id).ToUpperInvariant()
+if ($id -notmatch "^$guid$") { throw 'Invalid virtual machine id' }
+$cs = Get-CimInstance -Namespace $ns -ClassName Msvm_ComputerSystem -Filter "Name='$id'"
+if (-not $cs) { throw 'Virtual machine not found' }
+$s = Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemSettingData -Filter "VirtualSystemIdentifier='$id' AND VirtualSystemType='Microsoft:Hyper-V:System:Realized'"
+# Every setting of the machine in one call (a query per class with LIKE scans all machines and is slower).
+$parts = @(Get-CimAssociatedInstance -InputObject $s -Association Msvm_VirtualSystemSettingDataComponent)
+function Parts([string]$class) { @($parts | Where-Object { $_.CimClass.CimClassName -eq $class }) }
+$cpu = Parts 'Msvm_ProcessorSettingData' | Select-Object -First 1
+$mem = Parts 'Msvm_MemorySettingData' | Select-Object -First 1
+$storage = @(Parts 'Msvm_StorageAllocationSettingData' | Sort-Object InstanceID)
+$com1 = Parts 'Msvm_SerialPortSettingData' | Where-Object { $_.InstanceID.EndsWith('\0') } | Select-Object -First 1
+# The first adapter in WMI's own order is the one Get-VMNetworkAdapter lists first; its connection is "<adapter>\C".
+$adapter = @(Parts 'Msvm_SyntheticEthernetPortSettingData') + @(Parts 'Msvm_EmulatedEthernetPortSettingData') | Select-Object -First 1
+$port = if ($adapter) { Parts 'Msvm_EthernetPortAllocationSettingData' | Where-Object { $_.InstanceID -eq ($adapter.InstanceID + '\C') } | Select-Object -First 1 }
+$switch = ''
+if ($port -and $port.EnabledState -ne 3 -and (@($port.HostResource)[0] -match ',Name="([^"]+)"')) {
+	$switch = [string](Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualEthernetSwitch -Filter ("Name='" + $Matches[1] + "'")).ElementName
+}
+$generation = if ([string]$s.VirtualSystemSubType -match 'SubType:(\d+)$') { [int]$Matches[1] } else { 1 }
+$secureBoot = $null
+if ($generation -eq 2) {
+	$secureBoot = if ($s.SecureBootEnabled) { $t = $templates[([string]$s.SecureBootTemplateId).ToUpperInvariant()]; if ($t) { $t } else { [string]$s.SecureBootTemplateId } } else { 'off' }
+}
+$comPort = [string]@($com1.Connection)[0]
+[pscustomobject]@{
+	Name = [string]$cs.ElementName
+	State = StateName $cs.EnabledState
+	Generation = $generation
+	Cpus = [int]$cpu.VirtualQuantity
+	MemoryMB = [int64]$mem.VirtualQuantity
+	DynamicMemory = [bool]$mem.DynamicMemoryEnabled
+	Switch = $switch
+	Iso = MediaOf ($storage | Where-Object { $_.ResourceSubType -eq $dvdDisk } | Select-Object -First 1)
+	SecureBoot = $secureBoot
+	AutoStart = switch ([int]$s.AutomaticStartupAction) { 2 { 'Nothing' } 3 { 'StartIfRunning' } 4 { 'Start' } default { [string]$s.AutomaticStartupAction } }
+	AutoStop = switch ([int]$s.AutomaticShutdownAction) { 2 { 'TurnOff' } 3 { 'Save' } 4 { 'ShutDown' } default { [string]$s.AutomaticShutdownAction } }
+	CheckpointType = switch ([int]$s.UserSnapshotType) { 2 { 'Disabled' } 3 { 'Production' } 4 { 'ProductionOnly' } 5 { 'Standard' } default { [string]$s.UserSnapshotType } }
+	Serial = [bool]$comPort
+	ComPort = $comPort
+	Notes = (@($s.Notes) -join [string][char]10)
+	Disks = (@($storage | Where-Object { $_.ResourceSubType -eq $hardDisk } | ForEach-Object { MediaOf $_ }) -join '; ')
+	Path = [string]$s.ConfigurationDataRoot
+}
+`;
+
+/**
+ * The machine's settings parts in one call, and its drives with the ids the cmdlets use:
+ * `<ControllerType>:<ControllerNumber>:<ControllerLocation>`. A drive's InstanceID ends in
+ * `\<controller number>\<location>\D` and its media (disk or ISO) has the same id ending in `\L`.
+ */
+const CIM_MACHINE = String.raw`
+$id = ([string]$p.id).ToUpperInvariant()
+if ($id -notmatch "^$guid$") { throw 'Invalid virtual machine id' }
+$vssd = Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemSettingData -Filter "VirtualSystemIdentifier='$id' AND VirtualSystemType='Microsoft:Hyper-V:System:Realized'"
+if (-not $vssd) { throw 'Virtual machine not found' }
+$parts = @(Get-CimAssociatedInstance -InputObject $vssd -Association Msvm_VirtualSystemSettingDataComponent)
+$byId = @{}; foreach ($x in $parts) { $byId[[string]$x.InstanceID] = $x }
+function Drives([string]$subType) {
+	@($parts | Where-Object { $_.ResourceSubType -eq $subType } | ForEach-Object {
+		if ($_.InstanceID -match '^(.*)\\(\d+)\\(\d+)\\D$') {
+			$base = $Matches[1]; $number = [int]$Matches[2]; $location = [int]$Matches[3]
+			$controller = $byId[$base + '\' + $number]
+			$type = if ([string]$controller.ResourceSubType -like '*IDE*') { 'IDE' } else { 'SCSI' }
+			[pscustomobject]@{ Id = ('{0}:{1}:{2}' -f $type, $number, $location); Order = ('{0}{1:D4}{2:D4}' -f $type, $number, $location); Drive = $_; Media = $byId[$_.InstanceID.Substring(0, $_.InstanceID.Length - 1) + 'L'] }
+		}
+	} | Sort-Object Order)
+}
+`;
+
+export const VM_DETAILS_CIM = CIM_COMMON + CIM_MACHINE + String.raw`
+$disks = @()
+foreach ($d in (Drives 'Microsoft:Hyper-V:Synthetic Disk Drive')) {
+	$path = MediaOf $d.Media
+	$size = $null; $format = $null
+	if ($path) { try { $vhd = Get-VHD -Path $path -ErrorAction Stop; $size = [int64]$vhd.Size; $format = $vhd.VhdFormat.ToString() } catch { } }
+	$disks += [pscustomobject]@{ Id = $d.Id; Kind = 'disk'; Path = $path; SizeBytes = $size; Format = $format }
+}
+foreach ($d in (Drives 'Microsoft:Hyper-V:Synthetic DVD Drive')) {
+	$path = MediaOf $d.Media
+	$size = $null
+	if ($path -and (Test-Path -LiteralPath $path)) { $size = [int64](Get-Item -LiteralPath $path).Length }
+	$disks += [pscustomobject]@{ Id = $d.Id; Kind = 'cdrom'; Path = $path; SizeBytes = $size; Format = 'iso' }
+}
+$switches = @{}; foreach ($sw in (Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualEthernetSwitch)) { $switches[[string]$sw.Name] = [string]$sw.ElementName }
+$guest = GroupByVm (Get-CimInstance -Namespace $ns -ClassName Msvm_GuestNetworkAdapterConfiguration -Filter "InstanceID LIKE 'Microsoft:GuestNetwork\\$id\\%'")
+$adapters = @($parts | Where-Object { $_.CimClass.CimClassName -in 'Msvm_SyntheticEthernetPortSettingData', 'Msvm_EmulatedEthernetPortSettingData' })
+$nics = @($adapters | ForEach-Object {
+	$a = $_
+	$port = $byId[$a.InstanceID + '\C']
+	$connected = $port -and $port.EnabledState -ne 3 -and (@($port.HostResource)[0] -match ',Name="([^"]+)"')
+	$switch = if ($connected) { $switches[$Matches[1]] } else { '' }
+	$suffix = $a.InstanceID.Substring($a.InstanceID.IndexOf('\'))
+	$config = All $guest $id | Where-Object { $_.InstanceID.EndsWith($suffix) } | Select-Object -First 1
+	[pscustomobject]@{ Name = [string]$a.ElementName; Mac = [string]$a.Address; Switch = [string]$switch; Ips = @(@($config.IPAddresses) | Where-Object { $_ }); Connected = [bool]$connected; Legacy = ($a.CimClass.CimClassName -eq 'Msvm_EmulatedEthernetPortSettingData') }
+})
+[pscustomobject]@{ Generation = if ([string]$vssd.VirtualSystemSubType -match 'SubType:(\d+)$') { [int]$Matches[1] } else { 1 }; Disks = $disks; Nics = $nics }
+`;
+
+/**
+ * Inserts, changes or ejects ($p.path empty) the ISO of a DVD drive through WMI. The cmdlet (Set-VMDvdDrive)
+ * resolves the drive from its cache, which is still the old one a few seconds after a change, so an eject
+ * followed by an insert failed with "object not found".
+ */
+export const SET_MEDIA_CIM = CIM_COMMON + CIM_MACHINE + String.raw`
+function WaitFor($result, [string]$what) {
+	if ($result.ReturnValue -eq 0) { return }
+	if ($result.ReturnValue -ne 4096) { throw "$what failed (code $($result.ReturnValue))" }
+	$job = $result.Job | Get-CimInstance
+	while ($job.JobState -in 2, 3, 4) { Start-Sleep -Milliseconds 100; $job = $job | Get-CimInstance }
+	if ($job.JobState -ne 7) { throw "$what failed: $($job.ErrorDescription)" }
+}
+function AsText($instance) {
+	$serializer = [Microsoft.Management.Infrastructure.Serialization.CimSerializer]::Create()
+	[Text.Encoding]::Unicode.GetString($serializer.Serialize($instance, [Microsoft.Management.Infrastructure.Serialization.InstanceSerializationOptions]::None))
+}
+$drive = Drives 'Microsoft:Hyper-V:Synthetic DVD Drive' | Where-Object { $_.Id -eq [string]$p.device } | Select-Object -First 1
+if (-not $drive) { throw "DVD drive $($p.device) not found" }
+$svc = Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemManagementService
+$path = [string]$p.path
+if (-not $path) {
+	if ($drive.Media) { WaitFor (Invoke-CimMethod -InputObject $svc -MethodName RemoveResourceSettings -Arguments @{ ResourceSettings = [CimInstance[]]@($drive.Media) }) 'Eject' }
+	return
+}
+if (-not (Test-Path -LiteralPath $path)) { throw "Image not found: $path" }
+if ($drive.Media) {
+	$media = $drive.Media
+	$media.HostResource = [string[]]@($path)
+	WaitFor (Invoke-CimMethod -InputObject $svc -MethodName ModifyResourceSettings -Arguments @{ ResourceSettings = [string[]]@(AsText $media) }) 'Changing the image'
+	return
+}
+# A new media setting from the defaults of the host's DVD image pool, attached to the drive.
+$pool = Get-CimInstance -Namespace $ns -ClassName Msvm_ResourcePool -Filter "ResourceSubType='$dvdDisk' AND Primordial=True"
+$capabilities = Get-CimAssociatedInstance -InputObject $pool -ResultClassName Msvm_AllocationCapabilities
+$media = (Get-CimAssociatedInstance -InputObject $capabilities -Association Msvm_SettingsDefineCapabilities | Where-Object { $_.InstanceID -like '*\Default' } | Select-Object -First 1).Clone()
+$controllerPath = [string]$drive.Drive.Parent
+$media.Parent = $controllerPath.Substring(0, $controllerPath.IndexOf('InstanceID="')) + 'InstanceID="' + $drive.Drive.InstanceID.Replace('\', '\\') + '"'
+$media.HostResource = [string[]]@($path)
+WaitFor (Invoke-CimMethod -InputObject $svc -MethodName AddResourceSettings -Arguments @{ AffectedConfiguration = $vssd; ResourceSettings = [string[]]@(AsText $media) }) 'Inserting the image'
+`;
+
+export const SNAPSHOT_LIST_CIM = String.raw`
+$id = ([string]$p.id).ToUpperInvariant()
+if ($id -notmatch '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$') { throw 'Invalid virtual machine id' }
+Get-CimInstance -Namespace 'root\virtualization\v2' -ClassName Msvm_VirtualSystemSettingData -Filter "VirtualSystemIdentifier='$id' AND VirtualSystemType='Microsoft:Hyper-V:Snapshot:Realized'" | ForEach-Object {
+	[pscustomobject]@{
+		Id = ([string]$_.ConfigurationID).ToLowerInvariant()
+		Name = [string]$_.ElementName
+		Created = [int64]([DateTimeOffset]$_.CreationTime).ToUnixTimeMilliseconds()
 	}
 }
 `;
@@ -279,20 +506,6 @@ $vm = Get-VM -Id $p.id
 	AssignedMB = [int64]($vm.MemoryAssigned / 1MB)
 	DemandMB = [int64]($vm.MemoryDemand / 1MB)
 	StartupMB = [int64]($vm.MemoryStartup / 1MB)
-}
-`;
-
-/** $p.device is "<ControllerType>:<ControllerNumber>:<ControllerLocation>"; an empty $p.path ejects. */
-export const SET_MEDIA = String.raw`
-$vm = Get-VM -Id $p.id
-$type, $number, $location = ([string]$p.device).Split(':')
-$dvd = Get-VMDvdDrive -VM $vm | Where-Object { $_.ControllerType.ToString() -eq $type -and $_.ControllerNumber -eq [int]$number -and $_.ControllerLocation -eq [int]$location }
-if (-not $dvd) { throw "DVD drive $($p.device) not found" }
-if ($p.path) {
-	if (-not (Test-Path -LiteralPath $p.path)) { throw "Image not found: $($p.path)" }
-	Set-VMDvdDrive -VMDvdDrive $dvd -Path ([string]$p.path)
-} else {
-	Set-VMDvdDrive -VMDvdDrive $dvd -Path $null
 }
 `;
 
