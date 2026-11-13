@@ -2260,6 +2260,7 @@
     "@vscode/vsce": "^4.1.0",
     "esbuild": "^0.28.2",
     "happy-dom": "^21.0.4",
+    "minimatch": "^11.0.8",
     "sass": "^1.107.1",
     "semantic-release": "^25.0.9",
     "svelte": "^5.57.3",
@@ -2275,5 +2276,11 @@
     "@xterm/xterm": "^6.0.0",
     "bootstrap-icons": "^1.13.2",
     "uplot": "^1.6.32"
+  },
+  "overrides": {
+    "npm": "^12.2.2",
+    "@vscode/vsce": {
+      "minimatch": "^11.0.8"
+    }
   }
 }
