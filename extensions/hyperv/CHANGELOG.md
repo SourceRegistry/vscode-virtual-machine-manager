@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.1](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-hyperv-v0.10.0...vm-manager-hyperv-v0.10.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* Hyper-V checkpoints, and delete with disks after checkpoints ([b933a0d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/b933a0dae2d99ce7a1b4ac127f8f52f81055e874))
+* read Hyper-V state through CIM instead of the cached cmdlets ([0edf94e](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/0edf94e614aa6cf5bddf507a4e2561124569a990))
+* say why Hyper-V fails when PowerShell is in ConstrainedLanguage mode ([b6c42e5](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/b6c42e576d4f2422feb78d922da488cc21798a08))
+
 # [0.10.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-hyperv-v0.9.0...vm-manager-hyperv-v0.10.0) (2026-11-13)
 
 
