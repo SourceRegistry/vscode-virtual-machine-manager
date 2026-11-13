@@ -1,5 +1,22 @@
 # Changelog
 
+# [0.15.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.14.0...v0.15.0) (2026-11-13)
+
+
+### Bug Fixes
+
+* keep Disks… out of the context menus; align the size modal ([5e85870](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/5e858702b019c03ec5456ded5f41a966434448d1))
+* skip the disk action menu when there is only one thing to do ([6476b97](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/6476b97b3cf3e2e890d922085122f135c29e8de0))
+
+
+### Features
+
+* attach an existing disk image ([59558a6](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/59558a61f472ca0c2a57cd60f2a5ad4cc3fe28f2))
+* disk management for QEMU and libvirt ([994ff94](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/994ff94537a68e129b770f777562c8ac1568f89d))
+* disk size form as a modal on the details page ([0044807](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/0044807b3cb1a7a4db1ea3b65473581c90ba997e))
+* disk sizes and images through VS Code's own inputs ([7ac36a1](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/7ac36a1b08cffd731ed14c1261fb233f390769f5))
+* disk sizes in a form with a number field and MB/GB ([926899d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/926899d02f7b72fe1f6bbf669b4da4eefe16f352))
+
 # [0.14.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.13.0...v0.14.0) (2026-11-12)
 
 
