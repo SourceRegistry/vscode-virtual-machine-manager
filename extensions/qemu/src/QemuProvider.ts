@@ -17,7 +17,11 @@ import {
 	type ConsoleStream,
 	type CreateProgress,
 	type DeleteOptions,
+	type DiskDevice,
+	type DiskExportOptions,
+	type DiskProgress,
 	type DiskStats,
+	type NewDisk,
 	type Disposable,
 	type Event,
 	type ExternalVmInfo,
@@ -56,6 +60,7 @@ import { freeLocalPort, LocalHost, type Host } from './host';
 import { SshHost, validateSshTarget } from './sshHost';
 import { buildIso, cloudFields, cloudInitProblem, ensureImage, findImage, hostnameFor, imageFileName, metaData, parseKeys, sha512Crypt, SOURCE_ISO, userData } from '@vmm/sdk/provisioning';
 import { cloneDefinition } from './clone';
+import { addDiskProblem, convertArgs, convertTarget, diskIndex, exportArgs, newDiskFile } from './disks';
 import { commonSnapshots, qmpSnapshots, snapshotNameProblem, type QemuSnapshotInfo, type QmpSnapshotBlock } from './snapshots';
 import { walkFiles } from './hostProcess';
 import { iommuEnabled, listPciHost, listUsbHost, pciDriver, runPrivileged } from './hostDevices';
@@ -95,6 +100,14 @@ import { gracefulShutdown } from './shutdown';
 import { telnetStream } from './telnet';
 
 const NODE_ID = 'local';
+
+/** What `qemu-img info --output=json` reports about an image. */
+interface ImageInfo {
+	'virtual-size'?: number;
+	'actual-size'?: number;
+	format?: string;
+}
+
 const VM_NAME = /^[\w .()-]{1,64}$/;
 
 /** Shown only for a remote connection. `default` covers clusters saved before the choice existed. */
@@ -373,7 +386,10 @@ export class QemuConnection implements ClusterConnection {
 		importFolder: true,
 		stats: true,
 		guestExec: true,
-		guestFiles: true
+		guestFiles: true,
+		diskOperations: ['add', 'remove', 'resize', 'convert', 'export'],
+		diskOperationsWhileRunning: ['resize'],
+		diskExportConverts: true
 	};
 	private readonly startQueue = new SerialQueue();
 	private readonly cpuSamples = new Map<string, CpuSample>();
@@ -985,6 +1001,7 @@ export class QemuConnection implements ClusterConnection {
 					label: `Hard disk ${index + 1}`,
 					path: file,
 					sizeBytes: info?.['virtual-size'],
+					allocatedBytes: info?.['actual-size'],
 					format: info?.format,
 					bus
 				};
@@ -997,10 +1014,10 @@ export class QemuConnection implements ClusterConnection {
 		];
 	}
 
-	private async imageInfo(file: string): Promise<{ 'virtual-size'?: number; format?: string } | undefined> {
+	private async imageInfo(file: string): Promise<ImageInfo | undefined> {
 		try {
 			const { stdout } = await this.host.exec(this.qemu.img, ['info', '--output=json', file], { timeout: 10_000 });
-			return JSON.parse(stdout) as { 'virtual-size'?: number; format?: string };
+			return JSON.parse(stdout) as ImageInfo;
 		} catch {
 			return undefined;
 		}
@@ -1107,6 +1124,154 @@ export class QemuConnection implements ClusterConnection {
 	async insertMedia(_nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void> {
 		if (!(await this.host.exists(imagePath))) throw new ProviderError(`Image not found: ${imagePath}`, 'invalid');
 		await this.changeMedia(vmId, deviceId, imagePath);
+	}
+
+	// -----------------------------------------------------------------------------------------
+	// Disks
+	// -----------------------------------------------------------------------------------------
+
+	/** The definition of a VM whose disks can be changed, and whether it runs. */
+	private async diskVm(vmId: string, needsStopped: string | undefined): Promise<{ def: VmDefinition; runtime: VmRuntime | undefined }> {
+		const def = await this.definition(vmId);
+		if (def.origin === 'adopted') {
+			throw new ProviderError('The disks of a VM that was attached from outside cannot be changed. Import it or recreate it here first.', 'unsupported');
+		}
+		const runtime = await this.runtime(vmId);
+		if (runtime && needsStopped) throw new ProviderError(`Shut down "${def.name}" before ${needsStopped}.`, 'invalid');
+		return { def, runtime };
+	}
+
+	private diskFile(def: VmDefinition, diskId: string): { index: number; file: string } {
+		const index = diskIndex(diskId, def.disks.length);
+		if (index === undefined) throw new ProviderError(`${def.name} has no disk ${diskId}`, 'notFound');
+		return { index, file: def.disks[index]! };
+	}
+
+	private async img(args: string[], failure: string, timeout = 6 * 3600_000): Promise<void> {
+		try {
+			await this.host.exec(this.qemu.img, args, { timeout });
+		} catch (error) {
+			const detail = String((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
+			throw new ProviderError(`${failure}: ${detail}`, 'failed');
+		}
+	}
+
+	async addDisk(_nodeId: string, vmId: string, disk: NewDisk): Promise<DiskDevice> {
+		const { def } = await this.diskVm(vmId, 'adding a disk');
+		const format = disk.format ?? 'qcow2';
+		if (!Number.isFinite(disk.sizeBytes) || disk.sizeBytes < 1024 ** 2) throw new ProviderError('Give the disk at least 1 MB.', 'invalid');
+		const bus = guestArch(def) === 'aarch64' ? 'virtio' : def.diskBus;
+		const problem = addDiskProblem(def.disks.length, bus);
+		if (problem) throw new ProviderError(problem, 'invalid');
+		const snapshots = def.disks.length ? await this.listSnapshots(NODE_ID, vmId) : [];
+		if (snapshots.length && format !== 'qcow2') throw new ProviderError('This machine has snapshots, which need qcow2 disks: add a qcow2 disk.', 'invalid');
+		const dir = this.dir(vmId);
+		// A file left behind by a removed disk keeps its name taken.
+		const taken = [...def.disks];
+		let file = newDiskFile(dir, taken, format, (...parts) => this.host.path.join(...parts));
+		while (await this.host.exists(file)) {
+			taken.push(file);
+			file = newDiskFile(dir, taken, format, (...parts) => this.host.path.join(...parts));
+		}
+		await this.img(['create', '-f', format, file, String(Math.round(disk.sizeBytes))], 'Could not create the disk', 120_000);
+		try {
+			// The machine's snapshots cover every disk: the new one gets them too, empty, as it was when they were taken.
+			for (const snapshot of snapshots) await this.snapshotImg(['-c', snapshot.name, file], `Could not prepare ${path.basename(file)} for snapshot "${snapshot.name}"`);
+			def.disks = [...def.disks, file];
+			await this.saveDefinition(def);
+		} catch (error) {
+			await this.host.rm(file).catch(() => undefined);
+			throw error;
+		}
+		this.log.info(`Added ${file} (${disk.sizeBytes} bytes, ${format}) to ${def.name}`);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+		const index = def.disks.length - 1;
+		return { id: `disk${index}`, kind: 'disk', label: `Hard disk ${index + 1}`, path: file, sizeBytes: disk.sizeBytes, format, bus };
+	}
+
+	async removeDisk(_nodeId: string, vmId: string, diskId: string, options: { deleteFile: boolean }): Promise<void> {
+		const { def } = await this.diskVm(vmId, 'removing a disk');
+		const { index, file } = this.diskFile(def, diskId);
+		def.disks = def.disks.filter((_, i) => i !== index);
+		await this.saveDefinition(def);
+		if (options.deleteFile) await this.host.rm(file);
+		this.log.info(`Removed ${file} from ${def.name}${options.deleteFile ? ' and deleted it' : ''}`);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
+	async resizeDisk(_nodeId: string, vmId: string, diskId: string, sizeBytes: number): Promise<void> {
+		const { def, runtime } = await this.diskVm(vmId, undefined);
+		const { index, file } = this.diskFile(def, diskId);
+		const info = runtime ? undefined : await this.imageInfo(file);
+		const current = runtime
+			? (await (await this.client(vmId, runtime)).execute<QmpBlock[]>('query-block')).find((b) => b.device === `disk${index}`)?.inserted?.image?.['virtual-size']
+			: info?.['virtual-size'];
+		if (current === undefined) throw new ProviderError(`The size of ${path.basename(file)} cannot be read`, 'failed');
+		if (!Number.isFinite(sizeBytes) || sizeBytes <= current) {
+			throw new ProviderError('Disks can only grow: give a size larger than the current one.', 'invalid');
+		}
+		const size = Math.round(sizeBytes);
+		if (runtime) {
+			// The guest sees the new size at once; QEMU refuses to shrink.
+			const client = await this.client(vmId, runtime);
+			try {
+				await client.execute('block_resize', { device: `disk${index}`, size });
+			} catch (error) {
+				throw new ProviderError(`Could not grow ${path.basename(file)}: ${(error as Error).message}`, 'failed');
+			}
+		} else {
+			await this.img(['resize', '-f', info?.format ?? 'raw', file, String(size)], `Could not grow ${path.basename(file)}`, 10 * 60_000);
+		}
+		this.log.info(`Grew ${file} of ${def.name} to ${size} bytes${runtime ? ' (running)' : ''}`);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
+	async convertDisk(_nodeId: string, vmId: string, diskId: string, format: 'qcow2' | 'raw', progress?: (update: DiskProgress) => void): Promise<void> {
+		const { def } = await this.diskVm(vmId, 'converting a disk');
+		const { index, file } = this.diskFile(def, diskId);
+		if (format !== 'qcow2' && format !== 'raw') throw new ProviderError(`Disks can be converted to qcow2 or raw, not ${String(format)}`, 'invalid');
+		const snapshots = await this.listSnapshots(NODE_ID, vmId).catch(() => []);
+		if (snapshots.length) {
+			throw new ProviderError(`Converting a disk drops the snapshots inside it: delete the ${snapshots.length} snapshot${snapshots.length === 1 ? '' : 's'} of ${def.name} first.`, 'invalid');
+		}
+		const info = await this.imageInfo(file);
+		if (!info?.format) throw new ProviderError(`${path.basename(file)} cannot be read`, 'failed');
+		const { temp, final } = convertTarget(file, format);
+		if (final !== file && (await this.host.exists(final))) throw new ProviderError(`${final} already exists`, 'invalid');
+		progress?.({ message: `Writing ${path.basename(final)}…` });
+		await this.host.rm(temp);
+		try {
+			await this.img(convertArgs(file, info.format, temp, format), `Could not convert ${path.basename(file)}`);
+			await this.host.rename(temp, final);
+		} catch (error) {
+			await this.host.rm(temp).catch(() => undefined);
+			throw error;
+		}
+		if (final !== file) {
+			def.disks = def.disks.map((d, i) => (i === index ? final : d));
+			await this.saveDefinition(def);
+			await this.host.rm(file);
+		}
+		this.log.info(`Converted ${file} of ${def.name} to ${format}${final !== file ? ` (${final})` : ''}`);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+	}
+
+	async exportDisk(_nodeId: string, vmId: string, diskId: string, targetPath: string, options: DiskExportOptions, progress?: (update: DiskProgress) => void): Promise<void> {
+		// A running guest keeps writing: a copy taken now would be torn.
+		const { def } = await this.diskVm(vmId, 'exporting a disk');
+		const { file } = this.diskFile(def, diskId);
+		if (targetPath === file) throw new ProviderError('Export to another file than the disk itself.', 'invalid');
+		const info = await this.imageInfo(file);
+		if (!info?.format) throw new ProviderError(`${path.basename(file)} cannot be read`, 'failed');
+		let args: string[];
+		try {
+			args = exportArgs(file, info.format, targetPath, options);
+		} catch (error) {
+			throw new ProviderError((error as Error).message, 'invalid');
+		}
+		progress?.({ message: `Writing ${path.basename(targetPath)}…` });
+		await this.img(args, `Could not export ${path.basename(file)}`);
+		this.log.info(`Exported ${file} of ${def.name} to ${targetPath} (${options.format}${options.compress ? ', compressed' : ''})`);
 	}
 
 	async cloneVm(_nodeId: string, vmId: string, name: string): Promise<VmInfo> {

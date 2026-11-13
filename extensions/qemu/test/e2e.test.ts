@@ -334,4 +334,72 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 			expect(fs.existsSync(disk)).toBe(true);
 		}, 90_000);
 	});
+
+	it('adds, grows, converts, exports and removes disks', async () => {
+		const MB = 1024 ** 2;
+		const disks = async () => (await connection.getVmDetails!('local', vmId)).disks.filter((d) => d.kind === 'disk');
+		const info = (file: string) => JSON.parse(execFileSync('qemu-img', ['info', '--output=json', file], { encoding: 'utf8' })) as { format: string; 'virtual-size': number };
+		if ((await state()) !== 'stopped') await connection.power('local', vmId, 'stop');
+
+		// A snapshot taken before a disk is added still covers the machine afterwards.
+		await connection.createSnapshot!('local', vmId, 'before');
+		const added = await connection.addDisk!('local', vmId, { sizeBytes: 64 * MB });
+		expect(added).toMatchObject({ id: 'disk1', format: 'qcow2', sizeBytes: 64 * MB });
+		expect((await connection.listSnapshots!('local', vmId)).map((s) => s.name)).toEqual(['before']);
+		expect((await disks())[1]).toMatchObject({ id: 'disk1', sizeBytes: 64 * MB, format: 'qcow2' });
+		expect((await disks())[1]!.allocatedBytes).toBeGreaterThan(0);
+		await expect(connection.addDisk!('local', vmId, { sizeBytes: 64 * MB, format: 'raw' })).rejects.toThrow(/snapshots/);
+		await expect(connection.convertDisk!('local', vmId, 'disk1', 'raw')).rejects.toThrow(/delete the 1 snapshot/);
+		await connection.deleteSnapshot!('local', vmId, 'before');
+
+		// SATA: five disks at most.
+		for (let n = 2; n < 5; n++) await connection.addDisk!('local', vmId, { sizeBytes: 8 * MB, format: 'raw' });
+		await expect(connection.addDisk!('local', vmId, { sizeBytes: 8 * MB })).rejects.toThrow(/SATA controller holds 5/);
+		for (const id of ['disk4', 'disk3', 'disk2']) {
+			const file = (await disks()).find((d) => d.id === id)!.path!;
+			await connection.removeDisk!('local', vmId, id, { deleteFile: true });
+			expect(fs.existsSync(file)).toBe(false);
+		}
+
+		// Grow while stopped; never shrink.
+		await connection.resizeDisk!('local', vmId, 'disk1', 128 * MB);
+		expect((await disks())[1]!.sizeBytes).toBe(128 * MB);
+		await expect(connection.resizeDisk!('local', vmId, 'disk1', 64 * MB)).rejects.toThrow(/only grow/);
+
+		// Convert to raw and back; compact in place.
+		const qcow = (await disks())[1]!.path!;
+		await connection.convertDisk!('local', vmId, 'disk1', 'raw');
+		const raw = (await disks())[1]!;
+		expect(raw).toMatchObject({ format: 'raw', sizeBytes: 128 * MB });
+		expect(raw.path).toMatch(/\.img$/);
+		expect(fs.existsSync(qcow)).toBe(false);
+		await connection.convertDisk!('local', vmId, 'disk1', 'qcow2');
+		await connection.convertDisk!('local', vmId, 'disk1', 'qcow2');
+		expect((await disks())[1]).toMatchObject({ path: qcow, format: 'qcow2', sizeBytes: 128 * MB });
+		expect(fs.readdirSync(path.dirname(qcow)).filter((f) => f.includes('converting'))).toEqual([]);
+
+		// Export to the formats of other hypervisors.
+		for (const [format, ext] of [['vmdk', 'vmdk'], ['vhdx', 'vhdx'], ['vdi', 'vdi'], ['raw', 'img']] as const) {
+			const target = path.join(dir, `export.${ext}`);
+			await connection.exportDisk!('local', vmId, 'disk1', target, { format });
+			expect(info(target)).toMatchObject({ format, 'virtual-size': 128 * MB });
+		}
+		const compressed = path.join(dir, 'export-c.qcow2');
+		await connection.exportDisk!('local', vmId, 'disk1', compressed, { format: 'qcow2', compress: true });
+		expect(info(compressed).format).toBe('qcow2');
+
+		// Running: grow through QMP, everything else waits for a shut down.
+		await connection.power('local', vmId, 'start');
+		await new Promise((r) => setTimeout(r, 1500));
+		await connection.resizeDisk!('local', vmId, 'disk1', 256 * MB);
+		expect((await disks())[1]!.sizeBytes).toBe(256 * MB);
+		await expect(connection.addDisk!('local', vmId, { sizeBytes: 8 * MB })).rejects.toThrow(/Shut down/);
+		await expect(connection.exportDisk!('local', vmId, 'disk1', path.join(dir, 'x.qcow2'), { format: 'qcow2' })).rejects.toThrow(/Shut down/);
+		await connection.power('local', vmId, 'stop');
+
+		// Remove, keeping the file.
+		await connection.removeDisk!('local', vmId, 'disk1', { deleteFile: false });
+		expect((await disks()).map((d) => d.id)).toEqual(['disk0']);
+		expect(fs.existsSync(qcow)).toBe(true);
+	}, 120_000);
 });

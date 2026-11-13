@@ -15,6 +15,7 @@ import { VmDashboardPanel } from '../webview/VmDashboardPanel';
 import { VmSettingsPanel } from '../webview/VmSettingsPanel';
 import { errorMessage, log, showError } from '../util/log';
 import * as snapshotFlow from '../snapshots/flow';
+import { manageDisks as manageDisksFlow } from '../disks/flow';
 import { addSshForward, addToSshConfig, connectSsh, removeFromSshConfig } from '../ssh/connect';
 import { copyFileFromGuest, copyFileToGuest, runCommandInGuest } from '../guest/commands';
 import { deleteVmDetail } from '../../shared/deleteDetail';
@@ -340,6 +341,13 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		} catch (error) {
 			await showError(`Could not change the media of ${location.vm.name}`, error);
 		}
+	}
+
+	async function manageDisks(arg: Arg): Promise<void> {
+		const location = await resolveVm(arg, 'Select a virtual machine to manage the disks of', (l) => !!l.cluster.connection?.capabilities.diskOperations?.length && l.vm.origin !== 'adopted');
+		if (!location) return;
+		const diskId = asRecord(arg)?.diskId;
+		await manageDisksFlow({ manager, activity }, location, typeof diskId === 'string' ? diskId : undefined);
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -1038,6 +1046,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		}),
 		register('vmm.ejectMedia', (arg) => ejectMedia(arg)),
 		register('vmm.changeMedia', (arg) => changeMedia(arg)),
+		register('vmm.manageDisks', (arg) => manageDisks(arg)),
 		register('vmm.connectSsh', (arg) => connectWithSsh(arg)),
 		register('vmm.addSshForward', (arg) => forwardSsh(arg)),
 		register('vmm.runInGuest', (arg) => guest(arg, 'run')),

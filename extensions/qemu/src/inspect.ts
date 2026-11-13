@@ -12,7 +12,7 @@ export interface QmpBlock {
 		ro?: boolean;
 		drv?: string;
 		file?: string;
-		image?: { filename?: string; format?: string; 'virtual-size'?: number };
+		image?: { filename?: string; format?: string; 'virtual-size'?: number; 'actual-size'?: number };
 	};
 }
 
@@ -51,6 +51,7 @@ export function parseBlockDevices(blocks: QmpBlock[], context: BlockContext): Di
 				label: `Hard disk ${n + 1}`,
 				path,
 				sizeBytes: image?.['virtual-size'],
+				...(image?.['actual-size'] !== undefined ? { allocatedBytes: image['actual-size'] } : {}),
 				format: image?.format ?? block.inserted?.drv,
 				bus: context.diskBus,
 				readOnly: block.inserted?.ro ?? false

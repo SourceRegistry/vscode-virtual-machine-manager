@@ -355,6 +355,10 @@ export class SshHost implements Host {
 		await this.sh(shellCommand('cp', ['--', from, to]), { timeout: 10 * 60_000 });
 	}
 
+	async rename(from: string, to: string): Promise<void> {
+		await this.sh(shellCommand('mv', ['-f', '--', from, to]), { timeout: 10 * 60_000 });
+	}
+
 	async readChildren(dir: string, file: string): Promise<Array<[string, string]>> {
 		const script = `cd ${shq(dir)} 2>/dev/null || exit 0; for d in */; do d=\${d%/}; [ -f "$d"/${shq(file)} ] || continue; printf '${MARKER}%s\\n' "$d"; cat "$d"/${shq(file)}; printf '\\n'; done`;
 		return parseChildren(await this.sh(script, { timeout: 60_000 }));

@@ -34,6 +34,9 @@
 
 	let vm = $state<(VmInfo & { operation?: string }) | undefined>();
 	let caps = $state<Capabilities | undefined>();
+	/** The disk operations of the provider apply to this VM, and a disk can be added in its current state. */
+	const manageableDisks = $derived(!!caps?.diskOperations?.length && vm?.origin !== 'adopted');
+	const canAddDisk = $derived(manageableDisks && !!caps?.diskOperations?.includes('add') && (vm?.state === 'stopped' || !!caps?.diskOperationsWhileRunning?.includes('add')));
 	let details = $state<VmDetails | undefined>();
 	let detailsError = $state<string | undefined>();
 
@@ -136,10 +139,12 @@
 		newGuestPort = '';
 	}
 
-	function run(command: OverviewCommand) {
+	function run(command: OverviewCommand, diskId?: string) {
 		if (!boot.ref) return;
 		actionError = undefined;
-		request('runCommand', { command, ref: boot.ref }).catch((error: Error) => (actionError = error.message));
+		request('runCommand', { command, ref: boot.ref, diskId })
+			.then(() => (command === 'vmm.manageDisks' ? loadDetails() : undefined))
+			.catch((error: Error) => (actionError = error.message));
 	}
 
 	async function loadDetails() {
@@ -417,6 +422,11 @@
 			{:else}
 				<div class="hardware">
 					<Card title="Storage">
+						{#snippet header()}
+							{#if canAddDisk}
+								<span class="icon-only"><Button transparent title="Add a disk" aria-label="Add a disk" onclick={() => run('vmm.manageDisks', 'new')}><Icon icon="plus-lg" /></Button></span>
+							{/if}
+						{/snippet}
 						{#if details.disks.length}
 							<table class="grid">
 								<thead><tr><th>Device</th><th>Image</th><th>Size</th><th>Bus</th><th></th></tr></thead>
@@ -425,9 +435,14 @@
 										<tr>
 											<td>{d.label}</td>
 											<td class="path" title={d.path}>{d.path ?? (d.kind === 'cdrom' ? 'Empty' : '–')}</td>
-											<td>{formatBytes(d.sizeBytes)}</td>
+											<td title={d.allocatedBytes !== undefined ? `${formatBytes(d.allocatedBytes)} used on the host` : undefined}>
+												{formatBytes(d.sizeBytes)}{#if d.allocatedBytes !== undefined}<span class="muted"> · {formatBytes(d.allocatedBytes)} used</span>{/if}
+											</td>
 											<td>{(d.bus ?? '–').toUpperCase()}{d.format ? ` · ${d.format}` : ''}</td>
 											<td class="actions">
+												{#if d.kind === 'disk' && manageableDisks}
+													<Button transparent title="Grow, convert, export or remove" aria-label="Manage {d.label}" onclick={() => run('vmm.manageDisks', d.id)}><Icon icon="gear" /></Button>
+												{/if}
 												{#if d.kind === 'cdrom' && caps?.media}
 													<Button transparent title="Change ISO" aria-label="Change ISO" onclick={() => run('vmm.changeMedia')}><Icon icon="folder2-open" /></Button>
 													{#if d.path}

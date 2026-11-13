@@ -168,6 +168,58 @@ describe.skipIf(!enabled)('libvirt provider against real libvirt', () => {
 			try { v('undefine', name, '--nvram', '--managed-save', '--storage', 'vda'); } catch { /* gone */ }
 		}
 	}, 120_000);
+	it('adds, grows, exports and removes disks, also on the running domain', async () => {
+		const name = `${NAME}-disks`;
+		const MB = 1024 ** 2;
+		const schema = await connection.getCreateSchema('host');
+		const pool = String(schema.find((f) => f.key === 'pool')!.default || 'default');
+		const qemuImg = (file: string) => JSON.parse(execFileSync('qemu-img', ['info', '--output=json', file], { encoding: 'utf8', env: { ...process.env, PATH: `${process.env.PATH}:/opt/homebrew/bin` } })) as { format: string; 'virtual-size': number };
+		try {
+			const vm = await connection.createVm('host', { name, cpus: 1, memoryMB: 512, diskGB: 1, network: 'user', pool, diskBus: 'virtio', iso: join(dir, 'empty.iso') });
+			const disks = async () => (await connection.getVmDetails('host', vm.id)).disks.filter((d) => d.kind === 'disk');
+
+			const added = await connection.addDisk('host', vm.id, { sizeBytes: 64 * MB });
+			expect(added).toMatchObject({ id: 'vdb', format: 'qcow2', bus: 'virtio' });
+			expect(v('vol-list', '--pool', pool)).toContain(`${name}-vdb.qcow2`);
+			expect((await disks()).find((d) => d.id === 'vdb')).toMatchObject({ sizeBytes: 64 * MB, format: 'qcow2' });
+			expect((await disks()).find((d) => d.id === 'vdb')!.allocatedBytes).toBeGreaterThan(0);
+
+			await connection.resizeDisk('host', vm.id, 'vdb', 128 * MB);
+			expect((await disks()).find((d) => d.id === 'vdb')!.sizeBytes).toBe(128 * MB);
+			await expect(connection.resizeDisk('host', vm.id, 'vdb', 64 * MB)).rejects.toThrow(/only grow/);
+
+			const copy = join(dir, 'vdb.qcow2');
+			await connection.exportDisk('host', vm.id, 'vdb', copy, { format: 'qcow2' });
+			expect(qemuImg(copy)).toMatchObject({ format: 'qcow2', 'virtual-size': 128 * MB });
+			await expect(connection.exportDisk('host', vm.id, 'vdb', join(dir, 'vdb.vmdk'), { format: 'vmdk' })).rejects.toThrow(/as it is/);
+
+			await connection.power('host', vm.id, 'start');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'running', 'running');
+			await connection.resizeDisk('host', vm.id, 'vdb', 256 * MB);
+			expect((await disks()).find((d) => d.id === 'vdb')!.sizeBytes).toBe(256 * MB);
+			await expect(connection.exportDisk('host', vm.id, 'vdb', copy, { format: 'qcow2' })).rejects.toThrow(/Shut down/);
+			await expect(connection.addDisk('host', vm.id, { sizeBytes: 32 * MB })).rejects.toThrow(/Shut down/);
+			await expect(connection.removeDisk('host', vm.id, 'vdb', { deleteFile: false })).rejects.toThrow(/Shut down/);
+			await connection.power('host', vm.id, 'stop');
+			await until(async () => (await connection.listVms('host')).find((x) => x.id === vm.id)?.state === 'stopped', 'stopped');
+			expect((await connection.addDisk('host', vm.id, { sizeBytes: 32 * MB, format: 'raw' })).id).toBe('vdc');
+			expect((await disks()).map((d) => d.id)).toEqual(['vda', 'vdb', 'vdc']);
+			expect((await disks()).find((d) => d.id === 'vdc')!.format).toBe('raw');
+
+			await connection.removeDisk('host', vm.id, 'vdc', { deleteFile: true });
+			await connection.removeDisk('host', vm.id, 'vdb', { deleteFile: false });
+			expect((await disks()).map((d) => d.id)).toEqual(['vda']);
+			const volumes = v('vol-list', '--pool', pool);
+			expect(volumes).not.toContain(`${name}-vdc.img`);
+			expect(volumes).toContain(`${name}-vdb.qcow2`);
+			v('vol-delete', '--pool', pool, `${name}-vdb.qcow2`);
+			await connection.deleteVm('host', vm.id, { deleteDisks: true });
+		} finally {
+			try { v('destroy', name); } catch { /* not running */ }
+			try { v('undefine', name, '--nvram', '--managed-save', '--remove-all-storage'); } catch { /* gone */ }
+			for (const volume of [`${name}-vdb.qcow2`, `${name}-vdc.img`]) try { v('vol-delete', '--pool', pool, volume); } catch { /* gone */ }
+		}
+	}, 180_000);
 	it.runIf(!!image && /cloud/.test(image ?? ''))('creates a domain from a cloud image, cloud-init sets it up, and deletes it with its volumes', async () => {
 		const name = `${NAME}-cloud`;
 		const schema = await connection.getCreateSchema('host');

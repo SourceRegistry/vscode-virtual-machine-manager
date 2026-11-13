@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
 	ProviderError, type Capabilities, type ClusterConfig, type ClusterConnection, type ConsoleKind, type ConsoleStream, type DeleteOptions,
-	type DiskStats, type FieldSchema, type FieldValues, type HypervisorProvider, type Logger, type NodeInfo, type PowerAction, type ProviderContext,
+	type DiskDevice, type DiskExportOptions, type DiskProgress, type DiskStats, type NewDisk, type FieldSchema, type FieldValues, type HypervisorProvider, type Logger, type NodeInfo, type PowerAction, type ProviderContext,
 	type CreateProgress, type GuestCommand, type GuestCommandResult, type PortForward, type SecretBag, type TransferProgress, type Snapshot, type VmConfig, type VmDetails, type VmInfo, type VmStats
 } from '@vmm/sdk';
 import {
@@ -15,6 +15,7 @@ import {
 import { copyFromGuest, copyToGuest, explainAgentError, runInGuest, type AgentCall } from '@vmm/sdk/guest';
 import { openEndpoint, openPty } from './consoles';
 import { activeForwards, checkHmp, forwardsMetadata, hostfwdKey, hostfwdRule, METADATA_URI, normalizeForward, parseForwardsMetadata, sameHostPort, userNetdev } from './forwards';
+import { nextTarget, parseBlkinfo, withDisk } from './disks';
 import { buildDomainXml, DISK_BUSES, NAME, parseDomainCapabilities, type DiskBus } from './definition';
 import {
 	blockStats, guestMemoryUsedMB, netStats, parseDomain, parseDomifaddr, parseDomstats, parseNodeinfo, parseSnapshot, parseVersion, parseVncDisplay, stateOf, toDiskDevices, toNicDevices, UUID,
@@ -142,7 +143,12 @@ export class LibvirtConnection implements ClusterConnection {
 		power: ['start', 'shutdown', 'reboot', 'stop', 'reset'] as PowerAction[],
 		consoles: ['vnc', 'serial'] as ConsoleKind[],
 		preview: false, external: false, media: true, details: true, stats: true, snapshots: true, remotePaths: false,
-		guestExec: true, guestFiles: true
+		guestExec: true, guestFiles: true,
+		diskOperations: ['add', 'remove', 'resize', 'export'],
+		// Hot-plug needs a spare PCIe slot (domains made here have none) and a guest that lets the disk go: only growing is reliable.
+		diskOperationsWhileRunning: ['resize'],
+		// vol-download streams the volume through libvirt to this computer, as it is.
+		diskExportsHere: true
 	};
 	private readonly local: boolean;
 	private readonly ssh;
@@ -281,16 +287,17 @@ export class LibvirtConnection implements ClusterConnection {
 		const domain = await this.freshDomain(id);
 		const state = (await this.virsh.exec(['domstate', id])).trim();
 		const capacities = new Map<string, number>();
+		const allocations = new Map<string, number>();
 		await Promise.all(domain.disks.filter((d) => d.device === 'disk' && d.path && DISK_TARGET.test(d.target)).map(async (disk) => {
-			const info = await this.virsh.exec(['domblkinfo', id, disk.target], 10_000).catch(() => '');
-			const capacity = /^Capacity:\s+(\d+)/m.exec(info)?.[1];
-			if (capacity) capacities.set(disk.target, Number(capacity));
+			const { capacity, allocation } = parseBlkinfo(await this.virsh.exec(['domblkinfo', id, disk.target], 10_000).catch(() => ''));
+			if (capacity) capacities.set(disk.target, capacity);
+			if (allocation !== undefined) allocations.set(disk.target, allocation);
 		}));
 		const addresses = state === 'running' ? await this.guestAddresses(domain) : new Map<string, string[]>();
 		const forwards = this.local && domain.nics.some((n) => n.type === 'user') ? await this.savedForwards(id) : [];
 		// A domain started outside VS Code (virsh, virt-manager) has none of them yet.
 		if (forwards.length && state === 'running') await this.applyForwards(id, forwards);
-		return { disks: toDiskDevices(domain, capacities), nics: toNicDevices(domain, addresses), devices: [], forwards };
+		return { disks: toDiskDevices(domain, capacities, allocations), nics: toNicDevices(domain, addresses), devices: [], forwards };
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -747,6 +754,85 @@ export class LibvirtConnection implements ClusterConnection {
 	// -----------------------------------------------------------------------------------------
 	// Snapshots
 	// -----------------------------------------------------------------------------------------
+
+	// -----------------------------------------------------------------------------------------
+	// Disks (in the definition; a running domain can only grow one)
+	// -----------------------------------------------------------------------------------------
+
+	private async diskDomain(vmId: string, diskId: string | undefined, needsStopped?: string) {
+		const id = assertId(vmId);
+		const domain = await this.freshDomain(id);
+		const running = (await this.virsh.exec(['domstate', id])).trim() !== 'shut off';
+		if (running && needsStopped) throw new ProviderError(`Shut down "${domain.name}" before ${needsStopped}.`, 'invalid');
+		if (diskId === undefined) return { id, domain, running, disk: undefined };
+		const disk = domain.disks.find((d) => d.device === 'disk' && d.target === diskId);
+		if (!disk || !DISK_TARGET.test(disk.target)) throw new ProviderError(`${domain.name} has no disk ${diskId}`, 'notFound');
+		return { id, domain, running, disk };
+	}
+
+	async addDisk(_nodeId: string, vmId: string, newDisk: NewDisk): Promise<DiskDevice> {
+		const { id, domain } = await this.diskDomain(vmId, undefined, 'adding a disk');
+		if (!Number.isFinite(newDisk.sizeBytes) || newDisk.sizeBytes < 1024 ** 2) throw new ProviderError('Give the disk at least 1 MB.', 'invalid');
+		const format = newDisk.format ?? 'qcow2';
+		const first = domain.disks.find((d) => d.device === 'disk' && d.path);
+		const bus = first?.bus ?? 'virtio';
+		const target = nextTarget(domain.disks.map((d) => d.target), bus);
+		// Next to the domain's first disk, else in the usual pool.
+		const pool = (first?.path ? (await this.virsh.exec(['vol-pool', first.path]).catch(() => '')).trim() : '') || (await this.ensurePool(''));
+		const volume = `${domain.name}-${target}.${format === 'qcow2' ? 'qcow2' : 'img'}`;
+		await this.virsh.exec(['vol-create-as', pool, volume, `${Math.round(newDisk.sizeBytes)}b`, '--format', format], 120_000);
+		try {
+			const file = (await this.virsh.exec(['vol-path', '--pool', pool, volume])).trim();
+			// Keeps the VNC password: without --security-info libvirt leaves it out of the XML.
+			await this.define(withDisk(await this.virsh.exec(['dumpxml', '--inactive', '--security-info', id]), { file, target, bus, format }));
+			this.domains.clear();
+			this.log.info(`Added ${file} as ${target} to ${domain.name}`);
+			return { id: target, kind: 'disk', label: `Disk ${target}`, path: file, sizeBytes: newDisk.sizeBytes, format, bus };
+		} catch (error) {
+			await this.virsh.exec(['vol-delete', '--pool', pool, volume]).catch((e: Error) => this.log.warn(`Could not remove the new disk ${volume}: ${e.message}`));
+			throw error;
+		}
+	}
+
+	async removeDisk(_nodeId: string, vmId: string, diskId: string, options: { deleteFile: boolean }): Promise<void> {
+		const { id, domain, disk } = await this.diskDomain(vmId, diskId, 'removing a disk');
+		if (options.deleteFile && (await this.listSnapshots(NODE_ID, id)).length) {
+			throw new ProviderError(`The snapshots of ${domain.name} still refer to ${disk!.path}: remove the disk without deleting the file, or delete the snapshots first.`, 'invalid');
+		}
+		await this.virsh.exec(['detach-disk', id, disk!.target, '--config'], 60_000);
+		this.domains.clear();
+		if (options.deleteFile && disk!.path) {
+			await this.virsh.exec(['vol-delete', disk!.path], 120_000).catch((error: Error) => {
+				throw new ProviderError(`${disk!.target} was removed, but its file ${disk!.path} could not be deleted (is it in a storage pool?): ${error.message}`, 'failed');
+			});
+		}
+		this.log.info(`Removed ${disk!.target} (${disk!.path ?? 'no file'}) from ${domain.name}${options.deleteFile ? ' and deleted it' : ''}`);
+	}
+
+	async resizeDisk(_nodeId: string, vmId: string, diskId: string, sizeBytes: number): Promise<void> {
+		const { id, domain, running, disk } = await this.diskDomain(vmId, diskId);
+		const { capacity } = parseBlkinfo(await this.virsh.exec(['domblkinfo', id, disk!.target], 10_000));
+		if (capacity === undefined) throw new ProviderError(`The size of ${disk!.target} cannot be read`, 'failed');
+		if (!Number.isFinite(sizeBytes) || sizeBytes <= capacity) throw new ProviderError('Disks can only grow: give a size larger than the current one.', 'invalid');
+		const size = `${Math.round(sizeBytes)}b`;
+		if (running) await this.virsh.exec(['blockresize', id, disk!.target, size], 120_000);
+		else if (disk!.path) await this.virsh.exec(['vol-resize', disk!.path, size], 120_000);
+		else throw new ProviderError(`${disk!.target} has no file to grow`, 'unsupported');
+		this.log.info(`Grew ${disk!.target} of ${domain.name} to ${size}${running ? ' (running)' : ''}`);
+	}
+
+	async exportDisk(_nodeId: string, vmId: string, diskId: string, targetPath: string, options: DiskExportOptions, progress?: (update: DiskProgress) => void): Promise<void> {
+		// A running guest keeps writing: a copy taken now would be torn.
+		const { domain, disk } = await this.diskDomain(vmId, diskId, 'exporting a disk');
+		if (!disk!.path) throw new ProviderError(`${disk!.target} has no file to export`, 'unsupported');
+		const format = disk!.format ?? 'raw';
+		if (options.format !== format || options.compress) {
+			throw new ProviderError(`libvirt copies a disk as it is: export ${disk!.target} as ${format}, uncompressed.`, 'invalid');
+		}
+		progress?.({ message: `Downloading ${disk!.target}…` });
+		await this.virsh.exec(['vol-download', disk!.path, targetPath], 6 * 3600_000);
+		this.log.info(`Exported ${disk!.path} of ${domain.name} to ${targetPath}`);
+	}
 
 	async listSnapshots(_nodeId: string, vmId: string): Promise<Snapshot[]> {
 		const id = assertId(vmId);

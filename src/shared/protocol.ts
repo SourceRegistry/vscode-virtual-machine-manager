@@ -103,6 +103,7 @@ export type OverviewCommand =
 	| 'vmm.openVmDashboard'
 	| 'vmm.ejectMedia'
 	| 'vmm.changeMedia'
+	| 'vmm.manageDisks'
 	| 'vmm.cloneVm'
 	| 'vmm.convertToTemplate'
 	| 'vmm.convertToVm'
@@ -132,7 +133,8 @@ export interface RpcMethods {
 	/** One CPU/memory/disk sample per listed running VM; empty while the overview is hidden. */
 	vmStats: { params: { refs: VmRef[] }; result: Array<{ ref: VmRef; stats: VmStats }> };
 	runCommand: {
-		params: { command: OverviewCommand; ref?: VmRef; clusterId?: string; nodeId?: string };
+		/** `diskId`: the disk a dashboard row's action is about (`vmm.manageDisks`). */
+		params: { command: OverviewCommand; ref?: VmRef; clusterId?: string; nodeId?: string; diskId?: string };
 		result: void;
 	};
 	// vm dashboard

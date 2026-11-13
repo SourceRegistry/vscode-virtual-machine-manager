@@ -182,6 +182,20 @@ describe.each(['view/item/context', 'webview/context'])('%s media actions', (men
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s disk actions', (menu) => {
+	const withDisks: Capabilities = { ...caps, diskOperations: ['add', 'resize'], diskOperationsWhileRunning: ['resize'] };
+
+	it('offers Disks… in any state when the provider has disk operations', () => {
+		for (const state of ['running', 'stopped'] as const) expect(commandsFor(menu, vmContextValue(vm(state), withDisks))).toContain('vmm.manageDisks');
+	});
+
+	it('hides it without disk operations and for an attached VM', () => {
+		expect(commandsFor(menu, vmContextValue(vm('stopped'), caps))).not.toContain('vmm.manageDisks');
+		expect(commandsFor(menu, vmContextValue(vm('stopped'), { ...caps, diskOperations: [] }))).not.toContain('vmm.manageDisks');
+		expect(commandsFor(menu, vmContextValue({ ...vm('running'), origin: 'adopted' }, withDisks))).not.toContain('vmm.manageDisks');
+	});
+});
+
 describe.each(['view/item/context', 'webview/context'])('%s snapshot actions', (menu) => {
 	const withSnapshots: Capabilities = { ...caps, snapshots: true };
 

@@ -5,7 +5,7 @@
  *
  *   cluster;status=<status>;[signout;][rdp;]     rdp: the provider opens RDP consoles (remembered credentials)
  *   node;status=<status>;[create;][adopt;][import;]
- *   vm;state=<state>;flag;flag;     flags: power actions, busy, favorite, graphical, serial, terminal (serial without a display), external, media, ejectable, snapshots, guestexec, guestfiles, clone, details, edit, delete, istemplate (is a template), totemplate (can become one)
+ *   vm;state=<state>;flag;flag;     flags: power actions, busy, favorite, graphical, serial, terminal (serial without a display), external, media, ejectable, disks, snapshots, guestexec, guestfiles, clone, details, edit, delete, istemplate (is a template), totemplate (can become one)
  *
  * While a power operation runs, `state` is the transitional state and only the actions allowed
  * during it are listed (see operations.ts), plus `busy`.
@@ -18,7 +18,7 @@ import type { ClusterStatus } from './protocol';
  * What at least one connected cluster can do, as `vmm.can.<feature>` context keys. The command palette shows a VM
  * command only when some connected provider supports it (the context menus check the VM's own flags instead).
  */
-export const FEATURES = ['start', 'shutdown', 'reboot', 'stop', 'graphical', 'serial', 'external', 'details', 'media', 'snapshots', 'guestexec', 'guestfiles', 'clone', 'templates', 'edit', 'delete', 'adopt', 'forwards'] as const;
+export const FEATURES = ['start', 'shutdown', 'reboot', 'stop', 'graphical', 'serial', 'external', 'details', 'media', 'disks', 'snapshots', 'guestexec', 'guestfiles', 'clone', 'templates', 'edit', 'delete', 'adopt', 'forwards'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 export function featureFlags(capabilities: Capabilities[]): Record<Feature, boolean> {
@@ -33,6 +33,7 @@ export function featureFlags(capabilities: Capabilities[]): Record<Feature, bool
 		external: any((c) => c.external),
 		details: any((c) => c.details || c.stats),
 		media: any((c) => c.media),
+		disks: any((c) => !!c.diskOperations?.length),
 		snapshots: any((c) => c.snapshots),
 		guestexec: any((c) => c.guestExec),
 		guestfiles: any((c) => c.guestFiles),
@@ -79,6 +80,8 @@ export function vmContextValue(vm: VmInfo & { operation?: PowerAction; favorite?
 			flags.push('media');
 			if (vm.mediaInserted) flags.push('ejectable');
 		}
+		// An attached VM's disks belong to whoever started it.
+		if (caps.diskOperations?.length && vm.origin !== 'adopted') flags.push('disks');
 		if (caps.snapshots) flags.push('snapshots');
 		if (caps.guestExec) flags.push('guestexec');
 		if (caps.guestFiles) flags.push('guestfiles');

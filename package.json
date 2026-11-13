@@ -207,6 +207,12 @@
         "icon": "$(files)"
       },
       {
+        "command": "vmm.manageDisks",
+        "title": "Disks…",
+        "category": "VM",
+        "icon": "$(database)"
+      },
+      {
         "command": "vmm.connectSsh",
         "title": "Connect with Remote-SSH…",
         "category": "VM",
@@ -542,6 +548,10 @@
         {
           "command": "vmm.changeMedia",
           "when": "vmm.hasVms && vmm.can.media"
+        },
+        {
+          "command": "vmm.manageDisks",
+          "when": "vmm.hasVms && vmm.can.disks"
         },
         {
           "command": "vmm.connectSsh",
@@ -929,6 +939,11 @@
           "group": "2_media@2"
         },
         {
+          "command": "vmm.manageDisks",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bdisks;/",
+          "group": "2_media@3"
+        },
+        {
           "command": "vmm.takeSnapshot",
           "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bsnapshots;/",
           "group": "2_snapshots@1"
@@ -1186,6 +1201,11 @@
           "command": "vmm.changeMedia",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bmedia;/",
           "group": "2_media@2"
+        },
+        {
+          "command": "vmm.manageDisks",
+          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bdisks;/",
+          "group": "2_media@3"
         },
         {
           "command": "vmm.takeSnapshot",
