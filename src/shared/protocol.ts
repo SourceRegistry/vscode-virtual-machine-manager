@@ -18,7 +18,7 @@ import type {
 	VmStats
 } from '@vmm/sdk';
 
-export type ViewKind = 'overview' | 'vmSettings' | 'vmDashboard' | 'diskSize' | 'console.vnc' | 'console.serial' | 'console.preview' | 'console.rdp';
+export type ViewKind = 'overview' | 'vmSettings' | 'vmDashboard' | 'console.vnc' | 'console.serial' | 'console.preview' | 'console.rdp';
 
 export interface VmRef {
 	clusterId: string;
@@ -63,12 +63,14 @@ export interface BootData {
 	settings?: { scaleViewport: boolean };
 	/** RDP console: where the IronRDP WebAssembly module is served from. */
 	rdp?: { wasmUrl: string };
-	/** Size form: what is asked. */
-	diskSize?: DiskSizeRequest;
 }
 
-/** The size form asks for the new size of a disk (`grow`) or the size and format of a new one (`add`). */
+/**
+ * The size form (a modal on the details page) asks for the new size of a disk (`grow`) or the size and format of a
+ * new one (`add`). `askId` tells one question from the next.
+ */
 export interface DiskSizeRequest {
+	askId: number;
 	mode: 'grow' | 'add';
 	vmName: string;
 	diskLabel?: string;
@@ -188,9 +190,10 @@ export interface RpcMethods {
 		params: { directory: boolean; title: string; current?: string; filters?: Record<string, string[]> };
 		result: string | undefined;
 	};
-	// disk size form
-	submitDiskSize: { params: DiskSizeAnswer; result: void };
-	cancelDiskSize: { params: void; result: void };
+	/** The size question waiting for an answer, if any (a page that just opened asks for it). */
+	getDiskSizeAsk: { params: void; result: DiskSizeRequest | undefined };
+	submitDiskSize: { params: DiskSizeAnswer & { askId: number }; result: void };
+	cancelDiskSize: { params: { askId: number }; result: void };
 	// console
 	reconnect: { params: void; result: void };
 	power: { params: { action: PowerAction }; result: void };
@@ -219,6 +222,8 @@ export type HostToWebview =
 	| { kind: 'response'; id: number; ok: false; error: string }
 	| { kind: 'event'; name: 'snapshot'; payload: ClusterSnapshot[] }
 	| { kind: 'event'; name: 'vm'; payload: VmInfo | undefined }
+	/** The details page shows the size form for this question. */
+	| { kind: 'event'; name: 'diskSizeAsk'; payload: DiskSizeRequest }
 	| { kind: 'console.status'; status: ConsoleStatus; message?: string }
 	| { kind: 'console.data'; data: Uint8Array }
 	| { kind: 'console.credentials'; password: string }

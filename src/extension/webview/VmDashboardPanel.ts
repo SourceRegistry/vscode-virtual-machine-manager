@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import type { OverviewCommand, VmRef } from '../../shared/protocol';
+import type { DiskSizeAnswer, DiskSizeRequest, OverviewCommand, VmRef } from '../../shared/protocol';
+import { bytesProblem } from '../../shared/disks';
 import type { ConnectionManager } from '../clusters/ConnectionManager';
 import { browserUrl, sshCommand } from '../../shared/forwards';
 import { deleteSnapshot, listSnapshots, revertSnapshot, takeSnapshot } from '../snapshots/flow';
@@ -44,6 +45,37 @@ export class VmDashboardPanel implements vscode.Disposable {
 			webviewOptions(extensionUri, true)
 		);
 		VmDashboardPanel.panels.set(key, new VmDashboardPanel(key, panel, extensionUri, manager, ref, vm?.name));
+	}
+
+	/**
+	 * Opens (or reveals) the details page of the VM and asks for a disk size in a modal there. Resolves with the
+	 * answer, or `undefined` when the user cancels or closes the page. A new question replaces an unanswered one.
+	 */
+	static askDiskSize(extensionUri: vscode.Uri, manager: ConnectionManager, ref: VmRef, question: Omit<DiskSizeRequest, 'askId'>): Promise<DiskSizeAnswer | undefined> {
+		VmDashboardPanel.show(extensionUri, manager, ref);
+		const panel = VmDashboardPanel.panels.get(`${ref.clusterId}/${ref.nodeId}/${ref.vmId}`);
+		return panel ? panel.ask(question) : Promise.resolve(undefined);
+	}
+
+	private static nextAskId = 1;
+	private pending: { request: DiskSizeRequest; resolve: (answer: DiskSizeAnswer | undefined) => void } | undefined;
+	private channel: WebviewChannel | undefined;
+
+	private ask(question: Omit<DiskSizeRequest, 'askId'>): Promise<DiskSizeAnswer | undefined> {
+		this.answer(undefined);
+		const request: DiskSizeRequest = { ...question, askId: VmDashboardPanel.nextAskId++ };
+		return new Promise((resolve) => {
+			this.pending = { request, resolve };
+			// A page that is still loading asks for it once it is ready (`getDiskSizeAsk`).
+			void this.channel?.post({ kind: 'event', name: 'diskSizeAsk', payload: request });
+		});
+	}
+
+	private answer(answer: DiskSizeAnswer | undefined, askId?: number): void {
+		const pending = this.pending;
+		if (!pending || (askId !== undefined && askId !== pending.request.askId)) return;
+		this.pending = undefined;
+		pending.resolve(answer);
 	}
 
 	/** Closes the details tab of a VM that no longer exists. */
@@ -140,12 +172,24 @@ export class VmDashboardPanel implements vscode.Disposable {
 					await vscode.env.openExternal(vscode.Uri.parse(url));
 				}
 			},
+			getDiskSizeAsk: async () => this.pending?.request,
+			submitDiskSize: async ({ askId, bytes, format }) => {
+				const request = this.pending?.request;
+				if (!request || request.askId !== askId) throw new Error('This question was already answered.');
+				// The page checks too; this is the check that counts.
+				const problem = typeof bytes === 'number' ? bytesProblem(bytes, request.currentBytes) : 'Enter a size.';
+				if (problem) throw new Error(problem);
+				const chosen = request.mode === 'add' ? (format && request.formats?.includes(format) ? format : request.formats?.[0]) : undefined;
+				this.answer({ bytes, ...(chosen ? { format: chosen } : {}) }, askId);
+			},
+			cancelDiskSize: async ({ askId }) => this.answer(undefined, askId),
 			getStats: async () => {
 				if (!panel.visible) return undefined;
 				const connection = await manager.connect(ref.clusterId);
 				return connection.getVmStats?.(ref.nodeId, ref.vmId);
 			}
 		});
+		this.channel = channel;
 		this.disposables.push(
 			channel,
 			panel.onDidDispose(() => this.dispose()),
@@ -159,6 +203,7 @@ export class VmDashboardPanel implements vscode.Disposable {
 	}
 
 	dispose(): void {
+		this.answer(undefined);
 		VmDashboardPanel.panels.delete(this.key);
 		vscode.Disposable.from(...this.disposables).dispose();
 		this.panel.dispose();

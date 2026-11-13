@@ -7,7 +7,7 @@ import type { VmActivity } from '../activity/VmActivity';
 import { showError } from '../util/log';
 import { formatBytes } from '../../shared/metrics';
 import { diskDescription, diskOperations, EXPORT_CHOICES, exportFileName, needsStopText, type ExportChoice } from '../../shared/disks';
-import { askDiskSize } from './DiskSizePanel';
+import { VmDashboardPanel } from '../webview/VmDashboardPanel';
 
 /**
  * "Disks…": add, grow, convert, export and remove a VM's disks, in quick picks. Offers only what the provider
@@ -103,7 +103,7 @@ function withDiskProgress<T>(title: string, task: (progress: (update: DiskProgre
 
 async function addDisk(deps: DiskFlowDeps, location: VmLocation, connection: ClusterConnection): Promise<void> {
 	const vmName = location.vm.name;
-	const answer = await askDiskSize(deps.extensionUri, { mode: 'add', vmName, formats: ['qcow2', 'raw'] });
+	const answer = await VmDashboardPanel.askDiskSize(deps.extensionUri, deps.manager, location.ref, { mode: 'add', vmName, formats: ['qcow2', 'raw'] });
 	if (!answer) return;
 	const format = answer.format ?? 'qcow2';
 	try {
@@ -118,7 +118,7 @@ async function addDisk(deps: DiskFlowDeps, location: VmLocation, connection: Clu
 async function growDisk(deps: DiskFlowDeps, location: VmLocation, connection: ClusterConnection, disk: DiskDevice, note?: string): Promise<void> {
 	const vmName = location.vm.name;
 	const current = disk.sizeBytes;
-	const answer = await askDiskSize(deps.extensionUri, { mode: 'grow', vmName, diskLabel: disk.label, currentBytes: current, ...(note ? { note } : {}) });
+	const answer = await VmDashboardPanel.askDiskSize(deps.extensionUri, deps.manager, location.ref, { mode: 'grow', vmName, diskLabel: disk.label, currentBytes: current, ...(note ? { note } : {}) });
 	if (!answer) return;
 	try {
 		await withDiskProgress(`Growing ${disk.label} of ${vmName}…`, () => connection.resizeDisk!(location.ref.nodeId, location.ref.vmId, disk.id, answer.bytes));
