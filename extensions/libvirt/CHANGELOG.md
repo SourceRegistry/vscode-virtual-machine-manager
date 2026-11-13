@@ -1,5 +1,14 @@
 # Changelog
 
+# [1.5.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-libvirt-v1.4.0...vm-manager-libvirt-v1.5.0) (2026-11-13)
+
+
+### Features
+
+* attach an existing disk image ([59558a6](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/59558a61f472ca0c2a57cd60f2a5ad4cc3fe28f2))
+* disk management for QEMU and libvirt ([994ff94](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/994ff94537a68e129b770f777562c8ac1568f89d))
+* disk sizes in a form with a number field and MB/GB ([926899d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/926899d02f7b72fe1f6bbf669b4da4eefe16f352))
+
 # [1.4.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-libvirt-v1.3.1...vm-manager-libvirt-v1.4.0) (2026-11-12)
 
 
