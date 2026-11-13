@@ -8,7 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { packages, root } from './packages.mjs';
 
-const artwork = (name) => readFileSync(path.join(root, 'media', 'marketplace', name), 'utf8');
+// LF whatever the checkout uses (Git on Windows writes CRLF), so the output is the same on every OS.
+const artwork = (name) => readFileSync(path.join(root, 'media', 'marketplace', name), 'utf8').replace(/\r\n/g, '\n');
 const base = artwork('icon.svg');
 
 /** Badge in the bottom-right corner (512 coordinates of icon.svg); the ring in the tile colour separates it. */
