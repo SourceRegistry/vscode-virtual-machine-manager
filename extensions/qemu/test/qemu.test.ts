@@ -45,6 +45,13 @@ describe('buildArgs CD/DVD drive', () => {
 		expect(buildArgs(def, runtime, env)).toContain('file=/isos/debian.iso,if=none,id=cd0,media=cdrom,readonly=on');
 	});
 
+	it('puts the drive on virtio-scsi on x86 when the definition asks (cloud-image VMs)', () => {
+		const args = buildArgs({ ...withoutIso, cdromBus: 'scsi' }, runtime, env);
+		expect(args).toContain('virtio-scsi-pci,id=scsi0');
+		expect(args).toContain('scsi-cd,drive=cd0,bus=scsi0.0,bootindex=2');
+		expect(args.some((a) => a.startsWith('ide-cd'))).toBe(false);
+	});
+
 	it('does the same on ARM64 through virtio-scsi', () => {
 		const args = buildArgs({ ...withoutIso, arch: 'aarch64' }, runtime, env);
 		expect(args).toContain('if=none,id=cd0,media=cdrom,readonly=on');

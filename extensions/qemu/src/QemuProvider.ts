@@ -50,7 +50,7 @@ import {
 	type VmStats
 } from '@vmm/sdk';
 import { ARCHS, ARCH_LABEL, acceleratorsFor, archFromName, guestArch, hostArch, isNative, normalizeHardware, type Arch } from './arch';
-import { buildArgs, usableAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
+import { buildArgs, cdromBus, usableAccelerators, type DiskBus, type Firmware, type NicModel, type VgaModel, type VmDefinition, type VmRuntime } from './definition';
 import { detectQemu, type ArchInstallation, type QemuInstallation } from './detect';
 import { copyFromGuest, copyToGuest, explainAgentError, runInGuest, type AgentCall } from '@vmm/sdk/guest';
 import { GuestAgentClient } from './GuestAgent';
@@ -816,6 +816,8 @@ export class QemuConnection implements ClusterConnection {
 				disks: [disk],
 				diskBus: hardware.diskBus,
 				cdrom: seed,
+				// Debian's genericcloud kernel has no AHCI driver: on SATA it never sees the seed and boots unconfigured.
+				cdromBus: 'scsi',
 				nic: hardware.nic,
 				mac: randomMac(),
 				vga: hardware.vga,
@@ -1011,7 +1013,7 @@ export class QemuConnection implements ClusterConnection {
 		const cd = def.cdrom ? await this.imageInfo(def.cdrom) : undefined;
 		return [
 			...disks,
-			{ id: 'cd0', kind: 'cdrom' as const, label: 'CD/DVD drive', path: def.cdrom, sizeBytes: cd?.['virtual-size'], format: cd?.format, bus: guestArch(def) === 'aarch64' ? 'scsi' : 'sata', readOnly: true, removable: true }
+			{ id: 'cd0', kind: 'cdrom' as const, label: 'CD/DVD drive', path: def.cdrom, sizeBytes: cd?.['virtual-size'], format: cd?.format, bus: cdromBus(def), readOnly: true, removable: true }
 		];
 	}
 
