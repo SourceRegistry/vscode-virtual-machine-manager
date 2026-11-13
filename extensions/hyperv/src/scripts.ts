@@ -158,13 +158,38 @@ if ($null -ne $v.serial) {
 }
 `;
 
+/**
+ * With checkpoints the VM runs on a differencing disk (.avhdx) whose parents lead back to the disk it was made
+ * with, and each checkpoint branch has its own. Deleting the disks walks up from every one of them through the
+ * .avhdx files to the first ordinary disk and stops there: a parent of that (a shared base image) is never deleted.
+ * A clone's own folder under the VM storage path (see CLONE_VM) is removed when nothing but empty folders is left.
+ */
 export const DELETE_VM = String.raw`
 $vm = Get-VM -Id $p.id
-$disks = @(Get-VMHardDiskDrive -VM $vm | ForEach-Object { $_.Path })
+$disks = @()
+if ($p.deleteDisks) {
+	$leaves = @(Get-VMHardDiskDrive -VM $vm | ForEach-Object { $_.Path })
+	$leaves += @(Get-VMSnapshot -VM $vm | ForEach-Object { Get-VMHardDiskDrive -VMSnapshot $_ } | ForEach-Object { $_.Path })
+	foreach ($leaf in $leaves) {
+		$current = [string]$leaf
+		while ($current) {
+			if ($disks -notcontains $current) { $disks += $current }
+			if (-not $current.EndsWith('.avhdx', [StringComparison]::OrdinalIgnoreCase)) { break }
+			$parent = $null
+			try { $parent = [string](Get-VHD -Path $current -ErrorAction Stop).ParentPath } catch { }
+			$current = $parent
+		}
+	}
+}
+$folder = [string]$vm.Path
 if ($vm.State.ToString() -ne 'Off') { Stop-VM -VM $vm -TurnOff -Force }
 Remove-VM -VM $vm -Force
 if ($p.deleteDisks) {
 	foreach ($disk in $disks) { if ($disk -and (Test-Path -LiteralPath $disk)) { Remove-Item -LiteralPath $disk -Force } }
+	$storage = [string](Get-VMHost).VirtualHardDiskPath
+	if ($folder -and $storage -and ((Split-Path -Parent $folder).TrimEnd('\') -eq $storage.TrimEnd('\')) -and (Test-Path -LiteralPath $folder) -and -not (Get-ChildItem -LiteralPath $folder -Recurse -File -Force)) {
+		Remove-Item -LiteralPath $folder -Recurse -Force
+	}
 }
 `;
 
@@ -326,11 +351,19 @@ Get-VMSnapshot -VM (Get-VM -Id $p.id) | ForEach-Object {
 }
 `;
 
+/**
+ * The Hyper-V module answers from a cache that WMI events update a few seconds late (about 4.5 s, measured on
+ * Windows 11): `Get-VMSnapshot` right after `Checkpoint-VM` does not list the new checkpoint yet, even in the same
+ * process. So the new checkpoint comes from `-Passthru`, and a lookup by id waits briefly for it to show up.
+ */
 export const SNAPSHOT_CREATE = String.raw`
 $vm = Get-VM -Id $p.id
-if (Get-VMSnapshot -VM $vm -Name $p.name -ErrorAction SilentlyContinue) { throw "A snapshot named '$($p.name)' already exists" }
-Checkpoint-VM -VM $vm -SnapshotName ([string]$p.name)
-$s = Get-VMSnapshot -VM $vm -Name $p.name | Select-Object -Last 1
+# Names from CIM, which has no cache, so a checkpoint made a moment ago counts too.
+$taken = Get-CimInstance -Namespace 'root\virtualization\v2' -ClassName Msvm_VirtualSystemSettingData -Filter ("VirtualSystemIdentifier='" + $vm.VMId.ToString() + "' AND VirtualSystemType='Microsoft:Hyper-V:Snapshot:Realized'") |
+	Where-Object { $_.ElementName -eq [string]$p.name }
+if ($taken) { throw "A snapshot named '$($p.name)' already exists" }
+$s = Checkpoint-VM -VM $vm -SnapshotName ([string]$p.name) -Passthru | Select-Object -Last 1
+if (-not $s) { throw 'Hyper-V did not create the checkpoint' }
 [pscustomobject]@{
 	Id = $s.Id.ToString()
 	Name = [string]$s.Name
@@ -340,7 +373,11 @@ $s = Get-VMSnapshot -VM $vm -Name $p.name | Select-Object -Last 1
 
 const SNAPSHOT_BY_ID = String.raw`
 $vm = Get-VM -Id $p.id
-$s = Get-VMSnapshot -VM $vm | Where-Object { $_.Id.ToString() -eq $p.snapshot } | Select-Object -First 1
+$s = $null
+for ($i = 0; $i -lt 20 -and -not $s; $i++) {
+	if ($i) { Start-Sleep -Milliseconds 500 }
+	$s = Get-VMSnapshot -VM $vm | Where-Object { $_.Id.ToString() -eq $p.snapshot } | Select-Object -First 1
+}
 if (-not $s) { throw 'The snapshot no longer exists' }
 `;
 
