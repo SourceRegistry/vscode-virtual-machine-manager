@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script without types
 import { buildTargets, packages, root, tsconfigs } from '../scripts/packages.mjs';
 // @ts-expect-error plain ESM script without types
-import { BADGES } from '../scripts/render-icons.mjs';
+import { BADGES, walkthroughLogo } from '../scripts/render-icons.mjs';
 
 type Package = { id: string; dir: string; name: string };
 
@@ -85,6 +85,30 @@ describe.each(cases)('extension %s', (id, pkg) => {
 			const badge = BADGES[id];
 			expect(badge, `add "${id}" to BADGES in scripts/render-icons.mjs`).toBeDefined();
 			expect(existsSync(path.join(root, 'media', 'marketplace', badge.file))).toBe(true);
+		});
+
+		it('has its logo in the walkthrough, rendered from the badge artwork', () => {
+			const logo = path.join(root, 'media', 'walkthrough', 'logos', `${id}.svg`);
+			expect(existsSync(logo), `run node scripts/render-icons.mjs to write media/walkthrough/logos/${id}.svg`).toBe(true);
+			expect(readFileSync(logo, 'utf8'), 'out of date: run node scripts/render-icons.mjs').toBe(walkthroughLogo(BADGES[id].file, BADGES[id].scale));
+		});
+	}
+});
+
+describe('walkthrough', () => {
+	const core = packages.find((p: Package) => p.id === 'core') as Package;
+	const steps: { id: string; media: { markdown?: string; svg?: string } }[] = manifest(core).contributes.walkthroughs.flatMap((w: { steps: unknown[] }) => w.steps);
+	for (const step of steps) {
+		const media = step.media.markdown ?? step.media.svg ?? '';
+		it(`step ${step.id} has its media and images, packaged`, () => {
+			expect(existsSync(path.join(root, media)), media).toBe(true);
+			expect(packaged(core, media)).toBe(true);
+			if (!media.endsWith('.md')) return;
+			for (const [, src] of readFileSync(path.join(root, media), 'utf8').matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
+				const image = path.posix.join(path.posix.dirname(media), src);
+				expect(existsSync(path.join(root, image)), `${media}: ${src}`).toBe(true);
+				expect(packaged(core, image), `${image} is not packaged`).toBe(true);
+			}
 		});
 	}
 });
