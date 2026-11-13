@@ -113,7 +113,6 @@
 	.size-form {
 		display: grid;
 		gap: 0.6rem;
-		max-width: 32rem;
 	}
 	.now,
 	.hint,

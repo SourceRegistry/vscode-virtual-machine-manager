@@ -939,11 +939,6 @@
           "group": "2_media@2"
         },
         {
-          "command": "vmm.manageDisks",
-          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bdisks;/",
-          "group": "2_media@3"
-        },
-        {
           "command": "vmm.takeSnapshot",
           "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bsnapshots;/",
           "group": "2_snapshots@1"
@@ -1201,11 +1196,6 @@
           "command": "vmm.changeMedia",
           "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bmedia;/",
           "group": "2_media@2"
-        },
-        {
-          "command": "vmm.manageDisks",
-          "when": "webviewId == vmm.overview && vmmItem =~ /^vm;.*\\bdisks;/",
-          "group": "2_media@3"
         },
         {
           "command": "vmm.takeSnapshot",

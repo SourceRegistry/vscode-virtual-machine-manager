@@ -5,7 +5,7 @@
  *
  *   cluster;status=<status>;[signout;][rdp;]     rdp: the provider opens RDP consoles (remembered credentials)
  *   node;status=<status>;[create;][adopt;][import;]
- *   vm;state=<state>;flag;flag;     flags: power actions, busy, favorite, graphical, serial, terminal (serial without a display), external, media, ejectable, disks, snapshots, guestexec, guestfiles, clone, details, edit, delete, istemplate (is a template), totemplate (can become one)
+ *   vm;state=<state>;flag;flag;     flags: power actions, busy, favorite, graphical, serial, terminal (serial without a display), external, media, ejectable, snapshots, guestexec, guestfiles, clone, details, edit, delete, istemplate (is a template), totemplate (can become one)
  *
  * While a power operation runs, `state` is the transitional state and only the actions allowed
  * during it are listed (see operations.ts), plus `busy`.
@@ -80,8 +80,6 @@ export function vmContextValue(vm: VmInfo & { operation?: PowerAction; favorite?
 			flags.push('media');
 			if (vm.mediaInserted) flags.push('ejectable');
 		}
-		// An attached VM's disks belong to whoever started it.
-		if (caps.diskOperations?.length && vm.origin !== 'adopted') flags.push('disks');
 		if (caps.snapshots) flags.push('snapshots');
 		if (caps.guestExec) flags.push('guestexec');
 		if (caps.guestFiles) flags.push('guestfiles');
