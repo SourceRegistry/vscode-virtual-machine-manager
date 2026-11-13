@@ -347,7 +347,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		const location = await resolveVm(arg, 'Select a virtual machine to manage the disks of', (l) => !!l.cluster.connection?.capabilities.diskOperations?.length && l.vm.origin !== 'adopted');
 		if (!location) return;
 		const diskId = asRecord(arg)?.diskId;
-		await manageDisksFlow({ extensionUri: context.extensionUri, manager, activity }, location, typeof diskId === 'string' ? diskId : undefined);
+		await manageDisksFlow({ manager, activity }, location, typeof diskId === 'string' ? diskId : undefined);
 	}
 
 	// -----------------------------------------------------------------------------------------

@@ -8,10 +8,8 @@
 	import Icon from '#lib/client-lib/components/icons/Icon.svelte';
 	import Loader from '#lib/client-lib/components/feedback/Loader.svelte';
 	import Status from '#lib/client-lib/components/feedback/Status.svelte';
-	import Modal from '#lib/client-lib/components/overlays/Modal.svelte';
-	import DiskSizeForm from '../components/DiskSizeForm.svelte';
 	import { formatMemory, formatUptime, type Capabilities, type PassthroughInfo, type Snapshot, type VmDetails, type VmInfo, type VmStats } from '@vmm/sdk';
-	import type { BootData, DiskSizeAnswer, DiskSizeRequest, OverviewCommand } from '../../../shared/protocol';
+	import type { BootData, OverviewCommand } from '../../../shared/protocol';
 	import { guestLabel, originLabel } from '../../../shared/origin';
 	import { browserUrl, GUEST_HOST_ADDRESS, sshCommand } from '../../../shared/forwards';
 	import {
@@ -36,27 +34,6 @@
 
 	let vm = $state<(VmInfo & { operation?: string }) | undefined>();
 	let caps = $state<Capabilities | undefined>();
-	/** A disk size the host asks for (Disks… → grow or add), shown in a modal. */
-	let sizeAsk = $state<DiskSizeRequest | undefined>();
-	let sizeModal = $state(false);
-
-	function showSizeAsk(ask: DiskSizeRequest | undefined) {
-		if (!ask || ask.askId === sizeAsk?.askId) return;
-		sizeAsk = ask;
-		sizeModal = true;
-	}
-
-	async function answerSize(answer: DiskSizeAnswer) {
-		if (!sizeAsk) return;
-		await request('submitDiskSize', { askId: sizeAsk.askId, ...answer });
-		sizeModal = false;
-	}
-
-	/** Cancel, Escape, a click outside: the host stops waiting. */
-	function cancelSize() {
-		if (sizeAsk && sizeModal) void request('cancelDiskSize', { askId: sizeAsk.askId });
-		sizeModal = false;
-	}
 	/** The disk operations of the provider apply to this VM, and a disk can be added in its current state. */
 	const manageableDisks = $derived(!!caps?.diskOperations?.length && vm?.origin !== 'adopted');
 	const canAddDisk = $derived(
@@ -257,9 +234,7 @@
 		let alive = true;
 		const unsubscribe = onMessage((message) => {
 			if (message.kind === 'event' && message.name === 'vm') vm = message.payload;
-			if (message.kind === 'event' && message.name === 'diskSizeAsk') showSizeAsk(message.payload);
 		});
-		void request('getDiskSizeAsk').then(showSizeAsk, () => undefined);
 		void (async () => {
 			try {
 				const dashboard = await request('getDashboard');
@@ -664,20 +639,6 @@
 		</Section>
 	{/if}
 </Page>
-
-<Modal
-	bind:show={sizeModal}
-	title={sizeAsk?.mode === 'grow' ? `Grow ${sizeAsk.diskLabel ?? 'disk'}` : sizeAsk?.formats?.length === 0 ? 'Attach a disk image' : 'Add a disk'}
-	description={sizeAsk?.vmName}
-	alignVertical="center"
-	onclose={cancelSize}
->
-	{#if sizeAsk}
-		{#key sizeAsk.askId}
-			<DiskSizeForm ask={sizeAsk} onsubmit={answerSize} oncancel={cancelSize} />
-		{/key}
-	{/if}
-</Modal>
 
 <style>
 	.tiles {

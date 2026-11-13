@@ -65,32 +65,6 @@ export interface BootData {
 	rdp?: { wasmUrl: string };
 }
 
-/**
- * The size form (a modal on the details page) asks for the new size of a disk (`grow`) or the size and format of a
- * new one (`add`). `askId` tells one question from the next.
- */
-export interface DiskSizeRequest {
-	askId: number;
-	mode: 'grow' | 'add';
-	vmName: string;
-	diskLabel?: string;
-	/** Growing: the disk's size now, in bytes. */
-	currentBytes?: number;
-	/** Adding: the image formats to choose from (the first is the default). */
-	formats?: Array<'qcow2' | 'raw'>;
-	/** Shown above the form, e.g. what else waits for a shut down. */
-	note?: string;
-	/** Adding: an existing image file can be attached instead of an empty disk. */
-	attach?: {
-		modes: Array<'copy' | 'reference'>;
-		/** The file is on this computer: offer a file dialog (otherwise the path is typed, on the host). */
-		browse: boolean;
-	};
-}
-
-/** A size (empty disk to add, or the new size to grow to), or an image file to attach. */
-export type DiskSizeAnswer = { bytes: number; format?: 'qcow2' | 'raw' } | { file: { path: string; copy: boolean } };
-
 /** Everything the in-editor RDP client needs to start a session through the host's gateway. */
 export interface RdpStartConfig {
 	username: string;
@@ -194,12 +168,6 @@ export interface RpcMethods {
 		params: { directory: boolean; title: string; current?: string; filters?: Record<string, string[]> };
 		result: string | undefined;
 	};
-	/** The size question waiting for an answer, if any (a page that just opened asks for it). */
-	getDiskSizeAsk: { params: void; result: DiskSizeRequest | undefined };
-	submitDiskSize: { params: DiskSizeAnswer & { askId: number }; result: void };
-	/** A file dialog for a disk image on this computer. */
-	browseDiskImage: { params: void; result: string | undefined };
-	cancelDiskSize: { params: { askId: number }; result: void };
 	// console
 	reconnect: { params: void; result: void };
 	power: { params: { action: PowerAction }; result: void };
@@ -228,8 +196,6 @@ export type HostToWebview =
 	| { kind: 'response'; id: number; ok: false; error: string }
 	| { kind: 'event'; name: 'snapshot'; payload: ClusterSnapshot[] }
 	| { kind: 'event'; name: 'vm'; payload: VmInfo | undefined }
-	/** The details page shows the size form for this question. */
-	| { kind: 'event'; name: 'diskSizeAsk'; payload: DiskSizeRequest }
 	| { kind: 'console.status'; status: ConsoleStatus; message?: string }
 	| { kind: 'console.data'; data: Uint8Array }
 	| { kind: 'console.credentials'; password: string }

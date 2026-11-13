@@ -2,50 +2,45 @@ import type { ClusterConnection, DiskDevice, DiskImageFormat, DiskOperation } fr
 import { formatBytes } from './metrics';
 
 /**
- * Disk sizes in the size form: a number and a unit (MB or GB, binary as QEMU and libvirt count them: a GB is
- * 1024³ bytes). Sizes are rounded up to whole 512-byte sectors, the smallest step a disk image takes. Pure.
+ * Disk sizes as people type them: `40 GB`, `512 MB`, `1.5 TB`, a plain number (GB), and `+10 GB` / `+20 MB` for
+ * that much more. Binary units, as QEMU and libvirt count them (a GB is 1024³ bytes). Sizes are rounded up to whole
+ * 512-byte sectors, the smallest step a disk image takes. Pure.
  */
 
-export type SizeUnit = 'MB' | 'GB';
-export const UNIT_BYTES: Record<SizeUnit, number> = { MB: 1024 ** 2, GB: 1024 ** 3 };
+const UNITS: Record<string, number> = { b: 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4 };
 const SECTOR = 512;
-/** The smallest disk worth making. */
-export const MIN_DISK_BYTES = 1024 ** 2;
-export const MAX_DISK_BYTES = 64 * 1024 ** 4;
+const MIN_DISK_BYTES = 1024 ** 2;
+const MAX_DISK_BYTES = 64 * 1024 ** 4;
 
-/** MB for disks under 1 GB, else GB. */
-export function defaultUnit(bytes: number | undefined): SizeUnit {
-	return bytes !== undefined && bytes < UNIT_BYTES.GB ? 'MB' : 'GB';
+/** Bytes (whole sectors), or why the text is not a size. A leading `+` adds to `current`, which it then needs. */
+export function parseDiskSize(text: string, current?: number): { bytes: number; added?: number } | { problem: string } {
+	const match = /^\s*(\+)?\s*(\d+(?:[.,]\d+)?|[.,]\d+)\s*([bkmgt])?(?:i?b)?\s*$/i.exec(text);
+	if (!match) return { problem: 'Type a size like 40 GB or 512 MB, or +10 GB for that much more.' };
+	const [, plus, number, unit] = match;
+	const amount = Number(number!.replace(',', '.')) * UNITS[(unit ?? 'g').toLowerCase()]!;
+	if (plus) {
+		if (current === undefined) return { problem: 'The current size is not known: type the whole size.' };
+		const bytes = Math.ceil((current + amount) / SECTOR) * SECTOR;
+		return { bytes, added: bytes - current };
+	}
+	return { bytes: Math.ceil(amount / SECTOR) * SECTOR };
 }
 
-/** `bytes` in `unit`, with at most three decimals (for showing and filling in). */
-export function inUnit(bytes: number, unit: SizeUnit): number {
-	return Math.round((bytes / UNIT_BYTES[unit]) * 1000) / 1000;
-}
-
-/** A value in `unit` as bytes, rounded up to a whole sector. */
-export function sizeBytes(value: number, unit: SizeUnit): number {
-	return Math.ceil((value * UNIT_BYTES[unit]) / SECTOR) * SECTOR;
-}
-
-/** The first whole number of `unit` above `bytes`: what the form suggests when growing. */
-export function nextWhole(bytes: number, unit: SizeUnit): number {
-	return Math.floor(bytes / UNIT_BYTES[unit] + 1e-9) + 1;
-}
-
-/** Why `value` in `unit` is not a usable size (`undefined` when it is). With `current`, the disk must grow. */
-export function sizeProblem(value: number | null | undefined, unit: SizeUnit, current?: number): string | undefined {
-	if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) return 'Enter a size.';
-	return bytesProblem(sizeBytes(value, unit), current);
-}
-
-/** Why `bytes` is not a usable size (`undefined` when it is). With `current`, the disk must grow. */
-export function bytesProblem(bytes: number, current?: number): string | undefined {
-	if (!Number.isFinite(bytes)) return 'Enter a size.';
-	if (current !== undefined && bytes <= current) return `Disks can only grow: give more than ${formatBytes(current)}.`;
-	if (bytes < MIN_DISK_BYTES) return 'Give the disk at least 1 MB.';
-	if (bytes > MAX_DISK_BYTES) return 'That is more than 64 TB.';
+/** Why `text` is not a usable size (`undefined` when it is). With `current`, the disk must grow. */
+export function diskSizeProblem(text: string, current?: number): string | undefined {
+	const parsed = parseDiskSize(text, current);
+	if ('problem' in parsed) return parsed.problem;
+	if (current !== undefined && parsed.bytes <= current) return `Disks can only grow: give more than ${formatBytes(current)}, or +10 GB.`;
+	if (parsed.bytes < MIN_DISK_BYTES) return 'Give the disk at least 1 MB.';
+	if (parsed.bytes > MAX_DISK_BYTES) return 'That is more than 64 TB.';
 	return undefined;
+}
+
+/** What a typed size comes to, e.g. `32.0 GB → 42.0 GB (+10.0 GB)`; `undefined` while it is not a usable size. */
+export function diskSizePreview(text: string, current?: number): string | undefined {
+	if (diskSizeProblem(text, current)) return undefined;
+	const parsed = parseDiskSize(text, current) as { bytes: number };
+	return current === undefined ? formatBytes(parsed.bytes) : `${formatBytes(current)} → ${formatBytes(parsed.bytes)} (+${formatBytes(parsed.bytes - current)})`;
 }
 
 /** What can be done now, and what would need the VM shut down. */
