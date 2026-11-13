@@ -2,7 +2,7 @@
   "name": "vm-manager-qemu",
   "displayName": "VM Manager – QEMU",
   "description": "QEMU provider for VM Manager: create and run QEMU virtual machines with graphical (noVNC) and serial consoles.",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "sourceregistry",
   "icon": "media/icon.png",
   "license": "Apache-2.0",
