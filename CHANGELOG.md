@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.18.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.17.0...v0.18.0) (2026-11-13)
+
+
+### Features
+
+* start, shut down, reboot, power off and delete several machines at once ([8629423](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/8629423f763c6d10a56fb26e9e5146459bbccbb4))
+
 # [0.17.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.16.0...v0.17.0) (2026-11-13)
 
 
