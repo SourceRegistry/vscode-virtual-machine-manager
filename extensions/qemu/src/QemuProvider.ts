@@ -60,7 +60,7 @@ import { freeLocalPort, LocalHost, type Host } from './host';
 import { SshHost, validateSshTarget } from './sshHost';
 import { buildIso, cloudFields, cloudInitProblem, ensureImage, findImage, hostnameFor, imageFileName, metaData, parseKeys, sha512Crypt, SOURCE_ISO, userData } from '@vmm/sdk/provisioning';
 import { cloneDefinition } from './clone';
-import { addDiskProblem, convertArgs, convertTarget, diskIndex, exportArgs, newDiskFile } from './disks';
+import { addDiskProblem, convertArgs, convertTarget, diskIndex, exportArgs, newDiskFile, sectors } from './disks';
 import { commonSnapshots, qmpSnapshots, snapshotNameProblem, type QemuSnapshotInfo, type QmpSnapshotBlock } from './snapshots';
 import { walkFiles } from './hostProcess';
 import { iommuEnabled, listPciHost, listUsbHost, pciDriver, runPrivileged } from './hostDevices';
@@ -1173,7 +1173,7 @@ export class QemuConnection implements ClusterConnection {
 			taken.push(file);
 			file = newDiskFile(dir, taken, format, (...parts) => this.host.path.join(...parts));
 		}
-		await this.img(['create', '-f', format, file, String(Math.round(disk.sizeBytes))], 'Could not create the disk', 120_000);
+		await this.img(['create', '-f', format, file, String(sectors(disk.sizeBytes))], 'Could not create the disk', 120_000);
 		try {
 			// The machine's snapshots cover every disk: the new one gets them too, empty, as it was when they were taken.
 			for (const snapshot of snapshots) await this.snapshotImg(['-c', snapshot.name, file], `Could not prepare ${path.basename(file)} for snapshot "${snapshot.name}"`);
@@ -1210,7 +1210,7 @@ export class QemuConnection implements ClusterConnection {
 		if (!Number.isFinite(sizeBytes) || sizeBytes <= current) {
 			throw new ProviderError('Disks can only grow: give a size larger than the current one.', 'invalid');
 		}
-		const size = Math.round(sizeBytes);
+		const size = sectors(sizeBytes);
 		if (runtime) {
 			// The guest sees the new size at once; QEMU refuses to shrink.
 			const client = await this.client(vmId, runtime);

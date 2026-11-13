@@ -8,6 +8,11 @@ export const MAX_SATA_DISKS = 5;
 /** VirtIO disks each take a PCI slot: plenty, but not unlimited. */
 export const MAX_VIRTIO_DISKS = 16;
 
+/** `bytes` rounded up to whole 512-byte sectors: qcow2 and QMP refuse other sizes. */
+export function sectors(bytes: number): number {
+	return Math.ceil(bytes / 512) * 512;
+}
+
 /** The index in `VmDefinition.disks` of a `DiskDevice.id` (`disk0`, `disk1`, …), or `undefined`. */
 export function diskIndex(diskId: string, count: number): number | undefined {
 	const match = /^disk(\d+)$/.exec(diskId);

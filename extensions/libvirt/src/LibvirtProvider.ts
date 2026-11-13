@@ -780,7 +780,7 @@ export class LibvirtConnection implements ClusterConnection {
 		// Next to the domain's first disk, else in the usual pool.
 		const pool = (first?.path ? (await this.virsh.exec(['vol-pool', first.path]).catch(() => '')).trim() : '') || (await this.ensurePool(''));
 		const volume = `${domain.name}-${target}.${format === 'qcow2' ? 'qcow2' : 'img'}`;
-		await this.virsh.exec(['vol-create-as', pool, volume, `${Math.round(newDisk.sizeBytes)}b`, '--format', format], 120_000);
+		await this.virsh.exec(['vol-create-as', pool, volume, `${Math.ceil(newDisk.sizeBytes / 512) * 512}b`, '--format', format], 120_000);
 		try {
 			const file = (await this.virsh.exec(['vol-path', '--pool', pool, volume])).trim();
 			// Keeps the VNC password: without --security-info libvirt leaves it out of the XML.
@@ -814,7 +814,7 @@ export class LibvirtConnection implements ClusterConnection {
 		const { capacity } = parseBlkinfo(await this.virsh.exec(['domblkinfo', id, disk!.target], 10_000));
 		if (capacity === undefined) throw new ProviderError(`The size of ${disk!.target} cannot be read`, 'failed');
 		if (!Number.isFinite(sizeBytes) || sizeBytes <= capacity) throw new ProviderError('Disks can only grow: give a size larger than the current one.', 'invalid');
-		const size = `${Math.round(sizeBytes)}b`;
+		const size = `${Math.ceil(sizeBytes / 512) * 512}b`;
 		if (running) await this.virsh.exec(['blockresize', id, disk!.target, size], 120_000);
 		else if (disk!.path) await this.virsh.exec(['vol-resize', disk!.path, size], 120_000);
 		else throw new ProviderError(`${disk!.target} has no file to grow`, 'unsupported');

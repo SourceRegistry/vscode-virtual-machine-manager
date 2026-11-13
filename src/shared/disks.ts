@@ -2,42 +2,49 @@ import type { ClusterConnection, DiskDevice, DiskImageFormat, DiskOperation } fr
 import { formatBytes } from './metrics';
 
 /**
- * Disk sizes as people type them: `20`, `20G`, `20 GB`, `512 MiB`, `1.5T`, and `+10G` for "10 GB more". Binary
- * units (a GB is 1024³ bytes), as QEMU and libvirt count them. Pure.
+ * Disk sizes in the size form: a number and a unit (MB or GB, binary as QEMU and libvirt count them: a GB is
+ * 1024³ bytes). Sizes are rounded up to whole 512-byte sectors, the smallest step a disk image takes. Pure.
  */
 
-const UNITS: Record<string, number> = { b: 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4 };
+export type SizeUnit = 'MB' | 'GB';
+export const UNIT_BYTES: Record<SizeUnit, number> = { MB: 1024 ** 2, GB: 1024 ** 3 };
+const SECTOR = 512;
+/** The smallest disk worth making. */
+export const MIN_DISK_BYTES = 1024 ** 2;
+export const MAX_DISK_BYTES = 64 * 1024 ** 4;
 
-/**
- * Bytes, or the reason the text is not a size. A number without a unit is in GB. A leading `+` adds to `current`
- * (and needs it).
- */
-export function parseDiskSize(text: string, current?: number): { bytes: number } | { problem: string } {
-	const match = /^\s*(\+)?\s*(\d+(?:[.,]\d+)?)\s*([bkmgt])?(?:i?b)?\s*$/i.exec(text);
-	if (!match) return { problem: 'Write a size like 20 GB, 512 MB or +10 GB.' };
-	const [, plus, number, unit] = match;
-	const bytes = Math.round(Number(number!.replace(',', '.')) * UNITS[(unit ?? 'g').toLowerCase()]!);
-	if (plus) {
-		if (current === undefined) return { problem: 'Give the whole size: the current size is not known.' };
-		return { bytes: current + bytes };
-	}
-	return { bytes };
+/** MB for disks under 1 GB, else GB. */
+export function defaultUnit(bytes: number | undefined): SizeUnit {
+	return bytes !== undefined && bytes < UNIT_BYTES.GB ? 'MB' : 'GB';
 }
 
-/** Why `text` is not a usable new size for a disk of `current` bytes (`undefined` when it is). */
-export function growProblem(text: string, current: number | undefined): string | undefined {
-	const parsed = parseDiskSize(text, current);
-	if ('problem' in parsed) return parsed.problem;
-	if (current !== undefined && parsed.bytes <= current) return 'Disks can only grow: give a size larger than the current one.';
-	return undefined;
+/** `bytes` in `unit`, with at most three decimals (for showing and filling in). */
+export function inUnit(bytes: number, unit: SizeUnit): number {
+	return Math.round((bytes / UNIT_BYTES[unit]) * 1000) / 1000;
 }
 
-/** Why `text` is not a usable size for a new disk (`undefined` when it is). */
-export function newDiskProblem(text: string): string | undefined {
-	const parsed = parseDiskSize(text);
-	if ('problem' in parsed) return parsed.problem;
-	if (parsed.bytes < 1024 ** 2) return 'Give the disk at least 1 MB.';
-	if (parsed.bytes > 64 * 1024 ** 4) return 'That is more than 64 TB.';
+/** A value in `unit` as bytes, rounded up to a whole sector. */
+export function sizeBytes(value: number, unit: SizeUnit): number {
+	return Math.ceil((value * UNIT_BYTES[unit]) / SECTOR) * SECTOR;
+}
+
+/** The first whole number of `unit` above `bytes`: what the form suggests when growing. */
+export function nextWhole(bytes: number, unit: SizeUnit): number {
+	return Math.floor(bytes / UNIT_BYTES[unit] + 1e-9) + 1;
+}
+
+/** Why `value` in `unit` is not a usable size (`undefined` when it is). With `current`, the disk must grow. */
+export function sizeProblem(value: number | null | undefined, unit: SizeUnit, current?: number): string | undefined {
+	if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) return 'Enter a size.';
+	return bytesProblem(sizeBytes(value, unit), current);
+}
+
+/** Why `bytes` is not a usable size (`undefined` when it is). With `current`, the disk must grow. */
+export function bytesProblem(bytes: number, current?: number): string | undefined {
+	if (!Number.isFinite(bytes)) return 'Enter a size.';
+	if (current !== undefined && bytes <= current) return `Disks can only grow: give more than ${formatBytes(current)}.`;
+	if (bytes < MIN_DISK_BYTES) return 'Give the disk at least 1 MB.';
+	if (bytes > MAX_DISK_BYTES) return 'That is more than 64 TB.';
 	return undefined;
 }
 

@@ -18,7 +18,7 @@ import type {
 	VmStats
 } from '@vmm/sdk';
 
-export type ViewKind = 'overview' | 'vmSettings' | 'vmDashboard' | 'console.vnc' | 'console.serial' | 'console.preview' | 'console.rdp';
+export type ViewKind = 'overview' | 'vmSettings' | 'vmDashboard' | 'diskSize' | 'console.vnc' | 'console.serial' | 'console.preview' | 'console.rdp';
 
 export interface VmRef {
 	clusterId: string;
@@ -63,6 +63,24 @@ export interface BootData {
 	settings?: { scaleViewport: boolean };
 	/** RDP console: where the IronRDP WebAssembly module is served from. */
 	rdp?: { wasmUrl: string };
+	/** Size form: what is asked. */
+	diskSize?: DiskSizeRequest;
+}
+
+/** The size form asks for the new size of a disk (`grow`) or the size and format of a new one (`add`). */
+export interface DiskSizeRequest {
+	mode: 'grow' | 'add';
+	vmName: string;
+	diskLabel?: string;
+	/** Growing: the disk's size now, in bytes. */
+	currentBytes?: number;
+	/** Adding: the image formats to choose from (the first is the default). */
+	formats?: Array<'qcow2' | 'raw'>;
+}
+
+export interface DiskSizeAnswer {
+	bytes: number;
+	format?: 'qcow2' | 'raw';
 }
 
 /** Everything the in-editor RDP client needs to start a session through the host's gateway. */
@@ -168,6 +186,9 @@ export interface RpcMethods {
 		params: { directory: boolean; title: string; current?: string; filters?: Record<string, string[]> };
 		result: string | undefined;
 	};
+	// disk size form
+	submitDiskSize: { params: DiskSizeAnswer; result: void };
+	cancelDiskSize: { params: void; result: void };
 	// console
 	reconnect: { params: void; result: void };
 	power: { params: { action: PowerAction }; result: void };

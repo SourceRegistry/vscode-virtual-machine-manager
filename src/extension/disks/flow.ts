@@ -6,7 +6,8 @@ import type { ConnectionManager, VmLocation } from '../clusters/ConnectionManage
 import type { VmActivity } from '../activity/VmActivity';
 import { showError } from '../util/log';
 import { formatBytes } from '../../shared/metrics';
-import { diskDescription, diskOperations, EXPORT_CHOICES, exportFileName, growProblem, needsStopText, newDiskProblem, parseDiskSize, type ExportChoice } from '../../shared/disks';
+import { diskDescription, diskOperations, EXPORT_CHOICES, exportFileName, needsStopText, type ExportChoice } from '../../shared/disks';
+import { askDiskSize } from './DiskSizePanel';
 
 /**
  * "Disks…": add, grow, convert, export and remove a VM's disks, in quick picks. Offers only what the provider
@@ -14,6 +15,7 @@ import { diskDescription, diskOperations, EXPORT_CHOICES, exportFileName, growPr
  */
 
 export interface DiskFlowDeps {
+	extensionUri: vscode.Uri;
 	manager: ConnectionManager;
 	activity: VmActivity;
 }
@@ -99,27 +101,13 @@ function withDiskProgress<T>(title: string, task: (progress: (update: DiskProgre
 
 async function addDisk(deps: DiskFlowDeps, location: VmLocation, connection: ClusterConnection): Promise<void> {
 	const vmName = location.vm.name;
-	const sizeText = await vscode.window.showInputBox({
-		title: `Add a disk to ${vmName} (1/2)`,
-		prompt: 'Size of the new disk',
-		value: '20 GB',
-		validateInput: (text) => newDiskProblem(text)
-	});
-	if (sizeText === undefined) return;
-	const parsed = parseDiskSize(sizeText);
-	if ('problem' in parsed) return;
-	const format = await vscode.window.showQuickPick(
-		[
-			{ label: 'qcow2', description: 'Takes space as the guest writes; allows snapshots', format: 'qcow2' as const },
-			{ label: 'raw', description: 'Takes its full size at once; a little faster', format: 'raw' as const }
-		],
-		{ title: `Add a disk to ${vmName} (2/2)`, placeHolder: 'Image format' }
-	);
-	if (!format) return;
+	const answer = await askDiskSize(deps.extensionUri, { mode: 'add', vmName, formats: ['qcow2', 'raw'] });
+	if (!answer) return;
+	const format = answer.format ?? 'qcow2';
 	try {
-		const disk = await withDiskProgress(`Adding a disk to ${vmName}…`, () => connection.addDisk!(location.ref.nodeId, location.ref.vmId, { sizeBytes: parsed.bytes, format: format.format }));
-		await done(deps, location, `Added ${disk.label} (${formatBytes(parsed.bytes)}, ${format.format})${disk.path ? `: ${disk.path}` : ''}`, `Added ${disk.label} to ${vmName}`);
-		void vscode.window.showInformationMessage(`${disk.label} (${formatBytes(parsed.bytes)}) was added to ${vmName}. The guest sees an empty disk: partition and format it before use.`);
+		const disk = await withDiskProgress(`Adding a disk to ${vmName}…`, () => connection.addDisk!(location.ref.nodeId, location.ref.vmId, { sizeBytes: answer.bytes, format: format }));
+		await done(deps, location, `Added ${disk.label} (${formatBytes(answer.bytes)}, ${format})${disk.path ? `: ${disk.path}` : ''}`, `Added ${disk.label} to ${vmName}`);
+		void vscode.window.showInformationMessage(`${disk.label} (${formatBytes(answer.bytes)}) was added to ${vmName}. The guest sees an empty disk: partition and format it before use.`);
 	} catch (error) {
 		await showError(`Could not add a disk to ${vmName}`, error);
 	}
@@ -128,20 +116,13 @@ async function addDisk(deps: DiskFlowDeps, location: VmLocation, connection: Clu
 async function growDisk(deps: DiskFlowDeps, location: VmLocation, connection: ClusterConnection, disk: DiskDevice): Promise<void> {
 	const vmName = location.vm.name;
 	const current = disk.sizeBytes;
-	const text = await vscode.window.showInputBox({
-		title: `Grow ${disk.label} of ${vmName}`,
-		prompt: `${current !== undefined ? `Now ${formatBytes(current)}. ` : ''}New size, e.g. 40 GB, or +10 GB for 10 GB more. Disks cannot shrink.`,
-		value: current !== undefined ? '+10 GB' : '',
-		validateInput: (value) => growProblem(value, current)
-	});
-	if (text === undefined) return;
-	const parsed = parseDiskSize(text, current);
-	if ('problem' in parsed) return;
+	const answer = await askDiskSize(deps.extensionUri, { mode: 'grow', vmName, diskLabel: disk.label, currentBytes: current });
+	if (!answer) return;
 	try {
-		await withDiskProgress(`Growing ${disk.label} of ${vmName}…`, () => connection.resizeDisk!(location.ref.nodeId, location.ref.vmId, disk.id, parsed.bytes));
-		await done(deps, location, `Grew ${disk.label} from ${formatBytes(current)} to ${formatBytes(parsed.bytes)}`, `${disk.label} of ${vmName} is now ${formatBytes(parsed.bytes)}`);
+		await withDiskProgress(`Growing ${disk.label} of ${vmName}…`, () => connection.resizeDisk!(location.ref.nodeId, location.ref.vmId, disk.id, answer.bytes));
+		await done(deps, location, `Grew ${disk.label} from ${formatBytes(current)} to ${formatBytes(answer.bytes)}`, `${disk.label} of ${vmName} is now ${formatBytes(answer.bytes)}`);
 		void vscode.window.showInformationMessage(
-			`${disk.label} of ${vmName} is now ${formatBytes(parsed.bytes)}. Grow the partition and file system inside the guest to use the space (Linux: growpart and resize2fs; Windows: Disk Management, Extend Volume).`
+			`${disk.label} of ${vmName} is now ${formatBytes(answer.bytes)}. Grow the partition and file system inside the guest to use the space (Linux: growpart and resize2fs; Windows: Disk Management, Extend Volume).`
 		);
 	} catch (error) {
 		await showError(`Could not grow ${disk.label} of ${vmName}`, error);

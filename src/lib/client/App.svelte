@@ -4,6 +4,7 @@
 	import Overview from './views/Overview.svelte';
 	import VmSettings from './views/VmSettings.svelte';
 	import VmDashboard from './views/VmDashboard.svelte';
+	import DiskSize from './views/DiskSize.svelte';
 	import ConsoleVnc from './views/ConsoleVnc.svelte';
 	import ConsoleSerial from './views/ConsoleSerial.svelte';
 	import ConsolePreview from './views/ConsolePreview.svelte';
@@ -18,6 +19,8 @@
 	<VmSettings {boot} />
 {:else if boot.view === 'vmDashboard'}
 	<VmDashboard {boot} />
+{:else if boot.view === 'diskSize'}
+	<DiskSize {boot} />
 {:else if boot.view === 'console.vnc'}
 	<ConsoleVnc {boot} />
 {:else if boot.view === 'console.serial'}

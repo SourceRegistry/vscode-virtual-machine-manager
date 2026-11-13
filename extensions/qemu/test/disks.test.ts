@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { addDiskProblem, convertArgs, convertTarget, diskIndex, exportArgs, formatExtension, MAX_SATA_DISKS, newDiskFile } from '../src/disks';
+import { addDiskProblem, convertArgs, convertTarget, diskIndex, exportArgs, formatExtension, MAX_SATA_DISKS, newDiskFile, sectors } from '../src/disks';
 import { diskFormat } from '../src/importers';
 
 describe('disk helpers', () => {
@@ -10,6 +10,12 @@ describe('disk helpers', () => {
 		expect(diskIndex('disk2', 2)).toBeUndefined();
 		expect(diskIndex('cd0', 2)).toBeUndefined();
 		expect(diskIndex('disk', 2)).toBeUndefined();
+	});
+
+	it('rounds sizes up to whole sectors', () => {
+		expect(sectors(1024 ** 2)).toBe(1024 ** 2);
+		expect(sectors(1)).toBe(512);
+		expect(sectors(1025)).toBe(1536);
 	});
 
 	it('limits SATA to the ports the CD/DVD drive leaves', () => {

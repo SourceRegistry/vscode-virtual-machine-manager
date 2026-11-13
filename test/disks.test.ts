@@ -1,42 +1,49 @@
 import { describe, expect, it } from 'vitest';
 import type { Capabilities } from '@vmm/sdk';
-import { diskDescription, diskOperations, EXPORT_CHOICES, exportFileName, growProblem, needsStopText, newDiskProblem, parseDiskSize } from '../src/shared/disks';
+import { bytesProblem, defaultUnit, diskDescription, diskOperations, EXPORT_CHOICES, exportFileName, inUnit, needsStopText, nextWhole, sizeBytes, sizeProblem } from '../src/shared/disks';
 
 const GB = 1024 ** 3;
 
 describe('disk sizes', () => {
-	it('reads sizes as people type them, in binary units, GB by default', () => {
-		expect(parseDiskSize('20')).toEqual({ bytes: 20 * GB });
-		expect(parseDiskSize('20G')).toEqual({ bytes: 20 * GB });
-		expect(parseDiskSize(' 20 GB ')).toEqual({ bytes: 20 * GB });
-		expect(parseDiskSize('20GiB')).toEqual({ bytes: 20 * GB });
-		expect(parseDiskSize('512 MB')).toEqual({ bytes: 512 * 1024 ** 2 });
-		expect(parseDiskSize('1.5T')).toEqual({ bytes: 1.5 * 1024 * GB });
-		expect(parseDiskSize('1,5 t')).toEqual({ bytes: 1.5 * 1024 * GB });
-		expect(parseDiskSize('100 b')).toEqual({ bytes: 100 });
+	const MB = 1024 ** 2;
+
+	it('uses MB for disks under 1 GB', () => {
+		expect(defaultUnit(64 * MB)).toBe('MB');
+		expect(defaultUnit(GB)).toBe('GB');
+		expect(defaultUnit(undefined)).toBe('GB');
 	});
 
-	it('adds to the current size with +', () => {
-		expect(parseDiskSize('+10G', 20 * GB)).toEqual({ bytes: 30 * GB });
-		expect(parseDiskSize('+10G')).toHaveProperty('problem');
+	it('converts between units and rounds up to whole 512-byte sectors', () => {
+		expect(sizeBytes(20, 'GB')).toBe(20 * GB);
+		expect(sizeBytes(1.5, 'GB')).toBe(1.5 * GB);
+		expect(sizeBytes(64, 'MB')).toBe(64 * MB);
+		expect(sizeBytes(0.0001, 'MB') % 512).toBe(0);
+		expect(sizeBytes(0.0001, 'MB')).toBe(512);
+		expect(inUnit(21 * GB, 'MB')).toBe(21504);
+		expect(inUnit(1.5 * GB, 'GB')).toBe(1.5);
 	});
 
-	it('rejects what is not a size', () => {
-		for (const text of ['', 'big', '-5G', '10 PB', '10 GBs']) expect(parseDiskSize(text)).toHaveProperty('problem');
+	it('suggests the next whole unit when growing', () => {
+		expect(nextWhole(20 * GB, 'GB')).toBe(21);
+		expect(nextWhole(20.4 * GB, 'GB')).toBe(21);
+		expect(nextWhole(64 * MB, 'MB')).toBe(65);
 	});
 
-	it('only lets disks grow', () => {
-		expect(growProblem('30G', 20 * GB)).toBeUndefined();
-		expect(growProblem('+1G', 20 * GB)).toBeUndefined();
-		expect(growProblem('20G', 20 * GB)).toMatch(/only grow/);
-		expect(growProblem('10G', 20 * GB)).toMatch(/only grow/);
-		expect(growProblem('abc', 20 * GB)).toMatch(/Write a size/);
+	it('only lets disks grow, by as little as a sector', () => {
+		expect(sizeProblem(21, 'GB', 20 * GB)).toBeUndefined();
+		expect(sizeProblem(20 * 1024 + 1, 'MB', 20 * GB)).toBeUndefined();
+		expect(sizeProblem(20, 'GB', 20 * GB)).toMatch(/only grow: give more than 20.0 GB/);
+		expect(sizeProblem(10, 'GB', 20 * GB)).toMatch(/only grow/);
+		expect(bytesProblem(20 * GB + 512, 20 * GB)).toBeUndefined();
 	});
 
-	it('bounds a new disk', () => {
-		expect(newDiskProblem('20 GB')).toBeUndefined();
-		expect(newDiskProblem('100 KB')).toMatch(/at least 1 MB/);
-		expect(newDiskProblem('100 T')).toMatch(/64 TB/);
+	it('bounds a size', () => {
+		expect(sizeProblem(20, 'GB')).toBeUndefined();
+		expect(sizeProblem(1, 'MB')).toBeUndefined();
+		expect(sizeProblem(0.5, 'MB')).toMatch(/at least 1 MB/);
+		expect(sizeProblem(70_000, 'GB')).toMatch(/64 TB/);
+		for (const value of [null, undefined, Number.NaN, 0, -5]) expect(sizeProblem(value, 'GB')).toBe('Enter a size.');
+		expect(bytesProblem(Number.NaN)).toBe('Enter a size.');
 	});
 });
 
