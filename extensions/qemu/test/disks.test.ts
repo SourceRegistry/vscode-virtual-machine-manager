@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { addDiskProblem, convertArgs, convertTarget, diskIndex, exportArgs, formatExtension, MAX_SATA_DISKS, newDiskFile, sectors } from '../src/disks';
+import { addDiskProblem, attachProblem, convertArgs, convertTarget, diskIndex, exportArgs, formatExtension, MAX_SATA_DISKS, newDiskFile, sectors } from '../src/disks';
 import { diskFormat } from '../src/importers';
 
 describe('disk helpers', () => {
@@ -51,5 +51,13 @@ describe('disk helpers', () => {
 		expect(exportArgs('/a.qcow2', 'qcow2', '/out.vhdx', { format: 'vhdx' })).toEqual(['convert', '-f', 'qcow2', '-O', 'vhdx', '-o', 'subformat=dynamic', '/a.qcow2', '/out.vhdx']);
 		expect(exportArgs('/a.qcow2', 'qcow2', '/out.vmdk', { format: 'vmdk' })).toEqual(['convert', '-f', 'qcow2', '-O', 'vmdk', '/a.qcow2', '/out.vmdk']);
 		expect(() => exportArgs('/a.qcow2', 'qcow2', '/out.img', { format: 'raw', compress: true })).toThrow(/qcow2/);
+	});
+
+	it('uses an image in place only when that is safe', () => {
+		const ok = { format: 'qcow2', named: 'qcow2', users: [], snapshots: 0 };
+		expect(attachProblem(ok)).toBeUndefined();
+		expect(attachProblem({ ...ok, users: ['web'] })).toMatch(/already a disk of web/);
+		expect(attachProblem({ ...ok, named: 'raw' })).toMatch(/file name says raw, but the image is qcow2/);
+		expect(attachProblem({ ...ok, snapshots: 2 })).toMatch(/snapshots/);
 	});
 });

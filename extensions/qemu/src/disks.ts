@@ -79,3 +79,15 @@ export function exportArgs(source: string, sourceFormat: string, target: string,
 export function convertArgs(source: string, sourceFormat: string, target: string, format: 'qcow2' | 'raw'): string[] {
 	return ['convert', '-f', sourceFormat, '-O', format, source, target];
 }
+
+/**
+ * Why an image cannot be used where it is (`undefined` when it can). QEMU is told the format from the file name,
+ * so a name that says otherwise would have it write over the image; two machines writing one image corrupt it; and
+ * the machine's snapshots need a qcow2 disk of its own.
+ */
+export function attachProblem(image: { format: string; named: string; users: string[]; snapshots: number }): string | undefined {
+	if (image.users.length) return `The image is already a disk of ${image.users.join(', ')}. Copy it instead.`;
+	if (image.format !== image.named) return `The file name says ${image.named}, but the image is ${image.format}. Copy it instead, or rename it.`;
+	if (image.snapshots) return 'This machine has snapshots, which need disks of its own: copy the image instead.';
+	return undefined;
+}

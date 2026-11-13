@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextTarget, parseBlkinfo, targetPrefix, withDisk } from '../src/disks';
+import { nextTarget, parseBlkinfo, sniffFormat, targetPrefix, volumeExtension, withDisk } from '../src/disks';
 import { parseDomain } from '../src/parse';
 
 describe('libvirt disks', () => {
@@ -29,5 +29,21 @@ describe('libvirt disks', () => {
 		const domain = parseDomain(withDisk(xml, { file: "/images/a & b's.qcow2", target: 'vdb', bus: 'virtio', format: 'qcow2' }));
 		expect(domain.disks.map((d) => [d.target, d.path, d.format])).toEqual([['vda', undefined, undefined], ['vdb', "/images/a & b's.qcow2", 'qcow2']]);
 		expect(() => withDisk('<domain/>', { file: 'x', target: 'vdb', bus: 'virtio', format: 'raw' })).toThrow(/no devices/);
+	});
+
+	it('tells the image format from the header', () => {
+		const head = (text: string) => Buffer.concat([Buffer.from(text, 'latin1'), Buffer.alloc(512)]).subarray(0, 512);
+		expect(sniffFormat(head('QFI\xfb\0\0\0\x03'))).toBe('qcow2');
+		expect(sniffFormat(head('KDMV'))).toBe('vmdk');
+		expect(sniffFormat(head('# Disk DescriptorFile\nversion=1'))).toBeUndefined();
+		expect(sniffFormat(head('vhdxfile'))).toBe('vhdx');
+		const vdi = Buffer.alloc(512);
+		vdi.writeUInt32LE(0xbeda107f, 0x40);
+		expect(sniffFormat(vdi)).toBe('vdi');
+		expect(sniffFormat(Buffer.alloc(512), head('conectix'))).toBe('vpc');
+		expect(sniffFormat(head('conectix'))).toBe('vpc');
+		expect(sniffFormat(Buffer.alloc(512))).toBe('raw');
+		expect(sniffFormat(Buffer.alloc(0))).toBe('raw');
+		expect(['raw', 'vpc', 'qcow2'].map(volumeExtension)).toEqual(['img', 'vhd', 'qcow2']);
 	});
 });

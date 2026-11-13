@@ -59,7 +59,10 @@
 	}
 	/** The disk operations of the provider apply to this VM, and a disk can be added in its current state. */
 	const manageableDisks = $derived(!!caps?.diskOperations?.length && vm?.origin !== 'adopted');
-	const canAddDisk = $derived(manageableDisks && !!caps?.diskOperations?.includes('add') && (vm?.state === 'stopped' || !!caps?.diskOperationsWhileRunning?.includes('add')));
+	const canAddDisk = $derived(
+		manageableDisks &&
+			(['add', 'attach'] as const).some((op) => caps?.diskOperations?.includes(op) && (vm?.state === 'stopped' || !!caps?.diskOperationsWhileRunning?.includes(op)))
+	);
 	let details = $state<VmDetails | undefined>();
 	let detailsError = $state<string | undefined>();
 
@@ -449,7 +452,7 @@
 					<Card title="Storage">
 						{#snippet header()}
 							{#if canAddDisk}
-								<span class="icon-only"><Button transparent title="Add a disk" aria-label="Add a disk" onclick={() => run('vmm.manageDisks', 'new')}><Icon icon="plus-lg" /></Button></span>
+								<span class="icon-only"><Button transparent title="Add a disk or an image file" aria-label="Add a disk" onclick={() => run('vmm.manageDisks', 'new')}><Icon icon="plus-lg" /></Button></span>
 							{/if}
 						{/snippet}
 						{#if details.disks.length}
@@ -664,7 +667,7 @@
 
 <Modal
 	bind:show={sizeModal}
-	title={sizeAsk?.mode === 'grow' ? `Grow ${sizeAsk.diskLabel ?? 'disk'}` : 'Add a disk'}
+	title={sizeAsk?.mode === 'grow' ? `Grow ${sizeAsk.diskLabel ?? 'disk'}` : sizeAsk?.formats?.length === 0 ? 'Attach a disk image' : 'Add a disk'}
 	description={sizeAsk?.vmName}
 	alignVertical="center"
 	onclose={cancelSize}

@@ -58,6 +58,9 @@ describe('disk operations', () => {
 		expect(needsStopText('vm-1', running.needsStop)).toBe('Shut down vm-1 to add, remove, convert or export disks.');
 		expect(needsStopText('vm-1', ['export'])).toBe('Shut down vm-1 to export disks.');
 		expect(needsStopText('vm-1', [])).toBeUndefined();
+		// Attaching a file is part of adding.
+		expect(needsStopText('vm-1', ['add', 'attach', 'export'])).toBe('Shut down vm-1 to add or export disks.');
+		expect(needsStopText('vm-1', ['attach'])).toBe('Shut down vm-1 to attach disks.');
 	});
 
 	it('describes a disk by size, format and space on the host', () => {

@@ -56,12 +56,14 @@ export function diskOperations(connection: Pick<ClusterConnection, 'capabilities
 	return { now, needsStop: all.filter((op) => !now.has(op)) };
 }
 
-const OPERATION_VERB: Record<DiskOperation, string> = { add: 'add', remove: 'remove', resize: 'grow', convert: 'convert', export: 'export' };
+const OPERATION_VERB: Record<DiskOperation, string> = { add: 'add', attach: 'attach', remove: 'remove', resize: 'grow', convert: 'convert', export: 'export' };
 
 /** "Shut down vm-1 to add, convert or remove disks." */
 export function needsStopText(vmName: string, ops: DiskOperation[]): string | undefined {
-	if (!ops.length) return undefined;
-	const verbs = ops.map((op) => OPERATION_VERB[op]);
+	// Attaching a file is a way of adding one.
+	const shown = ops.includes('add') ? ops.filter((op) => op !== 'attach') : ops;
+	if (!shown.length) return undefined;
+	const verbs = shown.map((op) => OPERATION_VERB[op]);
 	const list = verbs.length === 1 ? verbs[0] : `${verbs.slice(0, -1).join(', ')} or ${verbs[verbs.length - 1]}`;
 	return `Shut down ${vmName} to ${list} disks.`;
 }

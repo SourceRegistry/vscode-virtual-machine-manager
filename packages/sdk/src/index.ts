@@ -195,10 +195,14 @@ export interface Capabilities {
 	diskExportConverts?: boolean;
 	/** `exportDisk` writes to this computer even with `remotePaths` (the provider streams the copy here). */
 	diskExportsHere?: boolean;
+	/** With `attach`: whether `attachDisk` copies the image (`copy`), uses it where it is (`reference`), or both. */
+	diskAttachModes?: Array<'copy' | 'reference'>;
+	/** `attachDisk` reads the image on this computer even with `remotePaths` (the provider uploads it). */
+	diskAttachFromHere?: boolean;
 }
 
-/** What can be done to a VM's disk (see `Capabilities.diskOperations`). */
-export type DiskOperation = 'add' | 'remove' | 'resize' | 'convert' | 'export';
+/** What can be done to a VM's disk (see `Capabilities.diskOperations`). `attach` adds an existing image file. */
+export type DiskOperation = 'add' | 'attach' | 'remove' | 'resize' | 'convert' | 'export';
 
 /** Image formats a disk can be exported to. */
 export type DiskImageFormat = 'qcow2' | 'raw' | 'vmdk' | 'vhdx' | 'vdi';
@@ -608,6 +612,12 @@ export interface ClusterConnection extends Disposable {
 	insertMedia?(nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void>;
 	/** Creates an empty disk next to the VM's others and attaches it. Returns the new disk. */
 	addDisk?(nodeId: string, vmId: string, disk: NewDisk): Promise<DiskDevice>;
+	/**
+	 * Adds an existing disk image (qcow2, raw, VMDK, VHDX, VDI…). `copy`: a copy next to the VM's other disks is
+	 * attached and the original is left alone; otherwise the VM uses the file where it is and writes to it. The path
+	 * is on the host when `Capabilities.remotePaths` (unless `diskAttachFromHere`), else on this computer.
+	 */
+	attachDisk?(nodeId: string, vmId: string, imagePath: string, options: { copy: boolean }, progress?: (update: DiskProgress) => void): Promise<DiskDevice>;
 	/** Detaches a disk (`DiskDevice.id`); `deleteFile` also deletes its image, otherwise the file is left on the host. */
 	removeDisk?(nodeId: string, vmId: string, diskId: string, options: { deleteFile: boolean }): Promise<void>;
 	/** Grows a disk to `sizeBytes`. Never shrinks: the guest still has to grow its partition and file system. */

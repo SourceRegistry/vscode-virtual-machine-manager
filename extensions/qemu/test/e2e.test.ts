@@ -401,5 +401,36 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 		await connection.removeDisk!('local', vmId, 'disk1', { deleteFile: false });
 		expect((await disks()).map((d) => d.id)).toEqual(['disk0']);
 		expect(fs.existsSync(qcow)).toBe(true);
+
+		// Attach image files: a VMDK copied (as qcow2), a qcow2 used where it is.
+		const vmdk = path.join(dir, 'other.vmdk');
+		execFileSync('qemu-img', ['create', '-q', '-f', 'vmdk', vmdk, '48M']);
+		const copied = await connection.attachDisk!('local', vmId, vmdk, { copy: true });
+		expect(copied).toMatchObject({ id: 'disk1', format: 'qcow2', sizeBytes: 48 * MB });
+		expect(copied.path).not.toBe(vmdk);
+		expect(info(copied.path!).format).toBe('qcow2');
+		expect(fs.existsSync(vmdk)).toBe(true);
+		const inPlace = path.join(dir, 'shared.qcow2');
+		execFileSync('qemu-img', ['create', '-q', '-f', 'qcow2', inPlace, '32M']);
+		expect(await connection.attachDisk!('local', vmId, inPlace, { copy: false })).toMatchObject({ id: 'disk2', path: inPlace, format: 'qcow2' });
+		await expect(connection.attachDisk!('local', vmId, inPlace, { copy: false })).rejects.toThrow(/already a disk of e2e/);
+		// A qcow2 named like a raw image would be written over as raw.
+		const misnamed = path.join(dir, 'misnamed.img');
+		execFileSync('qemu-img', ['create', '-q', '-f', 'qcow2', misnamed, '8M']);
+		await expect(connection.attachDisk!('local', vmId, misnamed, { copy: false })).rejects.toThrow(/file name says raw, but the image is qcow2/);
+		await expect(connection.attachDisk!('local', vmId, path.join(dir, 'missing.qcow2'), { copy: true })).rejects.toThrow(/not found/);
+		// With snapshots only a copy can join them.
+		await connection.createSnapshot!('local', vmId, 'attach');
+		const fresh = path.join(dir, 'fresh.qcow2');
+		execFileSync('qemu-img', ['create', '-q', '-f', 'qcow2', fresh, '8M']);
+		await expect(connection.attachDisk!('local', vmId, fresh, { copy: false })).rejects.toThrow(/snapshots/);
+		expect((await connection.attachDisk!('local', vmId, misnamed, { copy: true })).format).toBe('qcow2');
+		expect((await connection.listSnapshots!('local', vmId)).map((x) => x.name)).toEqual(['attach']);
+		await connection.deleteSnapshot!('local', vmId, 'attach');
+		await connection.removeDisk!('local', vmId, 'disk3', { deleteFile: true });
+		await connection.removeDisk!('local', vmId, 'disk2', { deleteFile: false });
+		await connection.removeDisk!('local', vmId, 'disk1', { deleteFile: true });
+		expect(fs.existsSync(inPlace)).toBe(true);
+		expect((await disks()).map((d) => d.id)).toEqual(['disk0']);
 	}, 120_000);
 });

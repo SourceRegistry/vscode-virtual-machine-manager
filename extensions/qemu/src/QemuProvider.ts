@@ -60,7 +60,7 @@ import { freeLocalPort, LocalHost, type Host } from './host';
 import { SshHost, validateSshTarget } from './sshHost';
 import { buildIso, cloudFields, cloudInitProblem, ensureImage, findImage, hostnameFor, imageFileName, metaData, parseKeys, sha512Crypt, SOURCE_ISO, userData } from '@vmm/sdk/provisioning';
 import { cloneDefinition } from './clone';
-import { addDiskProblem, convertArgs, convertTarget, diskIndex, exportArgs, newDiskFile, sectors } from './disks';
+import { addDiskProblem, attachProblem, convertArgs, convertTarget, diskIndex, exportArgs, newDiskFile, sectors } from './disks';
 import { commonSnapshots, qmpSnapshots, snapshotNameProblem, type QemuSnapshotInfo, type QmpSnapshotBlock } from './snapshots';
 import { walkFiles } from './hostProcess';
 import { iommuEnabled, listPciHost, listUsbHost, pciDriver, runPrivileged } from './hostDevices';
@@ -78,7 +78,7 @@ import {
 	USB_ID_PREFIX,
 	type PciHostDevice
 } from './passthrough';
-import { candidatesFromFolder, classifyFile, type FolderCandidate, type FolderInput } from './importers';
+import { candidatesFromFolder, classifyFile, diskFormat, type FolderCandidate, type FolderInput } from './importers';
 import { findExternalVms, type ExternalVm } from './scan';
 import {
 	hasMedia,
@@ -387,9 +387,10 @@ export class QemuConnection implements ClusterConnection {
 		stats: true,
 		guestExec: true,
 		guestFiles: true,
-		diskOperations: ['add', 'remove', 'resize', 'convert', 'export'],
+		diskOperations: ['add', 'attach', 'remove', 'resize', 'convert', 'export'],
 		diskOperationsWhileRunning: ['resize'],
-		diskExportConverts: true
+		diskExportConverts: true,
+		diskAttachModes: ['copy', 'reference']
 	};
 	private readonly startQueue = new SerialQueue();
 	private readonly cpuSamples = new Map<string, CpuSample>();
@@ -1165,14 +1166,7 @@ export class QemuConnection implements ClusterConnection {
 		if (problem) throw new ProviderError(problem, 'invalid');
 		const snapshots = def.disks.length ? await this.listSnapshots(NODE_ID, vmId) : [];
 		if (snapshots.length && format !== 'qcow2') throw new ProviderError('This machine has snapshots, which need qcow2 disks: add a qcow2 disk.', 'invalid');
-		const dir = this.dir(vmId);
-		// A file left behind by a removed disk keeps its name taken.
-		const taken = [...def.disks];
-		let file = newDiskFile(dir, taken, format, (...parts) => this.host.path.join(...parts));
-		while (await this.host.exists(file)) {
-			taken.push(file);
-			file = newDiskFile(dir, taken, format, (...parts) => this.host.path.join(...parts));
-		}
+		const file = await this.freeDiskFile(def, format);
 		await this.img(['create', '-f', format, file, String(sectors(disk.sizeBytes))], 'Could not create the disk', 120_000);
 		try {
 			// The machine's snapshots cover every disk: the new one gets them too, empty, as it was when they were taken.
@@ -1187,6 +1181,53 @@ export class QemuConnection implements ClusterConnection {
 		this.changes.fire({ nodeId: NODE_ID, vmId });
 		const index = def.disks.length - 1;
 		return { id: `disk${index}`, kind: 'disk', label: `Hard disk ${index + 1}`, path: file, sizeBytes: disk.sizeBytes, format, bus };
+	}
+
+	/** A free `diskN.<ext>` in the VM's folder (a file left behind by a removed disk keeps its name taken). */
+	private async freeDiskFile(def: VmDefinition, format: 'qcow2' | 'raw'): Promise<string> {
+		const dir = this.dir(def.id);
+		const taken = [...def.disks];
+		let file = newDiskFile(dir, taken, format, (...parts) => this.host.path.join(...parts));
+		while (await this.host.exists(file)) {
+			taken.push(file);
+			file = newDiskFile(dir, taken, format, (...parts) => this.host.path.join(...parts));
+		}
+		return file;
+	}
+
+	async attachDisk(_nodeId: string, vmId: string, imagePath: string, options: { copy: boolean }, progress?: (update: DiskProgress) => void): Promise<DiskDevice> {
+		const { def } = await this.diskVm(vmId, 'attaching a disk');
+		const source = imagePath.trim();
+		const bus = guestArch(def) === 'aarch64' ? 'virtio' : def.diskBus;
+		const problem = addDiskProblem(def.disks.length, bus);
+		if (problem) throw new ProviderError(problem, 'invalid');
+		if (!(await this.host.exists(source))) throw new ProviderError(`Image not found: ${source}`, 'invalid');
+		const info = await this.imageInfo(source);
+		if (!info?.format) throw new ProviderError(`${path.basename(source)} is not a disk image QEMU can read`, 'invalid');
+		const snapshots = def.disks.length ? await this.listSnapshots(NODE_ID, vmId) : [];
+		if (!options.copy) {
+			const users = (await this.definitions()).filter((d) => d.disks.includes(source)).map((d) => d.name);
+			const reason = attachProblem({ format: info.format, named: diskFormat(source), users, snapshots: snapshots.length });
+			if (reason) throw new ProviderError(reason, 'invalid');
+		}
+		let file = source;
+		if (options.copy) {
+			file = await this.freeDiskFile(def, 'qcow2');
+			progress?.({ message: `Copying ${path.basename(source)} as ${path.basename(file)}…` });
+			await this.img(['convert', '-f', info.format, '-O', 'qcow2', source, file], `Could not copy ${path.basename(source)}`);
+		}
+		try {
+			for (const snapshot of snapshots) await this.snapshotImg(['-c', snapshot.name, file], `Could not prepare ${path.basename(file)} for snapshot "${snapshot.name}"`);
+			def.disks = [...def.disks, file];
+			await this.saveDefinition(def);
+		} catch (error) {
+			if (options.copy) await this.host.rm(file).catch(() => undefined);
+			throw error;
+		}
+		this.log.info(`Attached ${source}${options.copy ? ` as a copy (${file})` : ''} to ${def.name}`);
+		this.changes.fire({ nodeId: NODE_ID, vmId });
+		const index = def.disks.length - 1;
+		return { id: `disk${index}`, kind: 'disk', label: `Hard disk ${index + 1}`, path: file, sizeBytes: info['virtual-size'], format: options.copy ? 'qcow2' : info.format, bus };
 	}
 
 	async removeDisk(_nodeId: string, vmId: string, diskId: string, options: { deleteFile: boolean }): Promise<void> {

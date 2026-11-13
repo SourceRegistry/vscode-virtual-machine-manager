@@ -173,14 +173,32 @@ export class VmDashboardPanel implements vscode.Disposable {
 				}
 			},
 			getDiskSizeAsk: async () => this.pending?.request,
-			submitDiskSize: async ({ askId, bytes, format }) => {
+			submitDiskSize: async (answer) => {
 				const request = this.pending?.request;
-				if (!request || request.askId !== askId) throw new Error('This question was already answered.');
-				// The page checks too; this is the check that counts.
+				if (!request || request.askId !== answer.askId) throw new Error('This question was already answered.');
+				// The page checks too; these are the checks that count.
+				if ('file' in answer) {
+					const path = typeof answer.file?.path === 'string' ? answer.file.path.trim() : '';
+					const copy = answer.file?.copy !== false;
+					if (!request.attach || !request.attach.modes.includes(copy ? 'copy' : 'reference')) throw new Error('An image file cannot be attached that way here.');
+					if (!/^(\/|[A-Za-z]:[\\/])/.test(path)) throw new Error('Give the full path of the image.');
+					this.answer({ file: { path, copy } }, answer.askId);
+					return;
+				}
+				const { bytes, format } = answer;
 				const problem = typeof bytes === 'number' ? bytesProblem(bytes, request.currentBytes) : 'Enter a size.';
 				if (problem) throw new Error(problem);
 				const chosen = request.mode === 'add' ? (format && request.formats?.includes(format) ? format : request.formats?.[0]) : undefined;
-				this.answer({ bytes, ...(chosen ? { format: chosen } : {}) }, askId);
+				this.answer({ bytes, ...(chosen ? { format: chosen } : {}) }, answer.askId);
+			},
+			browseDiskImage: async () => {
+				const uris = await vscode.window.showOpenDialog({
+					title: 'Disk image to attach',
+					canSelectMany: false,
+					openLabel: 'Select',
+					filters: { 'Disk images': ['qcow2', 'img', 'raw', 'vmdk', 'vhdx', 'vhd', 'vdi', 'qcow'], 'All files': ['*'] }
+				});
+				return uris?.[0]?.fsPath;
 			},
 			cancelDiskSize: async ({ askId }) => this.answer(undefined, askId),
 			getStats: async () => {

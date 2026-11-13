@@ -15,7 +15,7 @@ import {
 import { copyFromGuest, copyToGuest, explainAgentError, runInGuest, type AgentCall } from '@vmm/sdk/guest';
 import { openEndpoint, openPty } from './consoles';
 import { activeForwards, checkHmp, forwardsMetadata, hostfwdKey, hostfwdRule, METADATA_URI, normalizeForward, parseForwardsMetadata, sameHostPort, userNetdev } from './forwards';
-import { nextTarget, parseBlkinfo, withDisk } from './disks';
+import { nextTarget, parseBlkinfo, sniffFormat, volumeExtension, withDisk } from './disks';
 import { buildDomainXml, DISK_BUSES, NAME, parseDomainCapabilities, type DiskBus } from './definition';
 import {
 	blockStats, guestMemoryUsedMB, netStats, parseDomain, parseDomifaddr, parseDomstats, parseNodeinfo, parseSnapshot, parseVersion, parseVncDisplay, stateOf, toDiskDevices, toNicDevices, UUID,
@@ -47,6 +47,26 @@ async function imageFormat(file: string): Promise<'qcow2' | 'raw'> {
 		const magic = Buffer.alloc(4);
 		await handle.read(magic, 0, 4, 0);
 		return magic.equals(Buffer.from([0x51, 0x46, 0x49, 0xfb])) ? 'qcow2' : 'raw';
+	} finally {
+		await handle.close();
+	}
+}
+
+/** The format of an image on this computer, from its header (see `sniffFormat`). */
+async function sniffImage(file: string): Promise<string | undefined> {
+	let handle;
+	try {
+		handle = await open(file, 'r');
+	} catch {
+		throw new ProviderError(`Image not found: ${file}`, 'invalid');
+	}
+	try {
+		const { size } = await handle.stat();
+		const head = Buffer.alloc(Math.min(512, size));
+		await handle.read(head, 0, head.length, 0);
+		const tail = Buffer.alloc(size >= 512 ? 512 : 0);
+		if (tail.length) await handle.read(tail, 0, 512, size - 512);
+		return sniffFormat(head, tail);
 	} finally {
 		await handle.close();
 	}
@@ -144,11 +164,13 @@ export class LibvirtConnection implements ClusterConnection {
 		consoles: ['vnc', 'serial'] as ConsoleKind[],
 		preview: false, external: false, media: true, details: true, stats: true, snapshots: true, remotePaths: false,
 		guestExec: true, guestFiles: true,
-		diskOperations: ['add', 'remove', 'resize', 'export'],
+		diskOperations: ['add', 'attach', 'remove', 'resize', 'export'],
 		// Hot-plug needs a spare PCIe slot (domains made here have none) and a guest that lets the disk go: only growing is reliable.
 		diskOperationsWhileRunning: ['resize'],
 		// vol-download streams the volume through libvirt to this computer, as it is.
-		diskExportsHere: true
+		diskExportsHere: true,
+		// vol-upload streams an image on this computer into the pool, wherever libvirt runs.
+		diskAttachFromHere: true
 	};
 	private readonly local: boolean;
 	private readonly ssh;
@@ -169,6 +191,8 @@ export class LibvirtConnection implements ClusterConnection {
 		this.capabilities.remotePaths = !this.local;
 		// A forward listens on the libvirt host: only on this computer is that where Remote-SSH connects.
 		this.capabilities.forwards = this.local;
+		// A file on this computer can only be used in place by a libvirt on this computer.
+		this.capabilities.diskAttachModes = this.local ? ['copy', 'reference'] : ['copy'];
 		this.capabilities.shutdownTimeoutSeconds = shutdownTimeoutSeconds;
 	}
 
@@ -792,6 +816,45 @@ export class LibvirtConnection implements ClusterConnection {
 			await this.virsh.exec(['vol-delete', '--pool', pool, volume]).catch((e: Error) => this.log.warn(`Could not remove the new disk ${volume}: ${e.message}`));
 			throw error;
 		}
+	}
+
+	async attachDisk(_nodeId: string, vmId: string, imagePath: string, options: { copy: boolean }, progress?: (update: DiskProgress) => void): Promise<DiskDevice> {
+		const { id, domain } = await this.diskDomain(vmId, undefined, 'attaching a disk');
+		const source = imagePath.trim();
+		if (!options.copy && !this.local) throw new ProviderError('Only a libvirt on this computer can use an image where it is: copy it instead.', 'unsupported');
+		const format = await sniffImage(source);
+		if (!format) throw new ProviderError(`${source} is a VMDK that only describes other files: convert it to one file (qcow2) first.`, 'invalid');
+		if (format === 'vhdx') throw new ProviderError('libvirt does not read VHDX images: convert it first (qemu-img convert -O qcow2).', 'unsupported');
+		const first = domain.disks.find((d) => d.device === 'disk' && d.path);
+		const bus = first?.bus ?? 'virtio';
+		const target = nextTarget(domain.disks.map((d) => d.target), bus);
+		let file = source;
+		let pool: string | undefined;
+		const created: string[] = [];
+		try {
+			if (options.copy) {
+				pool = (first?.path ? (await this.virsh.exec(['vol-pool', first.path]).catch(() => '')).trim() : '') || (await this.ensurePool(''));
+				const volume = `${domain.name}-${target}.${volumeExtension(format)}`;
+				progress?.({ message: `Uploading ${source.split(/[\\/]/).pop()}…` });
+				await this.uploadVolume(pool, volume, source, await statSize(source), created);
+				// libvirt reads the format of a file in a directory pool from its header on a refresh.
+				await this.virsh.exec(['pool-refresh', pool], 120_000);
+				const read = parseVolumeXml(await this.virsh.exec(['vol-dumpxml', '--pool', pool, volume])).format;
+				if (read && read !== format) throw new ProviderError(`libvirt reads ${volume} as ${read}, not ${format}.`, 'failed');
+				file = (await this.virsh.exec(['vol-path', '--pool', pool, volume])).trim();
+			} else {
+				const users = [...this.domains.values()].filter(({ domain: d }) => d.uuid !== domain.uuid && d.disks.some((disk) => disk.path === source)).map(({ domain: d }) => d.name);
+				if (users.length) throw new ProviderError(`The image is already a disk of ${users.join(', ')}. Copy it instead.`, 'invalid');
+				if (domain.disks.some((d) => d.path === source)) throw new ProviderError(`The image is already a disk of ${domain.name}.`, 'invalid');
+			}
+			await this.define(withDisk(await this.virsh.exec(['dumpxml', '--inactive', '--security-info', id]), { file, target, bus, format }));
+		} catch (error) {
+			for (const v of created) await this.virsh.exec(['vol-delete', '--pool', pool!, v]).catch((e: Error) => this.log.warn(`Could not remove the new volume ${v}: ${e.message}`));
+			throw error;
+		}
+		this.domains.clear();
+		this.log.info(`Attached ${source}${options.copy ? ` as a copy (${file})` : ''} as ${target} to ${domain.name}`);
+		return { id: target, kind: 'disk', label: `Disk ${target}`, path: file, format, bus };
 	}
 
 	async removeDisk(_nodeId: string, vmId: string, diskId: string, options: { deleteFile: boolean }): Promise<void> {

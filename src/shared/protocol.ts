@@ -80,12 +80,16 @@ export interface DiskSizeRequest {
 	formats?: Array<'qcow2' | 'raw'>;
 	/** Shown above the form, e.g. what else waits for a shut down. */
 	note?: string;
+	/** Adding: an existing image file can be attached instead of an empty disk. */
+	attach?: {
+		modes: Array<'copy' | 'reference'>;
+		/** The file is on this computer: offer a file dialog (otherwise the path is typed, on the host). */
+		browse: boolean;
+	};
 }
 
-export interface DiskSizeAnswer {
-	bytes: number;
-	format?: 'qcow2' | 'raw';
-}
+/** A size (empty disk to add, or the new size to grow to), or an image file to attach. */
+export type DiskSizeAnswer = { bytes: number; format?: 'qcow2' | 'raw' } | { file: { path: string; copy: boolean } };
 
 /** Everything the in-editor RDP client needs to start a session through the host's gateway. */
 export interface RdpStartConfig {
@@ -193,6 +197,8 @@ export interface RpcMethods {
 	/** The size question waiting for an answer, if any (a page that just opened asks for it). */
 	getDiskSizeAsk: { params: void; result: DiskSizeRequest | undefined };
 	submitDiskSize: { params: DiskSizeAnswer & { askId: number }; result: void };
+	/** A file dialog for a disk image on this computer. */
+	browseDiskImage: { params: void; result: string | undefined };
 	cancelDiskSize: { params: { askId: number }; result: void };
 	// console
 	reconnect: { params: void; result: void };

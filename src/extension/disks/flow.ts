@@ -40,12 +40,14 @@ export async function manageDisks(deps: DiskFlowDeps, location: VmLocation, disk
 	const stopNote = needsStopText(vmName, needsStop);
 
 	// `new`: straight to adding one (the dashboard's + button).
-	if (diskId === 'new' && now.has('add') && connection.addDisk) return addDisk(deps, location, connection);
+	const canAdd = now.has('add') && !!connection.addDisk;
+	const canAttach = now.has('attach') && !!connection.attachDisk;
+	if (diskId === 'new' && (canAdd || canAttach)) return addDisk(deps, location, connection, canAdd, canAttach);
 	let disk = diskId ? disks.find((d) => d.id === diskId) : undefined;
 	if (!disk) {
 		type Item = vscode.QuickPickItem & { disk?: DiskDevice; add?: boolean };
 		const items: Item[] = [
-			...(now.has('add') && connection.addDisk ? [{ label: '$(add) Add Disk…', description: 'A new, empty disk', add: true }] : []),
+			...(canAdd || canAttach ? [{ label: '$(add) Add Disk…', description: canAttach ? (canAdd ? 'A new, empty disk or an image file' : 'An image file') : 'A new, empty disk', add: true }] : []),
 			...disks.map((d) => ({ label: `$(database) ${d.label}`, description: diskDescription(d), detail: d.path, disk: d }))
 		];
 		if (!items.length) {
@@ -54,7 +56,7 @@ export async function manageDisks(deps: DiskFlowDeps, location: VmLocation, disk
 		}
 		const picked = await vscode.window.showQuickPick(items, { title: `Disks of ${vmName}`, placeHolder: stopNote ?? 'Select a disk, or add one' });
 		if (!picked) return;
-		if (picked.add) return addDisk(deps, location, connection);
+		if (picked.add) return addDisk(deps, location, connection, canAdd, canAttach);
 		disk = picked.disk!;
 	}
 
@@ -101,13 +103,32 @@ function withDiskProgress<T>(title: string, task: (progress: (update: DiskProgre
 	});
 }
 
-async function addDisk(deps: DiskFlowDeps, location: VmLocation, connection: ClusterConnection): Promise<void> {
+async function addDisk(deps: DiskFlowDeps, location: VmLocation, connection: ClusterConnection, canAdd: boolean, canAttach: boolean): Promise<void> {
 	const vmName = location.vm.name;
-	const answer = await VmDashboardPanel.askDiskSize(deps.extensionUri, deps.manager, location.ref, { mode: 'add', vmName, formats: ['qcow2', 'raw'] });
+	const caps = connection.capabilities;
+	const modes = caps.diskAttachModes ?? ['copy'];
+	const answer = await VmDashboardPanel.askDiskSize(deps.extensionUri, deps.manager, location.ref, {
+		mode: 'add',
+		vmName,
+		formats: canAdd ? ['qcow2', 'raw'] : [],
+		...(canAttach ? { attach: { modes, browse: !caps.remotePaths || !!caps.diskAttachFromHere } } : {})
+	});
 	if (!answer) return;
+	if ('file' in answer) {
+		const { path: image, copy } = answer.file;
+		try {
+			const disk = await withDiskProgress(`Attaching ${path.basename(image)} to ${vmName}…`, (progress) =>
+				connection.attachDisk!(location.ref.nodeId, location.ref.vmId, image, { copy }, progress)
+			);
+			await done(deps, location, `Attached ${image}${copy ? ` as a copy${disk.path ? ` (${disk.path})` : ''}` : ''} as ${disk.label}`, `Attached ${path.basename(image)} to ${vmName}`);
+		} catch (error) {
+			await showError(`Could not attach ${path.basename(image)} to ${vmName}`, error);
+		}
+		return;
+	}
 	const format = answer.format ?? 'qcow2';
 	try {
-		const disk = await withDiskProgress(`Adding a disk to ${vmName}…`, () => connection.addDisk!(location.ref.nodeId, location.ref.vmId, { sizeBytes: answer.bytes, format: format }));
+		const disk = await withDiskProgress(`Adding a disk to ${vmName}…`, () => connection.addDisk!(location.ref.nodeId, location.ref.vmId, { sizeBytes: answer.bytes, format }));
 		await done(deps, location, `Added ${disk.label} (${formatBytes(answer.bytes)}, ${format})${disk.path ? `: ${disk.path}` : ''}`, `Added ${disk.label} to ${vmName}`);
 		void vscode.window.showInformationMessage(`${disk.label} (${formatBytes(answer.bytes)}) was added to ${vmName}. The guest sees an empty disk: partition and format it before use.`);
 	} catch (error) {
@@ -119,7 +140,7 @@ async function growDisk(deps: DiskFlowDeps, location: VmLocation, connection: Cl
 	const vmName = location.vm.name;
 	const current = disk.sizeBytes;
 	const answer = await VmDashboardPanel.askDiskSize(deps.extensionUri, deps.manager, location.ref, { mode: 'grow', vmName, diskLabel: disk.label, currentBytes: current, ...(note ? { note } : {}) });
-	if (!answer) return;
+	if (!answer || !('bytes' in answer)) return;
 	try {
 		await withDiskProgress(`Growing ${disk.label} of ${vmName}…`, () => connection.resizeDisk!(location.ref.nodeId, location.ref.vmId, disk.id, answer.bytes));
 		await done(deps, location, `Grew ${disk.label} from ${formatBytes(current)} to ${formatBytes(answer.bytes)}`, `${disk.label} of ${vmName} is now ${formatBytes(answer.bytes)}`);
