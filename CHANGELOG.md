@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.16.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.15.0...v0.16.0) (2026-11-13)
+
+
+### Features
+
+* walkthrough shows every provider and what it can do ([4346062](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/4346062e26d544d89bd3c8d8ec32d067df8f3dbc))
+
 # [0.15.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.14.0...v0.15.0) (2026-11-13)
 
 

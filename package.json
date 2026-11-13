@@ -2,7 +2,7 @@
   "name": "vm-manager",
   "displayName": "VM Manager",
   "description": "Manage virtual machines (Hyper-V, QEMU, Proxmox, ...) from VS Code: clusters, nodes, power actions, graphical and serial consoles.",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "publisher": "sourceregistry",
   "icon": "media/icon.png",
   "license": "Apache-2.0",
