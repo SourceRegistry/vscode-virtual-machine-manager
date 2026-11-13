@@ -61,6 +61,8 @@ export interface Host {
 	exists(file: string): Promise<boolean>;
 	readdir(dir: string): Promise<DirEntry[]>;
 	copyFile(from: string, to: string): Promise<void>;
+	/** Moves a file within the host's file system, replacing `to`. */
+	rename(from: string, to: string): Promise<void>;
 	/** `file` in every sub-directory of `dir` that has one, as `[directory name, text]`. */
 	readChildren(dir: string, file: string): Promise<Array<[string, string]>>;
 	/** Starts a program that outlives this process; its output goes to `logFile`. Returns its pid. */
@@ -166,6 +168,10 @@ export class LocalHost implements Host {
 
 	async copyFile(from: string, to: string): Promise<void> {
 		await fs.promises.copyFile(from, to);
+	}
+
+	async rename(from: string, to: string): Promise<void> {
+		await fs.promises.rename(from, to);
 	}
 
 	async readChildren(dir: string, file: string): Promise<Array<[string, string]>> {

@@ -60,7 +60,7 @@ Value = how much it moves "best VM extension for VS Code", weighed against effor
 | 7 | 8 | `feat/hyperv-remote` | Remote Hyper-V hosts; large Windows audience, but no Windows host to test | no | todo |
 | 8 | 16 | `feat/guest-integration` | Guest memory, run/copy, clipboard; makes VMs feel integrated | partly | first slice merged (PR #10) |
 | 9 | 18 | `feat/dev-ux` | Countdown, notifications, logs, API; cheap polish, wide effect | yes | built, manual check open |
-| 10 | 15 | `feat/disk-management` | Resize/convert/export; useful, not a differentiator | yes | todo |
+| 10 | 15 | `feat/disk-management` | Resize/convert/export; useful, not a differentiator | yes | built, manual check open |
 | 11 | 17 | `feat/qemu-network-v2` | NIC editor, bridge/vmnet; privileges make it costly on macOS | partly | todo |
 | 12 | 20 | `feat/more-providers` | VMware, VirtualBox, Parallels, XCP-ng, Nutanix; big but each is its own project | mostly no | Nutanix built (`feat/nutanix-provider`), rest todo |
 | 13 | 21 | `feat/mcp` | VMs as tools for AI agents (Copilot agent mode, Claude, any MCP client): list, start, stop, IP, run in guest | yes | todo |
@@ -297,10 +297,18 @@ Status: **merged** (PR #5, 2026-11-10): cloud images and templates; installer IS
 
 ### Phase 15: `feat/disk-management`  (Local: yes)
 
-- [ ] Add / remove / resize disks (stopped VM; running via QMP `block_resize` where possible), `qemu-img convert` between formats
-- [ ] Export / backup: qcow2 or raw copy, optional compression; import of OVA is out of scope for now
-- [ ] Disk usage vs allocated shown in the details page
+Status: built on `feat/disk-management` (2026-11-13).
+
+- [x] SDK: `Capabilities.diskOperations` (`add`, `remove`, `resize`, `convert`, `export`) and `diskOperationsWhileRunning`, `diskExportConverts`, `diskExportsHere`; `addDisk`, `removeDisk` (keep or delete the file), `resizeDisk` (grow only), `convertDisk` (qcow2 ↔ raw, same format = compact), `exportDisk` (qcow2, compressed qcow2, raw, VMDK, VHDX, VDI) with progress; `DiskDevice.allocatedBytes`
+- [x] QEMU: all five on a stopped VM, grow also while running (QMP `block_resize`). New disks next to the others (`diskN.qcow2` / `.img`), at most 5 on SATA (the CD/DVD drive takes the sixth port), 16 on VirtIO. A disk added to a machine with snapshots gets them too (empty), so they still cover every disk; converting refuses while snapshots exist (they would be lost). Conversion writes a temporary file that replaces the original only when complete
+- [x] libvirt: add (a volume in the first disk's pool, defined into the domain XML so libvirt finds a PCIe slot), remove (`detach-disk --config`, optionally `vol-delete`; refused while snapshots still refer to the file), grow (`vol-resize`, running: `blockresize`), export as is through `vol-download` (also from a remote host to this computer). Hot-plug is not offered: domains made here have no spare PCIe slot, and removing needs the guest's cooperation
+- [x] Attach an existing image (the + on the details page offers *Empty disk* or *Image file*): QEMU copies it as qcow2 (`qemu-img convert`) or uses it in place, refusing a file whose name says another format than its content (QEMU would write over it), one another VM uses, or in place while the machine has snapshots; libvirt uploads it into the pool as it is (also to a remote host) or, on this computer, uses it in place, with the format read from the file's header (VHDX refused: libvirt does not read it). End to end: QEMU (VMDK copied, qcow2 in place, refusals), libvirt (VMDK, VDI, VHD copied, qcow2 in place, boots with all of them)
+- [x] Core: disks are managed from the details page and the palette (*VM: Disks…*, `vmm.can.disks`); left out of the context menus to keep them short; quick picks that offer only what works in the machine's state and name what needs a shut down; sizes typed in VS Code's input box (`40 GB`, `512 MB`, `+10 GB`, `+20 MB`, with what it comes to shown as you type; rounded up to 512-byte sectors, the smallest step an image takes); the details page shows size and space used on the host per disk, a gear per disk and a + to add one; every change goes to the machine's activity log. The Fake provider has disks too
+- [x] Tests: size parsing, menus, helpers; end to end against real QEMU (add with snapshots, SATA limit, grow stopped and running, convert both ways and compact, export to VMDK / VHDX / VDI / raw / compressed qcow2, remove) and real libvirt (add, grow stopped and running, export, remove with and without the file)
+- [ ] Manual check in VS Code (QEMU and libvirt)
 - [ ] Hyper-V (`Resize-VHD`, `New-VHD`) and Proxmox disk API: **not local**, mocks only
+- [ ] Not done: shrinking, growing the guest's partition (cloud-init does it on the next boot of a cloud image), OVA import
+- [ ] Later, if users ask: more while the machine runs. Export as a point-in-time copy (QEMU `blockdev-backup`, libvirt `backup-begin`), hot-plug a VirtIO disk (needs spare PCIe slots reserved at start), hot-unplug (needs the guest's cooperation), live compact / convert (QEMU `blockdev-mirror` and switch over)
 
 ### Phase 16: `feat/guest-integration`  (Local: partly)
 

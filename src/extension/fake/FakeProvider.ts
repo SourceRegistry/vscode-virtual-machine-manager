@@ -4,6 +4,11 @@ import {
 	ProviderError,
 	type Capabilities,
 	type ClusterConnection,
+	type DiskDevice,
+	type DiskExportOptions,
+	type DiskProgress,
+	type NewDisk,
+	type VmDetails,
 	type FieldSchema,
 	type FieldValues,
 	type GuestCommand,
@@ -55,6 +60,8 @@ const vmSchema = (): FieldSchema[] => [
 	{ key: 'autostart', label: 'Start with host', type: 'checkbox', default: false, group: 'General', advanced: true }
 ];
 
+const GB = 1024 ** 3;
+
 class FakeConnection implements ClusterConnection {
 	readonly capabilities: Capabilities = {
 		create: true,
@@ -66,8 +73,15 @@ class FakeConnection implements ClusterConnection {
 		external: false,
 		guestExec: true,
 		guestFiles: true,
+		details: true,
+		diskOperations: ['add', 'attach', 'remove', 'resize', 'convert', 'export'],
+		diskOperationsWhileRunning: ['add', 'remove', 'resize'],
+		diskExportConverts: true,
+		diskAttachModes: ['copy', 'reference'],
 		shutdownTimeoutSeconds: 20
 	};
+	/** Disks of the fake machines, by VM id. */
+	private readonly disks = new Map<string, DiskDevice[]>();
 	/** Files "in" the fake guests, by VM id and path. */
 	private readonly guestFiles = new Map<string, Buffer>();
 	private readonly emitter = new vscode.EventEmitter<{ vmId?: string }>();
@@ -124,7 +138,87 @@ class FakeConnection implements ClusterConnection {
 			values
 		};
 		this.vms.set(id, vm);
+		this.disks.set(id, [{ id: 'disk0', kind: 'disk', label: 'Hard disk 1', path: `/fake/${vm.name}/disk0.qcow2`, sizeBytes: 20 * GB, allocatedBytes: 3 * GB, format: 'qcow2', bus: 'virtio' }]);
 		return vm;
+	}
+
+	async getVmDetails(_nodeId: string, vmId: string): Promise<VmDetails> {
+		this.get(vmId);
+		return { disks: [...(this.disks.get(vmId) ?? [])], nics: [], devices: [], forwards: [] };
+	}
+
+	private disk(vmId: string, diskId: string, stopped: boolean): { vm: ReturnType<FakeConnection['get']>; list: DiskDevice[]; disk: DiskDevice } {
+		const vm = this.get(vmId);
+		if (stopped && vm.state !== 'stopped') throw new ProviderError(`Shut down "${vm.name}" first.`, 'invalid');
+		const list = this.disks.get(vmId) ?? [];
+		const disk = list.find((d) => d.id === diskId);
+		if (!disk) throw new ProviderError(`${vm.name} has no disk ${diskId}`, 'notFound');
+		return { vm, list, disk };
+	}
+
+	async addDisk(_nodeId: string, vmId: string, disk: NewDisk): Promise<DiskDevice> {
+		const vm = this.get(vmId);
+		const list = this.disks.get(vmId) ?? [];
+		let n = 0;
+		while (list.some((d) => d.id === `disk${n}`)) n++;
+		const format = disk.format ?? 'qcow2';
+		const added: DiskDevice = { id: `disk${n}`, kind: 'disk', label: `Hard disk ${n + 1}`, path: `/fake/${vm.name}/disk${n}.${format === 'raw' ? 'img' : 'qcow2'}`, sizeBytes: disk.sizeBytes, allocatedBytes: format === 'raw' ? disk.sizeBytes : 196_608, format, bus: 'virtio' };
+		this.disks.set(vmId, [...list, added]);
+		this.emitter.fire({ vmId });
+		return added;
+	}
+
+	async attachDisk(_nodeId: string, vmId: string, imagePath: string, options: { copy: boolean }): Promise<DiskDevice> {
+		const vm = this.get(vmId);
+		if (vm.state !== 'stopped') throw new ProviderError(`Shut down "${vm.name}" first.`, 'invalid');
+		const data = await vscode.workspace.fs.stat(vscode.Uri.file(imagePath)).then(
+			(stat) => stat,
+			() => {
+				throw new ProviderError(`Image not found: ${imagePath}`, 'invalid');
+			}
+		);
+		const list = this.disks.get(vmId) ?? [];
+		let n = 0;
+		while (list.some((d) => d.id === `disk${n}`)) n++;
+		const name = imagePath.split(/[\\/]/).pop()!;
+		const attached: DiskDevice = { id: `disk${n}`, kind: 'disk', label: `Hard disk ${n + 1}`, path: options.copy ? `/fake/${vm.name}/disk${n}.qcow2` : imagePath, sizeBytes: Math.max(data.size, 1024 ** 2), allocatedBytes: data.size, format: options.copy ? 'qcow2' : (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? 'raw'), bus: 'virtio' };
+		this.disks.set(vmId, [...list, attached]);
+		this.emitter.fire({ vmId });
+		return attached;
+	}
+
+	async removeDisk(_nodeId: string, vmId: string, diskId: string): Promise<void> {
+		const { list } = this.disk(vmId, diskId, false);
+		this.disks.set(vmId, list.filter((d) => d.id !== diskId));
+		this.emitter.fire({ vmId });
+	}
+
+	async resizeDisk(_nodeId: string, vmId: string, diskId: string, sizeBytes: number): Promise<void> {
+		const { disk } = this.disk(vmId, diskId, false);
+		if (sizeBytes <= (disk.sizeBytes ?? 0)) throw new ProviderError('Disks can only grow.', 'invalid');
+		disk.sizeBytes = sizeBytes;
+		this.emitter.fire({ vmId });
+	}
+
+	async convertDisk(_nodeId: string, vmId: string, diskId: string, format: 'qcow2' | 'raw', progress?: (update: DiskProgress) => void): Promise<void> {
+		const { disk } = this.disk(vmId, diskId, true);
+		for (let step = 1; step <= 4; step++) {
+			await new Promise((r) => setTimeout(r, 400));
+			progress?.({ message: `Writing… ${step * 25}%`, fraction: step / 4 });
+		}
+		disk.allocatedBytes = format === 'raw' ? disk.sizeBytes : Math.round((disk.allocatedBytes ?? 0) * 0.7);
+		disk.format = format;
+		disk.path = disk.path?.replace(/\.[^.]+$/, format === 'raw' ? '.img' : '.qcow2');
+		this.emitter.fire({ vmId });
+	}
+
+	async exportDisk(_nodeId: string, vmId: string, diskId: string, targetPath: string, options: DiskExportOptions, progress?: (update: DiskProgress) => void): Promise<void> {
+		const { vm, disk } = this.disk(vmId, diskId, true);
+		for (let step = 1; step <= 4; step++) {
+			await new Promise((r) => setTimeout(r, 400));
+			progress?.({ message: `Writing… ${step * 25}%`, fraction: step / 4 });
+		}
+		await vscode.workspace.fs.writeFile(vscode.Uri.file(targetPath), Buffer.from(`fake ${options.format}${options.compress ? ' (compressed)' : ''} export of ${disk.label} of ${vm.name}\n`));
 	}
 
 	private get(vmId: string) {
@@ -184,6 +278,7 @@ class FakeConnection implements ClusterConnection {
 	async deleteVm(_nodeId: string, vmId: string) {
 		this.get(vmId);
 		this.vms.delete(vmId);
+		this.disks.delete(vmId);
 	}
 
 	async power(_nodeId: string, vmId: string, action: string) {

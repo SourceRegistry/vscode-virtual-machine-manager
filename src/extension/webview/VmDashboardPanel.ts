@@ -9,6 +9,7 @@ export const VM_DASHBOARD_VIEW_TYPE = 'vmm.vmDashboard';
 
 /** Commands the page may run, always on its own VM. */
 const ALLOWED_COMMANDS = new Set<OverviewCommand>([
+	'vmm.manageDisks',
 	'vmm.start',
 	'vmm.shutdown',
 	'vmm.reboot',
@@ -62,9 +63,9 @@ export class VmDashboardPanel implements vscode.Disposable {
 		panel.webview.html = renderHtml(panel.webview, extensionUri, { view: 'vmDashboard', title: panel.title, ref, vmName });
 		const channel = new WebviewChannel(panel.webview, {
 			// The VM is fixed by this panel; whatever `ref` the page sends is ignored.
-			runCommand: async ({ command }) => {
+			runCommand: async ({ command, diskId }) => {
 				if (!ALLOWED_COMMANDS.has(command)) throw new Error(`Command not allowed: ${command}`);
-				await vscode.commands.executeCommand(command, ref);
+				await vscode.commands.executeCommand(command, typeof diskId === 'string' ? { ...ref, diskId } : ref);
 			},
 			getDashboard: async () => {
 				await manager.connect(ref.clusterId).catch(() => undefined);

@@ -18,7 +18,7 @@ import type { ClusterStatus } from './protocol';
  * What at least one connected cluster can do, as `vmm.can.<feature>` context keys. The command palette shows a VM
  * command only when some connected provider supports it (the context menus check the VM's own flags instead).
  */
-export const FEATURES = ['start', 'shutdown', 'reboot', 'stop', 'graphical', 'serial', 'external', 'details', 'media', 'snapshots', 'guestexec', 'guestfiles', 'clone', 'templates', 'edit', 'delete', 'adopt', 'forwards'] as const;
+export const FEATURES = ['start', 'shutdown', 'reboot', 'stop', 'graphical', 'serial', 'external', 'details', 'media', 'disks', 'snapshots', 'guestexec', 'guestfiles', 'clone', 'templates', 'edit', 'delete', 'adopt', 'forwards'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 export function featureFlags(capabilities: Capabilities[]): Record<Feature, boolean> {
@@ -33,6 +33,7 @@ export function featureFlags(capabilities: Capabilities[]): Record<Feature, bool
 		external: any((c) => c.external),
 		details: any((c) => c.details || c.stats),
 		media: any((c) => c.media),
+		disks: any((c) => !!c.diskOperations?.length),
 		snapshots: any((c) => c.snapshots),
 		guestexec: any((c) => c.guestExec),
 		guestfiles: any((c) => c.guestFiles),

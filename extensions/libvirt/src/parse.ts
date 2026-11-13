@@ -192,13 +192,14 @@ export function guestMemoryUsedMB(s: Record<string, string>): number | undefined
 	return Math.round((available - usable) / 1024);
 }
 
-export function toDiskDevices(domain: DomainInfo, capacities: Map<string, number>): DiskDevice[] {
+export function toDiskDevices(domain: DomainInfo, capacities: Map<string, number>, allocations: Map<string, number> = new Map()): DiskDevice[] {
 	return domain.disks.map((disk) => ({
 		id: disk.target,
 		kind: disk.device,
 		label: disk.device === 'cdrom' ? `CD/DVD (${disk.target})` : `Disk ${disk.target}`,
 		...(disk.path ? { path: disk.path } : {}),
 		...(capacities.get(disk.target) ? { sizeBytes: capacities.get(disk.target) } : {}),
+		...(allocations.has(disk.target) && disk.device === 'disk' ? { allocatedBytes: allocations.get(disk.target) } : {}),
 		...(disk.format && disk.device === 'disk' ? { format: disk.format } : {}),
 		...(disk.bus ? { bus: disk.bus } : {}),
 		readOnly: disk.readOnly,

@@ -207,6 +207,12 @@
         "icon": "$(files)"
       },
       {
+        "command": "vmm.manageDisks",
+        "title": "Disks…",
+        "category": "VM",
+        "icon": "$(database)"
+      },
+      {
         "command": "vmm.connectSsh",
         "title": "Connect with Remote-SSH…",
         "category": "VM",
@@ -542,6 +548,10 @@
         {
           "command": "vmm.changeMedia",
           "when": "vmm.hasVms && vmm.can.media"
+        },
+        {
+          "command": "vmm.manageDisks",
+          "when": "vmm.hasVms && vmm.can.disks"
         },
         {
           "command": "vmm.connectSsh",

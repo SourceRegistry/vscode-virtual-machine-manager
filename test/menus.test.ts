@@ -182,6 +182,13 @@ describe.each(['view/item/context', 'webview/context'])('%s media actions', (men
 	});
 });
 
+describe.each(['view/item/context', 'webview/context'])('%s disk actions', (menu) => {
+	it('leaves Disks… out of the context menu (palette and details page only)', () => {
+		const withDisks: Capabilities = { ...caps, diskOperations: ['add', 'resize'], diskOperationsWhileRunning: ['resize'] };
+		for (const state of ['running', 'stopped'] as const) expect(commandsFor(menu, vmContextValue(vm(state), withDisks))).not.toContain('vmm.manageDisks');
+	});
+});
+
 describe.each(['view/item/context', 'webview/context'])('%s snapshot actions', (menu) => {
 	const withSnapshots: Capabilities = { ...caps, snapshots: true };
 

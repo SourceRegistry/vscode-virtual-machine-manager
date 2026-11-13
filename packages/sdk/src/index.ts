@@ -187,6 +187,45 @@ export interface Capabilities {
 	adopt?: boolean;
 	/** Implements `scanImportFolder` / `importFromFolder`. */
 	importFolder?: boolean;
+	/** The disk operations the provider implements (`addDisk`, `removeDisk`, `resizeDisk`, `convertDisk`, `exportDisk`). */
+	diskOperations?: DiskOperation[];
+	/** Those of `diskOperations` that also work while the VM runs; the others need it stopped and the core says so. */
+	diskOperationsWhileRunning?: DiskOperation[];
+	/** `exportDisk` writes every `DiskImageFormat`; without it, only a copy in the disk's own format (`DiskDevice.format`). */
+	diskExportConverts?: boolean;
+	/** `exportDisk` writes to this computer even with `remotePaths` (the provider streams the copy here). */
+	diskExportsHere?: boolean;
+	/** With `attach`: whether `attachDisk` copies the image (`copy`), uses it where it is (`reference`), or both. */
+	diskAttachModes?: Array<'copy' | 'reference'>;
+	/** `attachDisk` reads the image on this computer even with `remotePaths` (the provider uploads it). */
+	diskAttachFromHere?: boolean;
+}
+
+/** What can be done to a VM's disk (see `Capabilities.diskOperations`). `attach` adds an existing image file. */
+export type DiskOperation = 'add' | 'attach' | 'remove' | 'resize' | 'convert' | 'export';
+
+/** Image formats a disk can be exported to. */
+export type DiskImageFormat = 'qcow2' | 'raw' | 'vmdk' | 'vhdx' | 'vdi';
+
+/** A new, empty disk for `addDisk`. */
+export interface NewDisk {
+	sizeBytes: number;
+	/** Default `qcow2`. */
+	format?: 'qcow2' | 'raw';
+}
+
+/** How `exportDisk` writes the copy. */
+export interface DiskExportOptions {
+	format: DiskImageFormat;
+	/** Compress the copy (qcow2 only): smaller, slower to read. */
+	compress?: boolean;
+}
+
+/** What a provider says during a long disk operation (a copy). */
+export interface DiskProgress {
+	message?: string;
+	/** 0..1, when known. */
+	fraction?: number;
 }
 
 export interface NodeInfo {
@@ -274,7 +313,10 @@ export interface DiskDevice {
 	label: string;
 	/** Backing file. For a CD/DVD drive: the inserted image, undefined when the drive is empty. */
 	path?: string;
+	/** The size the guest sees. */
 	sizeBytes?: number;
+	/** Space the image takes on the host: less than `sizeBytes` for a sparse or thin image, more with snapshots inside. */
+	allocatedBytes?: number;
 	/** e.g. `qcow2`, `vhdx`. */
 	format?: string;
 	/** e.g. `sata`, `virtio`, `scsi`, `ide`. */
@@ -568,6 +610,28 @@ export interface ClusterConnection extends Disposable {
 	ejectMedia?(nodeId: string, vmId: string, deviceId: string): Promise<void>;
 	/** Inserts an image into a CD/DVD drive, replacing the current one. */
 	insertMedia?(nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void>;
+	/** Creates an empty disk next to the VM's others and attaches it. Returns the new disk. */
+	addDisk?(nodeId: string, vmId: string, disk: NewDisk): Promise<DiskDevice>;
+	/**
+	 * Adds an existing disk image (qcow2, raw, VMDK, VHDX, VDI…). `copy`: a copy next to the VM's other disks is
+	 * attached and the original is left alone; otherwise the VM uses the file where it is and writes to it. The path
+	 * is on the host when `Capabilities.remotePaths` (unless `diskAttachFromHere`), else on this computer.
+	 */
+	attachDisk?(nodeId: string, vmId: string, imagePath: string, options: { copy: boolean }, progress?: (update: DiskProgress) => void): Promise<DiskDevice>;
+	/** Detaches a disk (`DiskDevice.id`); `deleteFile` also deletes its image, otherwise the file is left on the host. */
+	removeDisk?(nodeId: string, vmId: string, diskId: string, options: { deleteFile: boolean }): Promise<void>;
+	/** Grows a disk to `sizeBytes`. Never shrinks: the guest still has to grow its partition and file system. */
+	resizeDisk?(nodeId: string, vmId: string, diskId: string, sizeBytes: number): Promise<void>;
+	/**
+	 * Rewrites a disk's image in `format` in place (the old image is replaced once the copy is complete). The same
+	 * format compacts it: space the guest freed is given back to the host. Snapshots inside the image are lost.
+	 */
+	convertDisk?(nodeId: string, vmId: string, diskId: string, format: 'qcow2' | 'raw', progress?: (update: DiskProgress) => void): Promise<void>;
+	/**
+	 * Writes a copy of a disk to `targetPath`: on the host when `Capabilities.remotePaths` (unless `diskExportsHere`),
+	 * else on this computer. Without `Capabilities.diskExportConverts`, `options.format` is the disk's own format.
+	 */
+	exportDisk?(nodeId: string, vmId: string, diskId: string, targetPath: string, options: DiskExportOptions, progress?: (update: DiskProgress) => void): Promise<void>;
 	/**
 	 * Makes an independent copy of a VM under a new name (`createVm`'s name rules apply): its own disks, its own
 	 * identity (MAC address), nothing shared with the original. Snapshots, port forwards and passed-through

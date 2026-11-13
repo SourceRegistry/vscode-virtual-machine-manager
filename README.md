@@ -93,6 +93,13 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
   charts (CPU, memory, disk throughput, operations and latency, and network where the provider
   reports it) over the last five minutes. Each chart has a **Show data** table.
 * **Eject** and **Change ISO…** swap the installation media, also while the machine runs.
+* **Disks** on the details page (a gear beside each disk, + to add one; or *VM: Disks…* in the Command Palette) adds an empty disk or an existing image file (copied, or used where it is), grows one, converts it between
+  qcow2 and raw, compacts it (gives space the guest freed back to the host), exports a copy for another
+  hypervisor (qcow2, raw, VMDK, VHDX, VDI) or removes it, keeping or deleting its file. Type sizes as `40 GB` or
+  `512 MB`, or `+10 GB` for that much more. Disks only grow; after
+  growing, extend the partition and file system inside the guest. Growing works while the machine runs; the rest
+  waits until it is shut down, and the list says so. The details page shows each disk's size and the space it
+  takes on the host.
 * **Snapshots** (**Take Snapshot…**, **Revert to Snapshot…**, **Delete Snapshot…**, or the *Snapshots* card on the details page) save the state of a machine's disks so you can return to it. QEMU saves disks only: taken while the machine runs, a snapshot is like a power cut. Reverting discards everything changed since and needs the machine powered off; VM Manager asks first and does it for you.
 * **Clone…** makes an independent copy of a machine: its own disks and network address, the same hardware. Snapshots, port forwards and passed-through devices are not copied. The original must be shut down first, and a large disk takes a while.
 * **Connect with Remote-SSH…** opens a running machine in a Remote - SSH window. It finds the way in from the
@@ -213,6 +220,8 @@ QEMU only, through the QEMU provider:
 | Snapshots | ✓ *(checkpoints)* | ✓ *(disks only, qcow2)* | ✓ *(disks only)* | ✓ *(with memory when running; not for UEFI with a raw nvram)* |
 | Clone | ✓ *(export and import)* | ✓ | ✓ *(full copy)* | – |
 | Templates | ✓ *(marked in the notes)* | ✓ | ✓ *(one way)* | – |
+| Disks: add, attach an image file, grow, remove | – | ✓ *(grow also while running)* | – | ✓ *(grow also while running; no VHDX)* |
+| Disks: convert, compact, export | – | ✓ *(export to qcow2, raw, VMDK, VHDX, VDI)* | – | export only, as is |
 | **Network and devices** | | | | |
 | Port forwards | – | ✓ | – | ✓ *(user-mode networking, this computer)* |
 | Host device passthrough | experimental *(PCI, DDA)* | experimental *(USB; PCI on Linux)* | – | – |
