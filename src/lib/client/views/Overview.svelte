@@ -22,6 +22,7 @@
 	import { guestLabel, originLabel } from '../../../shared/origin';
 	import {
 		eligibleFor,
+		eligibleForDelete,
 		filterRows,
 		flattenVms,
 		nodeAllocation,
@@ -71,6 +72,8 @@
 		return selectedRows.filter((r) => eligibleFor(action, r.vm, r.cluster.capabilities?.power));
 	}
 
+	const deleteTargets = $derived(selectedRows.filter((r) => eligibleForDelete(r.vm, r.cluster.capabilities)));
+
 	$effect(() => {
 		if (selectAll) selectAll.indeterminate = someVisibleSelected && !allVisibleSelected;
 	});
@@ -95,9 +98,21 @@
 		stateFilter = next;
 	}
 
-	function toggleRow(key: string) {
+	/** The row last clicked: Shift+click selects (or clears) every shown row from it to the clicked one. */
+	let anchor: string | undefined;
+
+	function toggleRow(key: string, event?: MouseEvent) {
 		const next = new Set(selection);
-		if (!next.delete(key)) next.add(key);
+		const on = !next.has(key);
+		const keys = visible.map((r) => r.key);
+		const from = event?.shiftKey && anchor ? keys.indexOf(anchor) : -1;
+		const to = keys.indexOf(key);
+		const range = from >= 0 && to >= 0 ? keys.slice(Math.min(from, to), Math.max(from, to) + 1) : [key];
+		for (const k of range) {
+			if (on) next.add(k);
+			else next.delete(k);
+		}
+		anchor = key;
 		selection = next;
 	}
 
@@ -113,9 +128,24 @@
 		if (!targets.length) return;
 		try {
 			const result = await request('bulkPower', { action, refs: targets.map((r) => r.ref) });
-			if (result.started) {
+			if (result.done) {
 				const verb = { start: 'Starting', shutdown: 'Shutting down', reboot: 'Rebooting', stop: 'Powering off', reset: 'Resetting' }[action];
-				toasts.push({ message: `${verb} ${result.started} virtual machine${result.started === 1 ? '' : 's'}`, icon: 'check-circle-fill', variant: 'success' });
+				toasts.push({ message: `${verb} ${result.done} virtual machine${result.done === 1 ? '' : 's'}`, icon: 'check-circle-fill', variant: 'success' });
+				selection = new Set();
+			}
+		} catch (error) {
+			toasts.push({ message: (error as Error).message, icon: 'exclamation-triangle-fill', variant: 'danger' });
+		}
+	}
+
+	/** The host asks for confirmation (keep or delete the disks) and reports failures. */
+	async function bulkDelete() {
+		const targets = deleteTargets;
+		if (!targets.length) return;
+		try {
+			const result = await request('bulkDelete', { refs: targets.map((r) => r.ref) });
+			if (result.done) {
+				toasts.push({ message: `Deleted ${result.done} virtual machine${result.done === 1 ? '' : 's'}`, icon: 'check-circle-fill', variant: 'success' });
 				selection = new Set();
 			}
 		} catch (error) {
@@ -407,8 +437,14 @@
 							<Button size="sm" disabled={!bulkTargets('shutdown').length} onclick={() => bulk('shutdown')}>
 								<Icon icon="power" margin="right" />Shut down ({bulkTargets('shutdown').length})
 							</Button>
+							<Button size="sm" disabled={!bulkTargets('reboot').length} onclick={() => bulk('reboot')}>
+								<Icon icon="arrow-repeat" margin="right" />Reboot ({bulkTargets('reboot').length})
+							</Button>
 							<Button size="sm" transparent disabled={!bulkTargets('stop').length} onclick={() => bulk('stop')}>
 								<Icon icon="stop-fill" margin="right" />Power off ({bulkTargets('stop').length})
+							</Button>
+							<Button size="sm" transparent variant="danger" disabled={!deleteTargets.length} onclick={() => bulkDelete()}>
+								<Icon icon="trash" margin="right" />Delete ({deleteTargets.length})
 							</Button>
 							<Button size="sm" transparent onclick={() => (selection = new Set())}>Clear</Button>
 						{/if}
@@ -446,7 +482,7 @@
 									{@const target = { clusterId: row.ref.clusterId, nodeId: row.ref.nodeId, vm }}
 									{@const history = cpuHistory.get(row.key) ?? []}
 									<tr data-vscode-context={vscodeContext(vmContextValue(vm, caps), row.ref)} class:selected={selection.has(row.key)}>
-										<td class="check"><input type="checkbox" checked={selection.has(row.key)} onchange={() => toggleRow(row.key)} aria-label="Select {vm.name}" /></td>
+										<td class="check"><input type="checkbox" checked={selection.has(row.key)} onclick={(event) => toggleRow(row.key, event)} aria-label="Select {vm.name}" title="Shift+click to select a range" /></td>
 										<td>
 											<Status value={vm.state} states={vmStates} />
 											{#if vm.operation}<span class="muted">{OPERATION_LABEL[vm.operation]}</span>{/if}

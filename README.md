@@ -65,7 +65,11 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
   * A card per node with its CPU load and memory, plus facts such as the QEMU version or host OS.
   * One table of all machines across all clusters: filter by name, host or IP, sort by any column,
     with a CPU sparkline per machine. Right-click a row for the same menu as in the tree.
-  * Select several machines to start, shut down or power them off together.
+  * Select several machines (Shift+click selects a range) to start, shut down, reboot, power off or
+    delete them together.
+* **Several machines at once in the tree**: select rows with Ctrl/Cmd or Shift and right-click for Start,
+  Shut Down, Reboot, Stop (Power Off) and Delete on all of them. Each action skips the machines it does not
+  apply to (Start skips running ones), asks once, and reports failures together.
 * **Search** (**VM: Search Virtual Machines…**): jump to a machine by name from the command palette.
 * **Status bar**: the number of running machines; click it to open the Overview.
 * **Show Log** opens a log for one machine: what you asked for from VS Code and how it ended, state changes

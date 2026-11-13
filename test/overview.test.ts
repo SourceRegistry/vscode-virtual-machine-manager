@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PowerAction, VmState } from '@vmm/sdk';
-import { eligibleFor, filterRows, flattenVms, nodeAllocation, sortRows, stateCounts, totalAllocation, type VmRow } from '../src/shared/overview';
+import { eligibleFor, eligibleForDelete, filterRows, flattenVms, nodeAllocation, sortRows, stateCounts, totalAllocation, type VmRow } from '../src/shared/overview';
 import type { ClusterSnapshot, NodeSnapshot, VmSnapshot } from '../src/shared/protocol';
 
 const vm = (id: string, name: string, state: VmState, extra: Partial<VmSnapshot> = {}): VmSnapshot => ({ id, name, state, ...extra });
@@ -117,5 +117,22 @@ describe('eligibleFor', () => {
 	it('requires provider support', () => {
 		expect(eligibleFor('shutdown', vm('x', 'x', 'running'), ['start'])).toBe(false);
 		expect(eligibleFor('start', vm('x', 'x', 'stopped'), undefined)).toBe(false);
+	});
+});
+
+describe('eligibleFor templates', () => {
+	it('never powers a template', () => {
+		const all: PowerAction[] = ['start', 'shutdown', 'reboot', 'stop'];
+		for (const action of all) expect(eligibleFor(action, vm('t', 't', 'stopped', { template: true }), all)).toBe(false);
+	});
+});
+
+describe('eligibleForDelete', () => {
+	it('needs provider support and leaves attached machines out (they can only be detached)', () => {
+		expect(eligibleForDelete(vm('x', 'x', 'running'), { delete: true })).toBe(true);
+		expect(eligibleForDelete(vm('x', 'x', 'stopped'), { delete: false })).toBe(false);
+		expect(eligibleForDelete(vm('x', 'x', 'stopped'), undefined)).toBe(false);
+		expect(eligibleForDelete(vm('x', 'x', 'running', { origin: 'adopted' }), { delete: true })).toBe(false);
+		expect(eligibleForDelete(vm('x', 'x', 'stopped', { origin: 'imported' }), { delete: true })).toBe(true);
 	});
 });

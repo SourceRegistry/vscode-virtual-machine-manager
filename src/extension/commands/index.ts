@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { fieldDefaults, validateValues, type ClusterConnection, type DiskDevice, type FieldSchema, type PowerAction, type VmInfo } from '@vmm/sdk';
-import type { VmRef } from '../../shared/protocol';
+import type { BulkOutcome, VmRef } from '../../shared/protocol';
 import type { ClusterStore } from '../clusters/ClusterStore';
 import type { ConnectionManager, VmLocation } from '../clusters/ConnectionManager';
 import type { ProviderRegistry } from '../registry/ProviderRegistry';
@@ -18,7 +18,8 @@ import * as snapshotFlow from '../snapshots/flow';
 import { manageDisks as manageDisksFlow } from '../disks/flow';
 import { addSshForward, addToSshConfig, connectSsh, removeFromSshConfig } from '../ssh/connect';
 import { copyFileFromGuest, copyFileToGuest, runCommandInGuest } from '../guest/commands';
-import { deleteVmDetail } from '../../shared/deleteDetail';
+import { deleteVmDetail, deleteVmsDetail } from '../../shared/deleteDetail';
+import { eligibleFor, eligibleForDelete } from '../../shared/overview';
 import { withDelayedProgress } from '../util/progress';
 import { matchesQuery } from '../../shared/vmSearch';
 import { OPERATION_LABEL, OPERATION_TITLE, allowedDuring } from '../../shared/operations';
@@ -69,6 +70,11 @@ function asNodeRef(arg: Arg): { clusterId: string; nodeId: string } | undefined 
 	const a = asRecord(arg);
 	if (a && typeof a.clusterId === 'string' && typeof a.nodeId === 'string') return { clusterId: a.clusterId, nodeId: a.nodeId };
 	return undefined;
+}
+
+/** "3 virtual machines". */
+function plural(count: number): string {
+	return `${count} virtual machine${count === 1 ? '' : 's'}`;
 }
 
 function asClusterId(arg: Arg): string | undefined {
@@ -207,7 +213,21 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 	// Power
 	// -----------------------------------------------------------------------------------------
 
-	async function power(arg: Arg, action: PowerAction, confirmed = false): Promise<void> {
+	const POWER_VERBS: Record<PowerAction, string> = {
+		start: 'start',
+		shutdown: 'shut down',
+		reboot: 'reboot',
+		stop: 'power off',
+		reset: 'reset'
+	};
+
+	const confirmPowerOff = () => vscode.workspace.getConfiguration('vmm').get<boolean>('confirmPowerOff', true);
+
+	/**
+	 * A power action on the machine `arg` names, or on every selected one when it is part of a multi-selection
+	 * (tree rows, the overview's checked rows). Returns how many were started and how many were left out.
+	 */
+	async function power(arg: Arg, action: PowerAction, confirmed = false, selected?: unknown): Promise<BulkOutcome> {
 		const idle = (l: VmLocation) => !l.vm.operation;
 		const filters: Record<PowerAction, (l: VmLocation) => boolean> = {
 			start: (l) => idle(l) && l.vm.state !== 'running',
@@ -216,27 +236,23 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			stop: (l) => (l.vm.operation ? allowedDuring(l.vm.operation, 'stop') : l.vm.state !== 'stopped'),
 			reset: (l) => idle(l) && l.vm.state === 'running'
 		};
-		const verbs: Record<PowerAction, string> = {
-			start: 'start',
-			shutdown: 'shut down',
-			reboot: 'reboot',
-			stop: 'power off',
-			reset: 'reset'
-		};
+		const verbs = POWER_VERBS;
 		const location = await resolveVm(arg, `Select a virtual machine to ${verbs[action]}`, filters[action]);
-		if (!location) return;
-		if (action === 'stop' && !confirmed && vscode.workspace.getConfiguration('vmm').get<boolean>('confirmPowerOff', true)) {
+		if (!location) return { done: 0, skipped: 0 };
+		const refs = selectedRefs(location, selected);
+		if (refs.length > 1) return powerMany(refs, action, confirmed);
+		if (action === 'stop' && !confirmed && confirmPowerOff()) {
 			const choice = await vscode.window.showWarningMessage(
 				`Power off "${location.vm.name}"?`,
 				{ modal: true, detail: 'This is like pulling the power plug. Unsaved data in the guest may be lost. Use Shut Down for a clean shutdown.' },
 				'Power Off'
 			);
-			if (choice !== 'Power Off') return;
+			if (choice !== 'Power Off') return { done: 0, skipped: 1 };
 		}
 		const running = manager.operation(location.ref);
 		if (running && !allowedDuring(running, action)) {
 			void vscode.window.showInformationMessage(`${location.vm.name}: ${OPERATION_LABEL[running]}`);
-			return;
+			return { done: 0, skipped: 1 };
 		}
 		// Background task: the command returns at once, the VM shows a spinner until the
 		// hypervisor call returns (a graceful shutdown can take minutes).
@@ -271,6 +287,65 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 			}
 			return showError(`Could not ${verbs[action]} ${name}`, error);
 		});
+		return { done: 1, skipped: 0 };
+	}
+
+	/**
+	 * One power action on several machines at once, in the background like a single one. Machines it does not
+	 * apply to (already running, a template, busy) are left out. A graceful request a guest ignores ends in one
+	 * offer to power off all of them; other failures are reported together.
+	 */
+	async function powerMany(refs: VmRef[], action: PowerAction, confirmed = false): Promise<BulkOutcome> {
+		const verb = POWER_VERBS[action];
+		const targets = refs
+			.map((ref) => manager.findVm(ref))
+			.filter((l): l is VmLocation => !!l && eligibleFor(action, l.vm, l.cluster.connection?.capabilities.power));
+		const skipped = refs.length - targets.length;
+		if (!targets.length) {
+			void vscode.window.showInformationMessage(`None of the ${refs.length} selected virtual machines can ${verb} right now.`);
+			return { done: 0, skipped };
+		}
+		const names = targets.map((l) => l.vm.name);
+		if (action === 'stop' && !confirmed && confirmPowerOff()) {
+			const choice = await vscode.window.showWarningMessage(
+				`Power off ${plural(targets.length)}?`,
+				{ modal: true, detail: `${names.join(', ')}\n\nThis is like pulling the power plug. Unsaved data in the guests may be lost. Use Shut Down for a clean shutdown.` },
+				'Power Off'
+			);
+			if (choice !== 'Power Off') return { done: 0, skipped: refs.length };
+		}
+		if (skipped) void vscode.window.setStatusBarMessage(`${OPERATION_TITLE[action]} ${plural(targets.length)}; ${skipped} selected cannot ${verb} right now`, 5000);
+		// Not awaited: a graceful shutdown can take minutes; the tree and the overview show the progress.
+		const settled = Promise.allSettled(targets.map((l) => manager.power(l.ref, action)));
+		void vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `${OPERATION_TITLE[action]} ${plural(targets.length)}` }, () => settled);
+		void settled.then((results) => {
+			const timedOut: VmLocation[] = [];
+			const failures: string[] = [];
+			results.forEach((result, i) => {
+				if (result.status !== 'rejected') return;
+				const location = targets[i]!;
+				// Duck-typed: the provider extension bundles its own copy of the SDK's ProviderError.
+				if ((action === 'shutdown' || action === 'reboot') && (result.reason as { code?: unknown } | undefined)?.code === 'timeout') timedOut.push(location);
+				else failures.push(`${location.vm.name}: ${errorMessage(result.reason)}`);
+			});
+			if (failures.length) {
+				log.warn(`Could not ${verb} ${failures.length} of ${targets.length}: ${failures.join('; ')}`);
+				void vscode.window.showWarningMessage(`Could not ${verb} ${failures.length} of ${plural(targets.length)}`, { modal: true, detail: failures.join('\n') });
+			}
+			if (timedOut.length) {
+				log.warn(`Did not ${verb}: ${timedOut.map((l) => l.vm.name).join(', ')}`);
+				void vscode.window
+					.showWarningMessage(
+						`${timedOut.length === 1 ? `"${timedOut[0]!.vm.name}" did` : `${timedOut.length} virtual machines did`} not ${action === 'reboot' ? 'reboot' : 'shut down'}`,
+						{ modal: true, detail: `${timedOut.map((l) => l.vm.name).join(', ')}\n\nPower Off is like pulling the power plug: unsaved data in the guests may be lost.` },
+						'Power Off'
+					)
+					.then((choice) => {
+						if (choice === 'Power Off') void powerMany(timedOut.map((l) => l.ref), 'stop', true);
+					});
+			}
+		});
+		return { done: targets.length, skipped };
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -896,9 +971,61 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		if (location) await detachFrom(location);
 	}
 
-	async function deleteVm(arg: Arg): Promise<void> {
+	/** Deletes the machine `arg` names, or every selected one when it is part of a multi-selection. */
+	async function deleteVm(arg: Arg, selected?: unknown): Promise<BulkOutcome> {
 		const location = await resolveVm(arg, 'Select the virtual machine to delete');
-		if (!location) return;
+		if (!location) return { done: 0, skipped: 0 };
+		const refs = selectedRefs(location, selected);
+		if (refs.length > 1) return deleteMany(refs);
+		await deleteOne(location);
+		return { done: manager.findVm(location.ref) ? 0 : 1, skipped: 0 };
+	}
+
+	/** Several machines, one confirmation. Attached machines are left out: they can only be detached. */
+	async function deleteMany(refs: VmRef[]): Promise<BulkOutcome> {
+		const targets = refs
+			.map((ref) => manager.findVm(ref))
+			.filter((l): l is VmLocation => !!l && eligibleForDelete(l.vm, l.cluster.connection?.capabilities));
+		const skipped = refs.length - targets.length;
+		if (!targets.length) {
+			void vscode.window.showInformationMessage(`None of the ${refs.length} selected virtual machines can be deleted. Attached machines can only be detached.`);
+			return { done: 0, skipped };
+		}
+		const choice = await vscode.window.showWarningMessage(
+			`Delete ${plural(targets.length)}?`,
+			{ modal: true, detail: deleteVmsDetail(targets.map((l) => l.vm.name), skipped) },
+			'Delete VMs',
+			'Delete VMs and Disks'
+		);
+		if (!choice) return { done: 0, skipped: refs.length };
+		const deleteDisks = choice === 'Delete VMs and Disks';
+		const failures: string[] = [];
+		let done = 0;
+		await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Deleting ${plural(targets.length)}…` }, async (progress) => {
+			// One at a time: deleting powers a running machine off first, and providers work through one host session.
+			for (const [index, location] of targets.entries()) {
+				progress.report({ message: `${location.vm.name} (${index + 1} of ${targets.length})`, increment: 100 / targets.length });
+				try {
+					const connection = await manager.connect(location.ref.clusterId);
+					await connection.deleteVm(location.ref.nodeId, location.ref.vmId, { deleteDisks });
+					manager.forgetVm(location.ref);
+					await marks.forget(location.ref);
+					closeViews(location.ref);
+					done++;
+				} catch (error) {
+					failures.push(`${location.vm.name}: ${errorMessage(error)}`);
+				}
+			}
+		});
+		await Promise.all([...new Set(targets.map((l) => l.ref.clusterId))].map((clusterId) => manager.refresh(clusterId)));
+		if (failures.length) {
+			log.warn(`Could not delete ${failures.length} of ${targets.length}: ${failures.join('; ')}`);
+			void vscode.window.showWarningMessage(`Could not delete ${failures.length} of ${plural(targets.length)}`, { modal: true, detail: failures.join('\n') });
+		}
+		return { done, skipped };
+	}
+
+	async function deleteOne(location: VmLocation): Promise<void> {
 		if (location.vm.origin === 'adopted') return detachFrom(location);
 		const snapshots = location.cluster.connection?.capabilities.snapshots ? await snapshotFlow.listSnapshots(manager, location).then((list) => list.length, () => undefined) : undefined;
 		const choice = await vscode.window.showWarningMessage(
@@ -1061,12 +1188,12 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register('vmm.takeSnapshot', (arg) => takeSnapshot(arg)),
 		register('vmm.revertSnapshot', (arg) => revertSnapshot(arg)),
 		register('vmm.deleteSnapshot', (arg) => deleteSnapshot(arg)),
-		register('vmm.deleteVm', (arg) => deleteVm(arg)),
+		register('vmm.deleteVm', (arg, selected) => deleteVm(arg, selected)),
 		register('vmm.detachVm', (arg) => detachVm(arg)),
-		register('vmm.start', (arg) => power(arg, 'start')),
-		register('vmm.shutdown', (arg) => power(arg, 'shutdown')),
-		register('vmm.reboot', (arg) => power(arg, 'reboot')),
-		register('vmm.stop', (arg) => power(arg, 'stop')),
+		register('vmm.start', (arg, selected) => power(arg, 'start', false, selected)),
+		register('vmm.shutdown', (arg, selected) => power(arg, 'shutdown', false, selected)),
+		register('vmm.reboot', (arg, selected) => power(arg, 'reboot', false, selected)),
+		register('vmm.stop', (arg, selected) => power(arg, 'stop', false, selected)),
 		register('vmm.connectGraphical', (arg) => connectGraphical(arg)),
 		register('vmm.connectSerial', (arg) => connectSerial(arg)),
 		register('vmm.openExternal', (arg) => openExternal(arg)),

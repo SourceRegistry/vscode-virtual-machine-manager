@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deleteVmDetail } from '../src/shared/deleteDetail';
+import { deleteVmDetail, deleteVmsDetail } from '../src/shared/deleteDetail';
 
 describe('deleteVmDetail', () => {
 	it('is the plain warning without snapshots or when the count is unknown', () => {
@@ -19,5 +19,24 @@ describe('deleteVmDetail', () => {
 		const text = deleteVmDetail(3);
 		expect(text).toContain('3 snapshots are stored');
 		expect(text).toContain('removes them too');
+	});
+});
+
+describe('deleteVmsDetail', () => {
+	it('names the machines and warns once', () => {
+		const text = deleteVmsDetail(['a', 'b']);
+		expect(text.startsWith('a, b')).toBe(true);
+		expect(text).toContain('This cannot be undone.');
+		expect(text).not.toContain('left alone');
+	});
+
+	it('shortens a long list', () => {
+		const names = Array.from({ length: 13 }, (_, i) => 'vm' + i);
+		expect(deleteVmsDetail(names)).toContain('vm9 and 3 more');
+	});
+
+	it('says how many selected machines are left out', () => {
+		expect(deleteVmsDetail(['a'], 1)).toContain('1 other selected machine cannot be deleted and is left alone.');
+		expect(deleteVmsDetail(['a'], 2)).toContain('2 other selected machines cannot be deleted and are left alone.');
 	});
 });

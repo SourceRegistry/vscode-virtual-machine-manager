@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import { eligibleFor } from '../../shared/overview';
-import type { OverviewCommand } from '../../shared/protocol';
-import { errorMessage, log } from '../util/log';
+import type { PowerAction } from '@vmm/sdk';
+import type { BulkOutcome, OverviewCommand } from '../../shared/protocol';
 import type { ConnectionManager } from '../clusters/ConnectionManager';
 import { panelIcon, renderHtml, WebviewChannel, webviewOptions } from './WebviewHost';
 
@@ -32,6 +31,13 @@ const ALLOWED_COMMANDS = new Set<OverviewCommand>([
 	'vmm.reconnectCluster',
 	'vmm.refresh'
 ]);
+
+const POWER_COMMANDS: Partial<Record<PowerAction, OverviewCommand>> = {
+	start: 'vmm.start',
+	shutdown: 'vmm.shutdown',
+	reboot: 'vmm.reboot',
+	stop: 'vmm.stop'
+};
 
 /** Singleton dashboard tab. Restored after reload through a WebviewPanelSerializer. */
 export class OverviewPanel implements vscode.Disposable {
@@ -76,29 +82,16 @@ export class OverviewPanel implements vscode.Disposable {
 				await Promise.all(manager.clusters().map((c) => manager.ensureLoaded(c.cluster.id)));
 				return manager.snapshot();
 			},
+			// Through the commands, with the first VM as the clicked one and all of them as the selection: the tree's
+			// multi-select runs the same code (eligibility, one confirmation, failures reported together).
 			bulkPower: async ({ action, refs }) => {
-				const targets = refs
-					.map((ref) => manager.findVm(ref))
-					.filter((l): l is NonNullable<typeof l> => !!l && eligibleFor(action, l.vm, l.cluster.connection?.capabilities.power));
-				const skipped = refs.length - targets.length;
-				if (!targets.length) return { started: 0, skipped };
-				if (action === 'stop' && vscode.workspace.getConfiguration('vmm').get<boolean>('confirmPowerOff', true)) {
-					const choice = await vscode.window.showWarningMessage(
-						`Power off ${targets.length} virtual machine${targets.length === 1 ? '' : 's'}?`,
-						{ modal: true, detail: `${targets.map((l) => l.vm.name).join(', ')}\n\nThis is like pulling the power plug. Unsaved data in the guests may be lost. Use Shut Down for a clean shutdown.` },
-						'Power Off'
-					);
-					if (choice !== 'Power Off') return { started: 0, skipped: refs.length };
-				}
-				// Not awaited: a graceful shutdown can take minutes; the tree and this page show the progress.
-				const verb = { start: 'start', shutdown: 'shut down', reboot: 'reboot', stop: 'power off', reset: 'reset' }[action];
-				void Promise.allSettled(targets.map((l) => manager.power(l.ref, action))).then((results) => {
-					const failures = results.flatMap((r, i) => (r.status === 'rejected' ? [`${targets[i]!.vm.name}: ${errorMessage(r.reason)}`] : []));
-					if (!failures.length) return;
-					log.warn(`Could not ${verb} ${failures.length} of ${targets.length}: ${failures.join('; ')}`);
-					void vscode.window.showWarningMessage(`Could not ${verb} ${failures.length} of ${targets.length} virtual machines`, { detail: failures.join('\n'), modal: true });
-				});
-				return { started: targets.length, skipped };
+				const command = POWER_COMMANDS[action];
+				if (!command || !refs.length) return { done: 0, skipped: refs.length };
+				return (await vscode.commands.executeCommand<BulkOutcome | undefined>(command, refs[0], refs)) ?? { done: 0, skipped: refs.length };
+			},
+			bulkDelete: async ({ refs }) => {
+				if (!refs.length) return { done: 0, skipped: 0 };
+				return (await vscode.commands.executeCommand<BulkOutcome | undefined>('vmm.deleteVm', refs[0], refs)) ?? { done: 0, skipped: refs.length };
 			},
 			vmStats: async ({ refs }) => {
 				if (!panel.visible) return [];
