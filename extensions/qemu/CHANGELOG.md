@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.11.0...vm-manager-qemu-v0.11.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* refuse USB passthrough for QEMU on Windows ([bdadc98](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/bdadc98c29367802b82167fae35c74ee814d2a44))
+
 # [0.11.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.10.0...vm-manager-qemu-v0.11.0) (2026-11-13)
 
 
