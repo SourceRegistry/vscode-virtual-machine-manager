@@ -267,8 +267,11 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 			expect(info.devices.every((d) => d.kind === 'usb' || d.kind === 'pci')).toBe(true);
 
 			// A device the host does not have is refused up front (QEMU itself would wait for it to appear).
-			await expect(connection.planPassthrough!('local', vmId, 'usb:dead:beef', 'attach')).rejects.toMatchObject({ code: 'notFound' });
-			await expect(connection.changePassthrough!('local', vmId, 'usb:dead:beef', 'attach', { confirmed: false })).rejects.toMatchObject({ code: 'notFound' });
+			// Windows refuses every USB device: QEMU there has no host USB passthrough.
+			const absent = process.platform === 'win32' ? 'unsupported' : 'notFound';
+			if (process.platform === 'win32') expect(info.usb.supported).toBe(false);
+			await expect(connection.planPassthrough!('local', vmId, 'usb:dead:beef', 'attach')).rejects.toMatchObject({ code: absent });
+			await expect(connection.changePassthrough!('local', vmId, 'usb:dead:beef', 'attach', { confirmed: false })).rejects.toMatchObject({ code: absent });
 			const real = info.devices.find((d) => d.kind === 'usb' && !d.unavailable);
 			if (real) {
 				const plan = await connection.planPassthrough!('local', vmId, real.id, 'attach');
@@ -310,16 +313,27 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 		}
 	}, 90_000);
 
-	describe.skipIf(process.platform === 'win32')('QEMU started outside the extension', () => {
+	describe('QEMU started outside the extension', () => {
 		let child: ReturnType<typeof spawn> | undefined;
 		afterAll(() => child?.kill('SIGKILL'));
 
 		it('is found by the scan, attached, observed, imported by folder and powered off', async () => {
-			const socket = path.join(dir, 'outside.sock');
 			const disk = path.join(dir, 'outside.qcow2');
 			execFileSync('qemu-img', ['create', '-f', 'qcow2', disk, '64M']);
-			child = spawn('qemu-system-x86_64', ['-name', 'outside-vm', '-machine', 'q35', '-accel', 'tcg', '-m', '128', '-smp', '1', '-display', 'none', '-drive', `file=${disk},if=none,id=d0,format=qcow2`, '-device', 'ide-hd,drive=d0,bus=ide.0', '-qmp', `unix:${socket},server=on,wait=off`], { stdio: 'ignore' });
-			for (let i = 0; i < 50 && !fs.existsSync(socket); i++) await new Promise((r) => setTimeout(r, 100));
+			// QEMU on Windows has no Unix sockets: QMP over TCP there.
+			const windows = process.platform === 'win32';
+			const socket = path.join(dir, 'outside.sock');
+			const qmpPort = windows ? await freePort() : 0;
+			const qmp = windows ? `tcp:127.0.0.1:${qmpPort},server=on,wait=off` : `unix:${socket},server=on,wait=off`;
+			child = spawn('qemu-system-x86_64', ['-name', 'outside-vm', '-machine', 'q35', '-accel', 'tcg', '-m', '128', '-smp', '1', '-display', 'none', '-drive', `file=${disk},if=none,id=d0,format=qcow2`, '-device', 'ide-hd,drive=d0,bus=ide.0', '-qmp', qmp], { stdio: 'ignore' });
+			const listening = () =>
+				windows
+					? new Promise<boolean>((resolve) => {
+							const s = net.connect(qmpPort, '127.0.0.1', () => (s.destroy(), resolve(true)));
+							s.once('error', () => resolve(false));
+						})
+					: Promise.resolve(fs.existsSync(socket));
+			for (let i = 0; i < 50 && !(await listening()); i++) await new Promise((r) => setTimeout(r, 100));
 
 			const found = (await connection.scanExternalVms!('local')).find((v) => v.name === 'outside-vm');
 			expect(found).toMatchObject({ id: String(child.pid), controllable: true });

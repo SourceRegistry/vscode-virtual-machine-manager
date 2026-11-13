@@ -1842,6 +1842,8 @@ export class QemuConnection implements ClusterConnection {
 		const runtime = await this.runtime(vmId);
 		if (deviceId.startsWith('usb:')) {
 			const usb = this.parseUsbId(deviceId);
+			// The listing below fails on Windows and a failed listing counts as "present", so say it here.
+			if (action === 'attach' && process.platform === 'win32') throw new ProviderError('QEMU on Windows cannot pass USB devices through.', 'unsupported');
 			if (action === 'attach' && !runtime) throw new ProviderError('Start the VM first: USB devices are hot-plugged.', 'unavailable');
 			// QEMU would accept an absent device and wait for it to show up; a stale selection is more likely a mistake.
 			if (action === 'attach' && !(await listUsbHost().then((list) => list.some((d) => usbKey(d) === usbKey(usb)), () => true))) {
