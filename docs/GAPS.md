@@ -7,10 +7,10 @@ Claims about other tools are from memory and were not re-checked.
 
 | # | Gap | Phase | Status 2026-11-12 |
 |---|-----|-------|---|
-| 1 | Unverified code: Hyper-V, VFIO, DDA and Windows paths never ran on real hardware; many "manual check" boxes open; Proxmox status unclear | 11 | Open. Proxmox status is written down (mocked API only); Hyper-V, VFIO, DDA still need hardware |
+| 1 | Unverified code: Hyper-V, VFIO, DDA and Windows paths never ran on real hardware; many "manual check" boxes open; Proxmox status unclear | 11 | Open. Proxmox status is written down (mocked API only); Hyper-V and the Windows paths verified on Windows 11 2026-11-13; VFIO, DDA still need hardware |
 | 2 | Remote hosts: Hyper-V over WinRM/SSH and QEMU over SSH are `todo` | 8, 9 | QEMU over SSH done (9); Hyper-V remote open (8) |
 | 3 | Missing hypervisors: libvirt/KVM, VMware, VirtualBox, Parallels, XCP-ng, Nutanix | 19, 20 | libvirt done (19, edit / clone / pools / networks open); Nutanix provider built (20, tested against a fake Prism API only); the rest open (20) |
-| 4 | Snapshots, clones, templates: absent | 12, 14 | Done for QEMU, Hyper-V (untested), Proxmox; libvirt has snapshots, no clone or templates |
+| 4 | Snapshots, clones, templates: absent | 12, 14 | Done for QEMU, Hyper-V (verified 2026-11-13), Proxmox; libvirt has snapshots, no clone or templates |
 | 5 | Networking: no NIC editor, no bridge/vmnet, no network chart, guest IP needs an agent | 17 | Open |
 
 ## Dev-workflow gaps (the VS Code edge)
@@ -38,7 +38,7 @@ Claims about other tools are from memory and were not re-checked.
 
 - Close the open manual checks (phase 11). The stacked branches were merged with PR #1 (2026-11-05).
 - ~~Memory chart shows host RSS, not guest memory (phase 16).~~ Done 2026-11-12: guest memory from the balloon driver, and the chart says which source it shows.
-- CI e2e on real QEMU (macOS arm64, Linux) runs on every pull request and passes, but is still non-blocking; a Windows job is still missing (phase 11).
+- CI e2e on real QEMU (macOS arm64, Linux) runs on every pull request and blocks merges; a Windows job is still missing (phase 11). The QEMU and Hyper-V e2e pass on a Windows 11 machine (2026-11-13); GitHub's Windows runners have no nested virtualisation for Hyper-V.
 - Marketplace page: screenshots, GIFs, demo (phase 18).
 
 ## Order (highest value first)

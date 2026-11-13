@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { Logger } from '@vmm/sdk';
 
 const MARKER = /<<VMM:(\d+):(OK|ERR):([A-Za-z0-9+/=]*)>>/;
+const MODE_MARKER = /<<VMM:MODE:(\w+)>>/;
 
 interface Pending {
 	id: number;
@@ -32,11 +33,15 @@ export class PowerShellSession {
 	private current: Pending | undefined;
 	private queue: Promise<unknown> = Promise.resolve();
 	private disposed = false;
+	/** Set when PowerShell reports a language mode the framing cannot run in. */
+	private blocked: PowerShellError | undefined;
 
 	constructor(
 		private readonly name: string,
 		private readonly log?: Logger,
-		private readonly executable = 'powershell.exe'
+		private readonly executable = 'powershell.exe',
+		/** A line run when the process starts, before anything else (tests use it to switch the language mode). */
+		private readonly prelude = ''
 	) {}
 
 	/** Runs `script` with `params` bound to `$p`; resolves with the pipeline output as an array. */
@@ -81,8 +86,13 @@ export class PowerShellSession {
 		child.stdin.write(
 			"$ProgressPreference = 'SilentlyContinue'; $ErrorActionPreference = 'Stop'; $WarningPreference = 'SilentlyContinue'; $InformationPreference = 'SilentlyContinue'\n"
 		);
+		// Under an AppLocker / WDAC policy PowerShell runs in ConstrainedLanguage mode, which blocks the .NET calls the
+		// command framing needs: every command would only time out. Say so instead (plain strings work in that mode).
+		if (this.prelude) child.stdin.write(`${this.prelude}\n`);
+		child.stdin.write("if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') { '<<VMM:MODE:' + $ExecutionContext.SessionState.LanguageMode + '>>' }\n");
 		this.process = child;
 		this.buffer = '';
+		this.blocked = undefined;
 		this.log?.debug(`[ps:${this.name}] started (pid ${child.pid})`);
 		return child;
 	}
@@ -94,6 +104,10 @@ export class PowerShellSession {
 				child = this.ensureProcess();
 			} catch (error) {
 				reject(error);
+				return;
+			}
+			if (this.blocked) {
+				reject(this.blocked);
 				return;
 			}
 			const id = this.nextId++;
@@ -115,6 +129,15 @@ export class PowerShellSession {
 		while ((newline = this.buffer.indexOf('\n')) >= 0) {
 			const line = this.buffer.slice(0, newline).trim();
 			this.buffer = this.buffer.slice(newline + 1);
+			const mode = MODE_MARKER.exec(line);
+			if (mode) {
+				this.blocked = new PowerShellError(
+					`PowerShell runs in ${mode[1]} mode on this computer (set by an AppLocker or Windows Defender Application Control policy). ` +
+						'That mode blocks what VM Manager needs to talk to Hyper-V; ask your administrator to allow full language mode for PowerShell, or use Hyper-V Manager.'
+				);
+				this.fail(this.blocked);
+				continue;
+			}
 			const match = MARKER.exec(line);
 			if (!match) {
 				if (line) this.log?.debug(`[ps:${this.name}] ${line}`);

@@ -288,7 +288,7 @@ export class HyperVConnection implements ClusterConnection {
 	}
 
 	async listVms(): Promise<VmInfo[]> {
-		const vms = await this.run<RawVm>(this.query, scripts.LIST_VMS);
+		const vms = await this.run<RawVm>(this.query, scripts.LIST_VMS_CIM);
 		return vms.map(toVmInfo);
 	}
 
@@ -367,7 +367,7 @@ export class HyperVConnection implements ClusterConnection {
 	}
 
 	async getVmConfig(_nodeId: string, vmId: string): Promise<VmConfig> {
-		const [config] = await this.run<RawConfig>(this.query, scripts.GET_CONFIG, { id: assertVmId(vmId) });
+		const [config] = await this.run<RawConfig>(this.query, scripts.GET_CONFIG_CIM, { id: assertVmId(vmId) });
 		if (!config) throw new ProviderError('Virtual machine not found', 'notFound');
 		const switches = await this.switches();
 		const off = config.State === 'Off';
@@ -474,14 +474,14 @@ export class HyperVConnection implements ClusterConnection {
 		const id = assertVmId(vmId);
 		if (values.notes !== undefined) {
 			// A template keeps its marker when the user edits the notes.
-			const [current] = await this.run<RawConfig>(this.query, scripts.GET_CONFIG, { id });
+			const [current] = await this.run<RawConfig>(this.query, scripts.GET_CONFIG_CIM, { id });
 			if (isTemplate(current?.Notes)) values = { ...values, notes: withTemplate(String(values.notes ?? ''), true) };
 		}
 		await this.run(this.ops, scripts.UPDATE_VM, { id, values }, 2 * 60_000);
 	}
 
 	async listSnapshots(_nodeId: string, vmId: string): Promise<Snapshot[]> {
-		return toSnapshots(await this.run<RawSnapshot>(this.query, scripts.SNAPSHOT_LIST, { id: assertVmId(vmId) }, 60_000));
+		return toSnapshots(await this.run<RawSnapshot>(this.query, scripts.SNAPSHOT_LIST_CIM, { id: assertVmId(vmId) }, 60_000));
 	}
 
 	async createSnapshot(_nodeId: string, vmId: string, name: string): Promise<Snapshot> {
@@ -510,7 +510,7 @@ export class HyperVConnection implements ClusterConnection {
 
 	async setTemplate(_nodeId: string, vmId: string, template: boolean): Promise<void> {
 		const id = assertVmId(vmId);
-		const [current] = await this.run<RawConfig>(this.query, scripts.GET_CONFIG, { id });
+		const [current] = await this.run<RawConfig>(this.query, scripts.GET_CONFIG_CIM, { id });
 		if (isTemplate(current?.Notes) === template) return;
 		await this.run(this.ops, scripts.SET_NOTES_TEMPLATE, { id, notes: withTemplate(current?.Notes, template) }, 60_000);
 	}
@@ -537,7 +537,7 @@ export class HyperVConnection implements ClusterConnection {
 	}
 
 	async getVmDetails(_nodeId: string, vmId: string): Promise<VmDetails> {
-		const [raw] = await this.run<RawDetails>(this.query, scripts.VM_DETAILS, { id: assertVmId(vmId) }, 60_000);
+		const [raw] = await this.run<RawDetails>(this.query, scripts.VM_DETAILS_CIM, { id: assertVmId(vmId) }, 60_000);
 		return toDetails(raw ?? { Generation: 0, Disks: null, Nics: null });
 	}
 
@@ -547,11 +547,11 @@ export class HyperVConnection implements ClusterConnection {
 	}
 
 	async ejectMedia(_nodeId: string, vmId: string, deviceId: string): Promise<void> {
-		await this.run(this.ops, scripts.SET_MEDIA, { id: assertVmId(vmId), device: deviceId, path: '' }, 60_000);
+		await this.run(this.ops, scripts.SET_MEDIA_CIM, { id: assertVmId(vmId), device: deviceId, path: '' }, 60_000);
 	}
 
 	async insertMedia(_nodeId: string, vmId: string, deviceId: string, imagePath: string): Promise<void> {
-		await this.run(this.ops, scripts.SET_MEDIA, { id: assertVmId(vmId), device: deviceId, path: imagePath }, 60_000);
+		await this.run(this.ops, scripts.SET_MEDIA_CIM, { id: assertVmId(vmId), device: deviceId, path: imagePath }, 60_000);
 	}
 
 	async getPassthrough(_nodeId: string, vmId: string): Promise<PassthroughInfo> {
@@ -616,7 +616,7 @@ export class HyperVConnection implements ClusterConnection {
 	async openConsole(_nodeId: string, vmId: string, kind: ConsoleKind): Promise<ConsoleStream> {
 		if (kind === 'vnc') throw new ProviderError('Hyper-V has no VNC endpoint; use the RDP console.', 'unsupported');
 		assertVmId(vmId);
-		const raw = (await this.run<RawVm>(this.query, scripts.LIST_VMS)).find((v) => v.Id === vmId);
+		const raw = (await this.run<RawVm>(this.query, scripts.LIST_VMS_CIM)).find((v) => v.Id === vmId);
 		if (!raw) throw new ProviderError('Virtual machine not found', 'notFound');
 		const vm = toVmInfo(raw);
 		if (kind === 'rdp') return this.openVmConnect(vm);

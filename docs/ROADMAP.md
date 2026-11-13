@@ -103,8 +103,8 @@ Branched from `fix/qemu-shutdown` (phase 1 not merged yet): merge phase 1 first,
 - [x] Hyper-V: `Get-VMHardDiskDrive`, `Get-VMDvdDrive`, `Get-VMNetworkAdapter`, CPU/memory from `Get-VM`, `Set-VMDvdDrive`. Disk/net counters not included (Hyper-V needs perf counters, phase 3)
 - [x] Quick eject: `VM: Eject` / `VM: Change ISO…` commands, context menus (tree and overview), inline eject button on running VMs with media
 - [x] Tests: parsers against real QMP output, menus, Hyper-V mapping, opt-in end-to-end against real QEMU
-- [ ] **Hyper-V code is untested** (no Windows host): scripts in `extensions/hyperv/src/scripts.ts` (`VM_DETAILS`, `VM_STATS`, `SET_MEDIA`) need a run on Hyper-V
-- [ ] Windows `sampleProcess` (PowerShell per sample, ~0.3 s) untested; phase 3 should sample less often there
+- [x] Hyper-V `VM_DETAILS`, `VM_STATS`, `SET_MEDIA`: Verified on Windows 11 2026-11-13 (opt-in `extensions/hyperv/test/hyperv.e2e.test.ts`): disks, DVD drive, adapter, CPU and memory, eject and insert while stopped and running
+- [x] Windows `sampleProcess` (PowerShell per sample, ~0.3 s): runs in the QEMU e2e on Windows 2026-11-13 (stats of a running and an attached VM). Sampling less often there is still open
 - [ ] Manual check in VS Code: inline eject button, Change ISO dialog, status bar message
 
 ## Phase 3: `feat/vm-dashboard`
@@ -144,7 +144,7 @@ Stacked on `feat/vm-dashboard` (phases 1-3 not merged yet).
 - [x] CPU sampling shared by the overview and the details page no longer makes each other jumpy (minimum 1 s window)
 - [x] Tests: overview logic (filter, sort, counts, allocation, eligibility), host parsers, RPC contract; rendered and exercised in Chrome (filter chip, select all, sort, bulk bar)
 - [ ] Manual check in VS Code with a real QEMU VM
-- [ ] Hyper-V node CPU load / facts and per-VM CPU for sparklines are untested (no Windows host); the overview polls one `getVmStats` per running VM every 3 s, which costs one PowerShell call each on Hyper-V
+- [x] Hyper-V node CPU load / facts and per-VM CPU: Verified on Windows 11 2026-11-13 (opt-in `extensions/hyperv/test/hyperv.e2e.test.ts`). Open: the overview polls one `getVmStats` per running VM every 3 s, which costs one PowerShell call each on Hyper-V
 - [ ] Accelerator choice only filters for QEMU's own list; a per-VM setting to force an accelerator is not done
 
 ## Phase 5: `feat/qemu-network`
@@ -164,7 +164,7 @@ Stacked on `feat/vm-dashboard` (phases 1-3 not merged yet).
 - [x] `QmpClient` unix-socket support
 - [x] Dedupe against managed VMs by pid
 - Decisions: an adopted VM exists only while its process does (it disappears from the list when it exits, nothing could restart it faithfully); "Delete" on one only detaches (never stops it or touches its disks). QMP serves one client at a time: if another tool holds the socket the VM is attached observe-only with a warning
-- Not done: translating UTM `config.plist`, importing a VM definition's NICs/firmware beyond UEFI, Windows process scan is untested
+- Not done: translating UTM `config.plist`, importing a VM definition's NICs/firmware beyond UEFI. The Windows process scan runs in the QEMU e2e on Windows (2026-11-13, QMP over TCP)
 
 ## Phase 7: `feat/passthrough`
 
@@ -247,7 +247,8 @@ Trust first. Close the open "manual check" items before adding features.
 - [ ] Proxmox provider: run against a real server (HTTPS token, session ticket, OIDC, VNC and serial consoles, power tasks, create). Not possible on this Mac without a Proxmox host; ask whoever has one
 - [x] Merge or close the stacked branches (phases 1-4): merged with PR #1 on 2026-11-05
 - [x] Views of a VM that disappears are closed (details, settings, display and serial consoles), also when it vanishes outside VM Manager. Deliberately slow to conclude: needs two successful listings in a row without it, and a failed or offline node counts for nothing. Told to the user unless they powered it off, deleted it or removed the cluster from here (`src/shared/vanished.ts`, unit tested). **Verified by hand 2026-11-10** with attached external VMs: force-killing the process closed the tabs and showed the notice; powering it off from VM Manager closed the tabs with no notice. The manager wiring itself has no automated test
-- [ ] Hyper-V, VFIO, DDA, Windows `sampleProcess`: **Not local** (need a Windows / Linux IOMMU host); keep marked experimental/untested
+- [x] Windows pass 2026-11-13 (Windows 11 Pro 26300, Hyper-V, QEMU 11.1 with TCG): `npm run check`, `npm test`, the VS Code smoke test, the QEMU e2e (all but the ARM64 case, including the external-VM scan over TCP QMP) and a new Hyper-V e2e (create, settings, rename, details, stats, preview, eject / insert, VMConnect port, checkpoints, template, clone, delete with disks). Found and fixed: creating a checkpoint always failed; deleting a VM with checkpoints left its base disk, and a deleted clone left its folder; QEMU offered a USB plan on Windows. Hyper-V's PowerShell module answers from a cache that is about 4.5 s late after a change (checkpoints and DVD drives even in the same process); the list, settings, details, checkpoint list and DVD media now use CIM (WMI) directly, so they are current at once (list 23 VMs: 0.5 s instead of 10 s; settings about 0.3 s). `cim.e2e.test.ts` compares them with the cmdlets on every VM of the host. The cmdlet list also threw ("null-valued expression") when a VM was deleted while it ran; the CIM list ran 60 times through create / start / delete churn without an error. Other writes (settings, power, checkpoints, clone, create) still use the cmdlets. No native helper: it would need a paid code-signing certificate. Locked-down machines (AppLocker / WDAC, PowerShell in ConstrainedLanguage mode) cannot run the provider; it now says so at once instead of timing out after 60 s
+- [ ] VFIO and DDA: **Not local** (need a Linux IOMMU host / Windows Server); keep marked experimental. Hyper-V serial console as a non-administrator not checked
 - [x] CI: `qemu-e2e` job in `.github/workflows/ci.yml` (ubuntu + macos) is **blocking** since 2026-11-13 (passed on every pull request since #9); release.yml runs it too, so a failure also holds back a release
 - [x] Hyper-V script syntax in CI: `extensions/hyperv/test/powershell.test.ts` parses every script the provider sends with PowerShell's own parser and runs the command framing end to end (parameters in, JSON out, errors). Runs in the Windows test job (Windows PowerShell 5.1, what the provider uses) and wherever `pwsh` is installed (Ubuntu runners, this Mac); no Hyper-V needed. Cmdlet behaviour still needs a Hyper-V host
 
@@ -267,7 +268,7 @@ Status: **merged** (PR #3, 2026-11-10). QEMU snapshots work end to end on this M
 - [ ] Snapshot size, and a snapshot tree/"current" marker (qcow2 does not track the current one)
 - [x] Clone (full copy): `VM: Clone…`, `cloneVm`, `Capabilities.clone` / `cloneNeedsStopped`. `qemu-img convert` per disk (compact, drops the source's snapshots), copy of `efivars.fd`, new MAC, forwards / passed-through devices / imported marker not copied (`extensions/qemu/src/clone.ts`). Stopped VMs only; attached VMs refused. Unit tests plus an e2e on real QEMU (data copied, independent, no snapshots, new MAC, running VM refused, name clash refused). Not yet clicked through by hand
 - [ ] Linked clone (`qemu-img create -b`): deferred on purpose. The clone depends on the original's disk staying untouched, and nothing stops the original from being started and corrupting it. Needs a template concept (a read-only base) first, see phase 14
-- [x] Hyper-V (checkpoints) and Proxmox (snapshot API) on the same SDK, with clone and templates (PR #6, merged with PR #7 on 2026-11-10). **Not local**: written against docs and mocks, never run on a real Hyper-V host or Proxmox server
+- [x] Hyper-V (checkpoints) and Proxmox (snapshot API) on the same SDK, with clone and templates (PR #6, merged with PR #7 on 2026-11-10). Hyper-V: checkpoints (take, list, revert, delete), template and clone verified on Windows 11 2026-11-13. Proxmox: written against docs and mocks, never run on a real server
 - [ ] Revert for a running VM without powering off (needs memory snapshots)
 
 ### Phase 13: `feat/remote-ssh-connect`  (Local: yes)
@@ -307,7 +308,7 @@ Status: built on `feat/disk-management` (2026-11-13).
 - [x] Core: disks are managed from the details page and the palette (*VM: Disks…*, `vmm.can.disks`); left out of the context menus to keep them short; quick picks that offer only what works in the machine's state and name what needs a shut down; sizes typed in VS Code's input box (`40 GB`, `512 MB`, `+10 GB`, `+20 MB`, with what it comes to shown as you type; rounded up to 512-byte sectors, the smallest step an image takes); the details page shows size and space used on the host per disk, a gear per disk and a + to add one; every change goes to the machine's activity log. The Fake provider has disks too
 - [x] Tests: size parsing, menus, helpers; end to end against real QEMU (add with snapshots, SATA limit, grow stopped and running, convert both ways and compact, export to VMDK / VHDX / VDI / raw / compressed qcow2, remove) and real libvirt (add, grow stopped and running, export, remove with and without the file)
 - [ ] Manual check in VS Code (QEMU and libvirt)
-- [ ] Hyper-V (`Resize-VHD`, `New-VHD`) and Proxmox disk API: **not local**, mocks only
+- [ ] Hyper-V (`Resize-VHD`, `New-VHD`): not implemented yet. Proxmox disk API: mocks only
 - [ ] Not done: shrinking, growing the guest's partition (cloud-init does it on the next boot of a cloud image), OVA import
 - [ ] Later, if users ask: more while the machine runs. Export as a point-in-time copy (QEMU `blockdev-backup`, libvirt `backup-begin`), hot-plug a VirtIO disk (needs spare PCIe slots reserved at start), hot-unplug (needs the guest's cooperation), live compact / convert (QEMU `blockdev-mirror` and switch over)
 

@@ -30,5 +30,19 @@ Manage the Hyper-V virtual machines on your Windows machine from VS Code.
 
 * Windows 10/11 Pro, Enterprise or Education, or Windows Server, with Hyper-V enabled.
 * Your account in the **Hyper-V Administrators** group (or VS Code running elevated).
+* PowerShell in full language mode. Machines locked down with AppLocker or Windows Defender Application Control run it
+  in ConstrainedLanguage mode, which the provider cannot work in; it tells you so.
 
 Run **VM: Check Hyper-V Prerequisites** to verify the setup.
+
+## Tested
+
+An end-to-end test runs the provider against a real Hyper-V (Windows 11 Pro, 2026-11-13): host facts, create,
+settings and rename, details, CPU and memory, screen preview, eject and insert, the VMConnect port, checkpoints,
+templates, clone and delete with disks. Run it with
+`VMM_E2E_HYPERV=1 npx vitest run extensions/hyperv/test/hyperv.e2e.test.ts`; it only touches the `vmm-e2e-*`
+machine it creates. Not verified: device assignment (needs Windows Server), the serial console as a non-administrator.
+
+The list, settings, details, checkpoints and DVD media go through WMI (CIM) directly rather than the Hyper-V cmdlets:
+the cmdlets answer from a cache that is about 5 seconds behind after a change. `cim.e2e.test.ts` checks that the CIM
+reads give the same result as the cmdlets for every VM on the host (read-only).
