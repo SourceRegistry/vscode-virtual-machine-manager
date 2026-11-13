@@ -129,6 +129,12 @@ export type OverviewCommand =
 	| 'vmm.reconnectCluster'
 	| 'vmm.refresh';
 
+/** A multi-VM action: how many machines it was done to (or started on) and how many were left out. */
+export interface BulkOutcome {
+	done: number;
+	skipped: number;
+}
+
 export interface RpcMethods {
 	// overview
 	snapshot: { params: void; result: ClusterSnapshot[] };
@@ -136,7 +142,9 @@ export interface RpcMethods {
 	 * Starts `action` on every listed VM it applies to, in the background (a shutdown can take
 	 * minutes). Failures are reported on the host side in one message.
 	 */
-	bulkPower: { params: { action: PowerAction; refs: VmRef[] }; result: { started: number; skipped: number } };
+	bulkPower: { params: { action: PowerAction; refs: VmRef[] }; result: BulkOutcome };
+	/** Deletes the listed VMs after one confirmation on the host side (attached VMs are skipped). */
+	bulkDelete: { params: { refs: VmRef[] }; result: BulkOutcome };
 	/** One CPU/memory/disk sample per listed running VM; empty while the overview is hidden. */
 	vmStats: { params: { refs: VmRef[] }; result: Array<{ ref: VmRef; stats: VmStats }> };
 	runCommand: {

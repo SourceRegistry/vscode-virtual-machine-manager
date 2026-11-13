@@ -892,22 +892,42 @@
         },
         {
           "command": "vmm.start",
-          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && !listMultiSelection && viewItem =~ /^vm;state=(stopped|saved|paused);.*\\bstart;/",
+          "group": "1_power@1"
+        },
+        {
+          "command": "vmm.start",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && listMultiSelection && viewItem =~ /^vm;.*\\bstart;/",
           "group": "1_power@1"
         },
         {
           "command": "vmm.shutdown",
-          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\bshutdown;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && !listMultiSelection && viewItem =~ /^vm;state=running;.*\\bshutdown;/",
+          "group": "1_power@2"
+        },
+        {
+          "command": "vmm.shutdown",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && listMultiSelection && viewItem =~ /^vm;.*\\bshutdown;/",
           "group": "1_power@2"
         },
         {
           "command": "vmm.reboot",
-          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=running;.*\\breboot;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && !listMultiSelection && viewItem =~ /^vm;state=running;.*\\breboot;/",
+          "group": "1_power@3"
+        },
+        {
+          "command": "vmm.reboot",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && listMultiSelection && viewItem =~ /^vm;.*\\breboot;/",
           "group": "1_power@3"
         },
         {
           "command": "vmm.stop",
-          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;state=(running|paused|starting|stopping|unknown);.*\\bstop;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && !listMultiSelection && viewItem =~ /^vm;state=(running|paused|starting|stopping|unknown);.*\\bstop;/",
+          "group": "1_power@4"
+        },
+        {
+          "command": "vmm.stop",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && listMultiSelection && viewItem =~ /^vm;.*\\bstop;/",
           "group": "1_power@4"
         },
         {
@@ -1002,7 +1022,12 @@
         },
         {
           "command": "vmm.deleteVm",
-          "when": "view =~ /^vmm\\.(clusters|groups)$/ && viewItem =~ /^vm;.*\\bdelete;/",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && !listMultiSelection && viewItem =~ /^vm;.*\\bdelete;/",
+          "group": "3_manage@3"
+        },
+        {
+          "command": "vmm.deleteVm",
+          "when": "view =~ /^vmm\\.(clusters|groups)$/ && listMultiSelection && viewItem =~ /^vm;.*\\bdelete;/",
           "group": "3_manage@3"
         },
         {

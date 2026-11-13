@@ -34,11 +34,12 @@ async function run() {
 	// Overview right-click menu mirrors the tree menu (same commands, same state rules).
 	const menus = core.packageJSON.contributes.menus;
 	// Group rows (the user's groups) only exist in the tree.
-	const treeMenu = menus['view/item/context'].filter((m) => !m.group.startsWith('inline') && !m.when.includes('viewItem =~ /^group;'));
+	// Multi-selection entries only exist in the tree (the overview has its own bulk toolbar).
+	const treeMenu = menus['view/item/context'].filter((m) => !m.group.startsWith('inline') && !m.when.includes('viewItem =~ /^group;') && !m.when.includes('&& listMultiSelection'));
 	const webviewMenu = menus['webview/context'];
 	assert.deepEqual(
 		webviewMenu.map((m) => [m.command, m.when.replace('webviewId == vmm.overview && vmmItem', '')]),
-		treeMenu.map((m) => [m.command, m.when.replace(/^view (==|=~) \S+ && viewItem/, '')]),
+		treeMenu.map((m) => [m.command, m.when.replace(/^view (==|=~) \S+ && (!listMultiSelection && )?viewItem/, '')]),
 		'overview context menu matches tree context menu'
 	);
 

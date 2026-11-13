@@ -2,7 +2,7 @@
  * Pure logic of the overview dashboard: one flat VM list across all clusters, filtering, sorting,
  * state counts, resource allocation and which power actions apply. No DOM, no vscode.
  */
-import type { PowerAction, VmState } from '@vmm/sdk';
+import type { Capabilities, PowerAction, VmState } from '@vmm/sdk';
 import { allowedDuring } from './operations';
 import type { ClusterSnapshot, NodeSnapshot, VmRef, VmSnapshot } from './protocol';
 
@@ -130,6 +130,8 @@ export function totalAllocation(clusters: ClusterSnapshot[]): Allocation {
 /** Whether `action` applies to a VM right now. Mirrors the single-VM command filters. */
 export function eligibleFor(action: PowerAction, vm: VmSnapshot, supported: readonly PowerAction[] | undefined): boolean {
 	if (!supported?.includes(action)) return false;
+	// A template is never started: it is only copied.
+	if (vm.template) return false;
 	// Attached without a control channel: nothing but a hard power-off can be asked of it.
 	if (vm.controllable === false && action !== 'stop') return false;
 	if (vm.operation) return allowedDuring(vm.operation, action);
@@ -143,4 +145,9 @@ export function eligibleFor(action: PowerAction, vm: VmSnapshot, supported: read
 		case 'stop':
 			return vm.state !== 'stopped';
 	}
+}
+
+/** Whether a VM can be deleted along with others. An attached VM is not ours to delete: it can only be detached. */
+export function eligibleForDelete(vm: VmSnapshot, caps: Pick<Capabilities, 'delete'> | undefined): boolean {
+	return !!caps?.delete && vm.origin !== 'adopted';
 }

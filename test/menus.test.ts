@@ -42,10 +42,18 @@ function inView(when: string, view: string): boolean {
 	return re ? new RegExp(re[1]).test(view) : true;
 }
 
-function commandsFor(menu: string, contextValue: string, { inline = false, view = 'vmm.clusters' } = {}): string[] {
+/** Whether an item's `listMultiSelection` part (if any) holds: several tree rows selected, or one. */
+function inSelection(when: string, multi: boolean): boolean {
+	if (when.includes('!listMultiSelection')) return !multi;
+	if (when.includes('listMultiSelection')) return multi;
+	return true;
+}
+
+function commandsFor(menu: string, contextValue: string, { inline = false, view = 'vmm.clusters', multi = false } = {}): string[] {
 	return menus[menu]
 		.filter((m) => m.group.startsWith('inline') === inline)
 		.filter((m) => inView(m.when, view))
+		.filter((m) => inSelection(m.when, multi))
 		.filter((m) => regexOf(m.when).test(contextValue))
 		.map((m) => m.command);
 }
@@ -371,13 +379,37 @@ describe('Groups view', () => {
 	});
 });
 
+describe('tree multi-selection', () => {
+	const menu = 'view/item/context';
+	const power = (commands: string[]) => commands.filter((c) => ['vmm.start', 'vmm.shutdown', 'vmm.reboot', 'vmm.stop', 'vmm.deleteVm'].includes(c));
+
+	it('offers every power action and Delete once, whatever state the right-clicked machine is in', () => {
+		for (const state of ['running', 'stopped', 'paused'] as const) {
+			for (const view of ['vmm.clusters', 'vmm.groups']) {
+				expect(power(commandsFor(menu, vmContextValue(vm(state), caps), { multi: true, view }))).toEqual(['vmm.start', 'vmm.shutdown', 'vmm.reboot', 'vmm.stop', 'vmm.deleteVm']);
+			}
+		}
+	});
+
+	it("still only offers what the right-clicked machine's provider supports", () => {
+		const limited: Capabilities = { ...caps, power: ['start', 'stop'], delete: false };
+		expect(power(commandsFor(menu, vmContextValue(vm('running'), limited), { multi: true }))).toEqual(['vmm.start', 'vmm.stop']);
+	});
+
+	it('keeps the single-machine menu when one row is selected', () => {
+		expect(power(commandsFor(menu, vmContextValue(vm('running'), caps)))).toEqual(['vmm.shutdown', 'vmm.reboot', 'vmm.stop', 'vmm.deleteVm']);
+		expect(power(commandsFor(menu, vmContextValue(vm('stopped'), caps)))).toEqual(['vmm.start', 'vmm.deleteVm']);
+	});
+});
+
 describe('overview menu', () => {
 	// Same check as the VS Code integration test, so a missing entry fails fast and locally.
 	it('mirrors the tree menu: same commands, same state rules, same order', () => {
 		const tree = menus['view/item/context']
 			// Group rows (the user's groups) only exist in the tree.
-			.filter((m) => !m.group.startsWith('inline') && !m.when.includes('viewItem =~ /^group;'))
-			.map((m) => [m.command, m.when.replace(/^view (==|=~) \S+ && viewItem/, '')]);
+			// Multi-selection entries only exist in the tree (the overview has its own bulk toolbar).
+			.filter((m) => !m.group.startsWith('inline') && !m.when.includes('viewItem =~ /^group;') && !m.when.includes('&& listMultiSelection'))
+			.map((m) => [m.command, m.when.replace(/^view (==|=~) \S+ && (!listMultiSelection && )?viewItem/, '')]);
 		const overview = menus['webview/context'].map((m) => [m.command, m.when.replace('webviewId == vmm.overview && vmmItem', '')]);
 		expect(overview).toEqual(tree);
 	});
