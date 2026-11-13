@@ -47,8 +47,15 @@ describe('buildDomainXml', () => {
 		const xml = buildDomainXml({ ...base, seed: '/pool/web-cidata.iso', diskFormat: 'raw', host: x86 });
 		expect(() => parseXml(xml)).not.toThrow();
 		expect(xml).toContain("<driver name='qemu' type='raw' discard='unmap'/><source file='/pool/web.qcow2'/>");
-		expect(xml).toContain("<source file='/pool/web-cidata.iso'/><target dev='sda' bus='sata'/><readonly/></disk>");
 		expect(xml).not.toContain("<boot order='1'/>");
+	});
+	it('puts a cloud-init seed on virtio-scsi, which slim cloud kernels without AHCI still see', () => {
+		const xml = buildDomainXml({ ...base, seed: '/pool/web-cidata.iso', host: x86 });
+		expect(xml).toContain("<source file='/pool/web-cidata.iso'/><target dev='sda' bus='scsi'/><readonly/></disk>");
+		expect(xml).toContain("<controller type='scsi' model='virtio-scsi'/>");
+	});
+	it('keeps an installer CD on SATA, which every installer can read', () => {
+		expect(buildDomainXml({ ...base, iso: '/isos/setup.iso', host: x86 })).toContain("<target dev='sda' bus='sata'/>");
 	});
 	it('turns on the balloon statistics, so the guest reports its own memory use', () => {
 		expect(buildDomainXml({ ...base, host: x86 })).toContain("<memballoon model='virtio'><stats period='5'/></memballoon>");

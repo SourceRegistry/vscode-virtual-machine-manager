@@ -56,8 +56,9 @@ export function buildDomainXml(d: NewDomain): string {
 	if (arm && !d.host.efi) throw new ProviderError('This host has no UEFI firmware for ARM guests (install edk2 / qemu-efi-aarch64), which they need to boot.', 'unavailable');
 	if (d.diskBus === 'sata' && arm) throw new ProviderError('ARM guests have no SATA controller: use virtio or scsi.', 'invalid');
 	const firmware = d.uefi || arm;
-	// A CD-ROM needs an IDE, SATA, SCSI or USB bus; virtio cannot carry one.
-	const cdBus = arm || d.diskBus === 'scsi' ? 'scsi' : 'sata';
+	// A CD-ROM needs an IDE, SATA, SCSI or USB bus; virtio cannot carry one. A cloud-init seed goes on
+	// virtio-scsi: Debian's genericcloud kernel has no AHCI driver and would never see it on SATA.
+	const cdBus = arm || d.diskBus === 'scsi' || (d.seed && !d.iso) ? 'scsi' : 'sata';
 	const target = (bus: string, index: number) => `${bus === 'virtio' ? 'vd' : 'sd'}${String.fromCharCode(97 + index)}`;
 	const cd = d.iso ?? d.seed;
 	const needsScsi = d.diskBus === 'scsi' || (!!cd && cdBus === 'scsi');

@@ -1088,6 +1088,7 @@ export function registerCommands(deps: CommandDeps): vscode.Disposable[] {
 		register('vmm.console.sendCtrlAltDel', () => consoles.active()?.sendCommand('ctrlAltDel')),
 		register('vmm.console.toggleScaling', () => consoles.active()?.sendCommand('toggleScaling')),
 		register('vmm.console.typeClipboard', () => typeClipboard()),
+		register('vmm.console.refresh', () => consoles.active()?.sendCommand('refresh')),
 		register('vmm.console.reconnect', () => consoles.active()?.connect()),
 		register('vmm.console.openInNewWindow', () => consoles.moveToNewWindow()),
 		register('vmm.console.shutdown', () => consolePower('shutdown')),

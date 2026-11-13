@@ -23,6 +23,8 @@ export interface VmDefinition {
 	disks: string[];
 	diskBus: DiskBus;
 	cdrom?: string;
+	/** Bus of the CD drive; absent = SATA (AHCI) on x86, SCSI on ARM. Kept per VM: changing it breaks loading snapshots. */
+	cdromBus?: 'sata' | 'scsi';
 	nic: NicModel;
 	/** MAC of the first NIC. Absent on VMs created before it was stored (QEMU's default then applies). */
 	mac?: string;
@@ -148,6 +150,11 @@ function accelSpec(name: string): string {
 	return name === 'whpx' ? 'whpx,kernel-irqchip=off' : name;
 }
 
+/** The CD drive's bus: ARM's `virt` machine has no SATA, so it is always SCSI there. */
+export function cdromBus(def: Pick<VmDefinition, 'cdromBus' | 'arch'>): 'sata' | 'scsi' {
+	return guestArch(def) === 'aarch64' ? 'scsi' : (def.cdromBus ?? 'sata');
+}
+
 /** Builds the `qemu-system-<arch>` argument vector. */
 export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvironment): string[] {
 	const arch = guestArch(def);
@@ -173,8 +180,9 @@ export function buildArgs(def: VmDefinition, runtime: VmRuntime, env: LaunchEnvi
 	// Always present, empty when there is no ISO: media can then be inserted at any time, also on a
 	// running VM (a drive cannot be hot-added), and the guest sees the drive on its next boot.
 	args.push('-drive', `${def.cdrom ? `file=${escapeOptionValue(def.cdrom)},` : ''}if=none,id=cd0,media=cdrom,readonly=on`);
-	if (arm) {
-		// No IDE/AHCI on `virt`: a virtio-scsi controller carries the CD (removable, so eject/insert work).
+	if (cdromBus(def) === 'scsi') {
+		// No IDE/AHCI on `virt`, and slim cloud kernels lack AHCI: a virtio-scsi controller carries the CD
+		// (removable, so eject/insert work).
 		args.push('-device', 'virtio-scsi-pci,id=scsi0');
 		args.push('-device', `scsi-cd,drive=cd0,bus=scsi0.0,bootindex=${def.disks.length + 1}`);
 	} else {

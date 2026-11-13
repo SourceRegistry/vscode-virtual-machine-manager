@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import type { ConsoleStream, PowerAction, RdpTarget } from '@vmm/sdk';
-import { RdpErrorKind, type ViewKind, type VmRef, type WebviewToHost } from '../../shared/protocol';
+import { RdpErrorKind, type ConsoleCommand, type ViewKind, type VmRef, type WebviewToHost } from '../../shared/protocol';
 import { RdpGateway } from '../rdp/RdpGateway';
 import { vmConnectPayload } from '../rdp/rdcleanpath';
 import { splitUsername, type RdpCredentialStore } from '../rdp/credentials';
@@ -248,7 +248,7 @@ class ConsoleSession implements vscode.Disposable {
 		gateway?.dispose();
 	}
 
-	sendCommand(command: 'ctrlAltDel' | 'toggleScaling'): void {
+	sendCommand(command: ConsoleCommand): void {
 		void this.channel.post({ kind: 'console.command', command });
 	}
 
@@ -319,14 +319,16 @@ export class ConsoleManager implements vscode.Disposable {
 			webviewOptions(this.extensionUri, true)
 		);
 		panel.iconPath = panelIcon(this.extensionUri, kind === 'serial' ? 'terminal' : 'vm');
-		const scaleViewport = vscode.workspace.getConfiguration('vmm.console').get<boolean>('scaleViewport', true);
+		const consoleConfig = vscode.workspace.getConfiguration('vmm.console');
+		const scaleViewport = consoleConfig.get<boolean>('scaleViewport', true);
+		const reportWindowSize = consoleConfig.get<boolean>('serial.reportWindowSize', true);
 		const view: ViewKind = `console.${kind}`;
 		panel.webview.html = renderHtml(panel.webview, this.extensionUri, {
 			view,
 			title: name,
 			ref,
 			vmName: name,
-			settings: { scaleViewport },
+			settings: { scaleViewport, reportWindowSize },
 			rdp:
 				kind === 'rdp'
 					? { wasmUrl: panel.webview.asWebviewUri(vscode.Uri.joinPath(webviewRoot(this.extensionUri), 'ironrdp_web_bg.wasm')).toString() }
