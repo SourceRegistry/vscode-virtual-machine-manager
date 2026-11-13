@@ -30,6 +30,7 @@ For SSH, `ControlMaster auto` (with `ControlPersist`) in `~/.ssh/config` makes i
 * **In the guest**: run a command and copy files to and from a running domain through its guest agent (`virsh qemu-agent-command`; libvirt then notes the domain as *tainted: custom-ga-command*). Copies to the guest go in 4 KiB pieces, one virsh call each (libvirt cuts longer agent requests short), so they run at roughly 80 KB/s: fine for scripts and configuration, slow for large files. Copies from the guest are fast. The memory chart shows the guest's own use once the balloon driver reports (statistics are switched on for running domains; new domains have them in their definition).
 * **Media**: insert and eject an ISO in a CD/DVD drive, on a running domain too.
 * **Snapshots**: take, revert and delete (`virsh snapshot-*`, libvirt's internal snapshots). A snapshot of a running domain includes its memory.
+* **Disks**: add an empty disk (a volume in the pool of the domain's first disk), grow one (`vol-resize`, or `blockresize` while it runs), export a copy as it is (`vol-download`, also from a remote host to this computer) and remove one, keeping or deleting its volume. Adding and removing need the domain shut down; converting is not offered.
 * **Delete**: removes the domain, its UEFI variables and snapshot metadata, and with *Delete disks* its disks: volumes of a storage pool through libvirt, other files by deleting them (this computer only).
 
 ## Not included yet

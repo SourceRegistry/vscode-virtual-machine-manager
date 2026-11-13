@@ -29,7 +29,7 @@ Claims about other tools are from memory and were not re-checked.
 |---|-----|-------|---|
 | 11 | SPICE (audio, USB redirection, clipboard, dynamic resize) | 16 | Open |
 | 12 | Audio | 16 | Open |
-| 13 | Disk management and export | 15 | Open |
+| 13 | Disk management and export | 15 | Built on `feat/disk-management` (QEMU and libvirt: add, grow, remove, convert, compact, export) |
 | 14 | Public API for other extensions, tasks, groups, favorites | 18 | Built on `feat/dev-ux` (`api.vms`, `vm` task, favorites, groups, group by) |
 | 15 | Notifications, per-VM log, shutdown countdown | 18 | Built on `feat/dev-ux` |
 | 16 | AI agents cannot see or drive VMs (language model tools / MCP) | 21 | Built on `feat/mcp` (19 tools incl. screenshot, keyboard and mouse; agent mode + MCP server, actions confirmed, destructive opt-in) |
@@ -54,7 +54,7 @@ Claims about other tools are from memory and were not re-checked.
 | 7 | 8 | Hyper-V remote | Open (no Windows host) |
 | 8 | 16 | Guest integration (memory, exec/copy, clipboard, audio, SPICE, shared folders) | Memory, exec, copy merged |
 | 9 | 18 | Dev UX (countdown, notifications, logs, API, groups) | Built; marketplace page open |
-| 10 | 15 | Disk management | Open |
+| 10 | 15 | Disk management | Built (QEMU, libvirt) |
 | 11 | 17 | Network v2 | Open |
 | 12 | 20 | More providers | Open |
 | 13 | 21 | MCP / language model tools | Built; Copilot agent mode check open |
