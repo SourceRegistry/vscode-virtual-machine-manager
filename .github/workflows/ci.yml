@@ -1,11 +1,17 @@
 name: CI
 
+# Pull requests only: a push trigger as well ran every PR commit twice. main is tested by release.yml
+# before it releases; a branch without a PR can be run by hand (workflow_dispatch).
 on:
-  push:
-    branches-ignore: [main] # main is tested by release.yml before it releases
   pull_request:
   workflow_call:
   workflow_dispatch:
+
+# A new commit on a PR cancels the run of the previous one. Other events get their own group (run_id),
+# so a release's test run is never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
