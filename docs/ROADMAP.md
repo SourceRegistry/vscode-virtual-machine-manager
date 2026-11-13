@@ -426,4 +426,5 @@ Versions are core first, then the provider extensions that were released with it
 2026-11-12  fix             fix/libvirt-serial-console (PR #15)  libvirt 1.3.1   serial console no longer echoes guest output back; no leaked threads
 2026-11-12  phase 20        feat/nutanix-provider (PR #13)     nutanix 1.0.0   Prism Central v3: inventory, create, edit, power, recovery points, clone, stats, VNC (experimental); fake Prism for tests
 2026-11-12  —               feat/hide-unavailable-commands (PR #14)  core 0.12.0   Connect with Remote-SSH only when installed; palette commands only when a connected provider supports them
+2026-11-12  phase 18        feat/dev-ux (PR #12)               core 0.13.0; hyperv 0.9.0; libvirt 1.4.0; nutanix 1.1.0; proxmox 0.9.0; qemu 0.10.0   machine logs, state notifications, shutdown countdown, Groups view with favorites and tags, vm tasks, API
 ```
