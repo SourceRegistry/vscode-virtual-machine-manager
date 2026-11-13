@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.17.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.16.0...v0.17.0) (2026-11-13)
+
+
+### Features
+
+* serial console window size and Refresh Terminal (Ctrl+L) ([3e6d88d](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/3e6d88d26336861815516dc97bb32f30b3d9cf9a))
+
 # [0.16.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/v0.15.0...v0.16.0) (2026-11-13)
 
 
