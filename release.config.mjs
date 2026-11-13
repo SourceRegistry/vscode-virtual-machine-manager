@@ -26,6 +26,9 @@ export default {
 				message: `chore(release): ${pkg.name} \${nextRelease.version} [skip ci]\n\n\${nextRelease.notes}`
 			}
 		],
-		['@semantic-release/github', { assets: [{ path: `out/${pkg.name}-\${nextRelease.version}.vsix` }] }]
+		// An asset `path` is a glob and is not templated (only `name` and `label` are), so a `${nextRelease.version}`
+		// in it never matched and no VSIX was attached. `[0-9]*` keeps core (`vm-manager-`) from matching the
+		// providers (`vm-manager-qemu-`); `out/` is ignored by git, so in CI it holds only this run's packages.
+		['@semantic-release/github', { assets: [{ path: `out/${pkg.name}-[0-9]*.vsix` }] }]
 	]
 };
