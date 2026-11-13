@@ -93,7 +93,7 @@ Local (Hyper-V)            ← cluster: one hypervisor you added
   charts (CPU, memory, disk throughput, operations and latency, and network where the provider
   reports it) over the last five minutes. Each chart has a **Show data** table.
 * **Eject** and **Change ISO…** swap the installation media, also while the machine runs.
-* **Disks…** (or the gear beside a disk on the details page) adds an empty disk, grows one, converts it between
+* **Disks** on the details page (a gear beside each disk, + to add one; or *VM: Disks…* in the Command Palette) adds an empty disk, grows one, converts it between
   qcow2 and raw, compacts it (gives space the guest freed back to the host), exports a copy for another
   hypervisor (qcow2, raw, VMDK, VHDX, VDI) or removes it, keeping or deleting its file. Sizes are entered in MB or
   GB in a dialog on the machine's details page. Disks only grow; after
