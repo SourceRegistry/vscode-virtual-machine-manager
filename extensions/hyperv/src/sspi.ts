@@ -235,6 +235,9 @@ if ($global:vmmSspi -and $global:vmmSspi.ContainsKey($p.id)) {
 }
 `;
 
+/** The PowerShell side, exported for the syntax test. */
+export const SSPI_SCRIPTS = { OPEN, STEP, SEAL, CLOSE };
+
 const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
 const bytes = (value: string) => new Uint8Array(Buffer.from(value, 'base64'));
 

@@ -206,7 +206,7 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 		}
 	}, 90_000);
 
-	it('adds and removes a port forward on a running VM and remembers it', async () => {
+	it('adds and removes a port forward on a running VM, kept across restarts', async () => {
 		const nicVm = await connection.createVm('local', { name: 'e2e-net', arch: 'x86_64', cpus: 1, memoryMB: 256, diskGB: 1, firmware: 'uefi', diskBus: 'sata', nic: 'e1000', serial: false });
 		const listening = (port: number) =>
 			new Promise<boolean>((resolve) => {
@@ -226,13 +226,36 @@ describe.skipIf(!process.env.VMM_E2E_QEMU)('QEMU provider end to end', () => {
 			expect((await connection.getVmDetails!('local', nicVm.id)).forwards).toEqual([{ ...forward, hostAddress: '127.0.0.1' }]);
 			await expect(connection.addPortForward!('local', nicVm.id, forward)).rejects.toMatchObject({ code: 'invalid' });
 
+			// Kept across a restart of the VM.
+			await connection.power('local', nicVm.id, 'stop');
+			expect(await listening(hostPort)).toBe(false);
+			await connection.power('local', nicVm.id, 'start');
+			await new Promise((r) => setTimeout(r, 1500));
+			expect(await listening(hostPort)).toBe(true);
+
+			// And across a restart of VS Code: a new connection reads it from the definition.
+			const again = await new QemuProvider({ defaultQemuPath: () => undefined }).connect(
+				{ id: 'c', name: 'c', providerId: 'qemu', config: { accelerator: 'tcg', shutdownTimeout: 5 } },
+				{},
+				{ storagePath: dir, log: { info() {}, warn() {}, error() {}, debug() {} } }
+			);
+			try {
+				expect((await again.getVmDetails!('local', nicVm.id)).forwards).toEqual([{ ...forward, hostAddress: '127.0.0.1' }]);
+			} finally {
+				again.dispose();
+			}
+
 			await connection.removePortForward!('local', nicVm.id, forward);
 			expect(await listening(hostPort)).toBe(false);
 			expect((await connection.getVmDetails!('local', nicVm.id)).forwards).toEqual([]);
+			await connection.power('local', nicVm.id, 'stop');
+			await connection.power('local', nicVm.id, 'start');
+			await new Promise((r) => setTimeout(r, 1500));
+			expect(await listening(hostPort)).toBe(false);
 		} finally {
 			await connection.power('local', nicVm.id, 'stop').catch(() => undefined);
 		}
-	}, 60_000);
+	}, 120_000);
 
 	it('reports passthrough support and handles a USB device that does not exist', async () => {
 		await connection.power('local', vmId, 'start');

@@ -72,11 +72,9 @@ jobs:
           if-no-files-found: error
 
   # Drives the QEMU provider against a real QEMU (TCG, an empty UEFI VM; no guest OS is needed).
-  # Non-blocking until it has been seen passing on both runners; then drop `continue-on-error`.
   # The guest-agent test (guest.e2e.test.ts) needs a cloud image, so it stays a local check.
   qemu-e2e:
     name: QEMU end to end (${{ matrix.os }})
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
