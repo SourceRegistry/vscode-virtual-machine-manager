@@ -1,5 +1,13 @@
 # Changelog
 
+# [1.2.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-nutanix-v1.1.0...vm-manager-nutanix-v1.2.0) (2026-11-13)
+
+
+### Features
+
+* attach an existing disk image ([59558a6](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/59558a61f472ca0c2a57cd60f2a5ad4cc3fe28f2))
+* disk management for QEMU and libvirt ([994ff94](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/994ff94537a68e129b770f777562c8ac1568f89d))
+
 # [1.1.0](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-nutanix-v1.0.0...vm-manager-nutanix-v1.1.0) (2026-11-12)
 
 
