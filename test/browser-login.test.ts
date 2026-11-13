@@ -1,10 +1,21 @@
 import { readFileSync } from 'node:fs';
+import * as net from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
 import { BrowserLoginService, renderLoginPage } from '../src/extension/auth/BrowserLogin';
 
 const template = readFileSync('media/auth/callback.html', 'utf8');
 const icon = 'data:image/png;base64,AA==';
-const port = () => 24000 + Math.floor(Math.random() * 10000);
+// Ask the OS for a port: a fixed or random one can fall in a range Windows reserves for Hyper-V
+// (`netsh int ipv4 show excludedportrange protocol=tcp`), where listening fails with EACCES.
+const port = () =>
+	new Promise<number>((resolve, reject) => {
+		const server = net.createServer();
+		server.once('error', reject);
+		server.listen(0, '127.0.0.1', () => {
+			const { port } = server.address() as net.AddressInfo;
+			server.close(() => resolve(port));
+		});
+	});
 
 function fixture(onOpen: (redirect: string) => Promise<void>) {
 	const host = { template, icon, editorUrl: 'vscode://', openUrl: vi.fn(onOpen) };
@@ -17,7 +28,7 @@ describe('shared browser login', () => {
 		expect(() => renderLoginPage('{{missing}}', {})).toThrow('Missing login page variable');
 	});
 	it('exchanges the code before showing success and cleans up its listener', async () => {
-		const callbackPort = port();
+		const callbackPort = await port();
 		let page: Promise<Response> | undefined;
 		const { service } = fixture(async () => { page = fetch(`http://127.0.0.1:${callbackPort}/?code=private-code&state=private-state`); });
 		const exchange = vi.fn(async () => ({ ticket: 'private-ticket' }));
@@ -39,7 +50,7 @@ describe('shared browser login', () => {
 		} finally { service.dispose(); }
 	});
 	it('shows failure when the exchange fails instead of displaying success', async () => {
-		const callbackPort = port();
+		const callbackPort = await port();
 		let page: Promise<Response> | undefined;
 		const { service } = fixture(async () => { page = fetch(`http://127.0.0.1:${callbackPort}/?code=c&state=s`); });
 		try {
@@ -51,7 +62,7 @@ describe('shared browser login', () => {
 		} finally { service.dispose(); }
 	});
 	it('releases the port if browser opening fails and cancels attempts on disposal', async () => {
-		const callbackPort = port();
+		const callbackPort = await port();
 		const { service } = fixture(async () => { throw new Error('Browser unavailable'); });
 		await expect(service.login({ providerName: 'Test', port: callbackPort, getAuthorizationUrl: async () => 'https://idp.test/', exchange: async () => 'session' })).rejects.toThrow('Browser unavailable');
 		const retry = fixture(async () => { retry.service.dispose(); });

@@ -46,18 +46,29 @@ describe('SerialQueue', () => {
 	});
 });
 
+// Bases come from the OS: fixed ports can sit in a range Windows reserves for Hyper-V, where
+// listening fails with EACCES. The ranges are wider than one reserved block (100 ports).
+const osPort = (server = net.createServer()) =>
+	new Promise<number>((resolve, reject) => {
+		server.once('error', reject);
+		server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port));
+	});
+
 describe('freePort avoid', () => {
 	it('skips avoided ports in a range', async () => {
-		const first = await freePort(41000, 41010);
-		const second = await freePort(41000, 41010, new Set([first]));
+		const probe = net.createServer();
+		const base = await osPort(probe);
+		probe.close();
+		const first = await freePort(base, base + 200);
+		const second = await freePort(base, base + 200, new Set([first]));
 		expect(second).not.toBe(first);
 	});
 
 	it('skips a port that is really in use', async () => {
 		const server = net.createServer();
-		await new Promise<void>((r) => server.listen(41020, '127.0.0.1', r));
+		const base = await osPort(server);
 		try {
-			expect(await freePort(41020, 41022)).toBeGreaterThan(41020);
+			expect(await freePort(base, base + 200)).toBeGreaterThan(base);
 		} finally {
 			server.close();
 		}
