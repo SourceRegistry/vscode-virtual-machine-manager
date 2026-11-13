@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.11.1...vm-manager-qemu-v0.11.2) (2026-11-13)
+
+
+### Bug Fixes
+
+* attach the cloud-init seed on virtio-scsi so Debian cloud images see it ([56ba682](https://github.com/SourceRegistry/vscode-virtual-machine-manager/commit/56ba682d936f6d1102fcc85d7765ff538fe7e873))
+
 ## [0.11.1](https://github.com/SourceRegistry/vscode-virtual-machine-manager/compare/vm-manager-qemu-v0.11.0...vm-manager-qemu-v0.11.1) (2026-11-13)
 
 
