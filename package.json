@@ -438,6 +438,12 @@
         "icon": "$(clippy)"
       },
       {
+        "command": "vmm.console.refresh",
+        "title": "Refresh Terminal",
+        "category": "VM Console",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "vmm.console.reconnect",
         "title": "Reconnect Console",
         "category": "VM Console",
@@ -489,6 +495,13 @@
         "title": "Take Back Keyboard and Mouse from AI Agents",
         "category": "VM",
         "icon": "$(debug-stop)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "vmm.console.refresh",
+        "key": "ctrl+l",
+        "when": "activeWebviewPanelId == 'vmm.console.serial'"
       }
     ],
     "menus": {
@@ -659,6 +672,10 @@
         {
           "command": "vmm.console.typeClipboard",
           "when": "activeWebviewPanelId =~ /^vmm\\.console\\.(vnc|rdp|serial)$/"
+        },
+        {
+          "command": "vmm.console.refresh",
+          "when": "activeWebviewPanelId == 'vmm.console.serial'"
         },
         {
           "command": "vmm.console.reconnect",
@@ -1061,6 +1078,11 @@
           "group": "navigation@4"
         },
         {
+          "command": "vmm.console.refresh",
+          "when": "activeWebviewPanelId == 'vmm.console.serial'",
+          "group": "1_console@0"
+        },
+        {
           "command": "vmm.console.reconnect",
           "when": "activeWebviewPanelId =~ /^vmm\\.console\\./",
           "group": "1_console@1"
@@ -1299,6 +1321,11 @@
             "type": "boolean",
             "default": true,
             "description": "Scale graphical consoles to fit the editor."
+          },
+          "vmm.console.serial.reportWindowSize": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Answer the guest's window-size query (`CSI 18 t`) on the serial console with the terminal's rows and columns. A serial line cannot tell the guest its size, so full-screen programs that ask can then use the whole panel. Applies to consoles opened after the change."
           },
           "vmm.confirmPowerOff": {
             "type": "boolean",

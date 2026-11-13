@@ -67,7 +67,9 @@
 			fontSize: fontSize(),
 			theme: terminalTheme(),
 			scrollback: 5000,
-			allowProposedApi: false
+			allowProposedApi: false,
+			// A serial line carries no window size; let guests that ask (`CSI 18 t`) learn it.
+			windowOptions: { getWinSizeChars: boot.settings?.reportWindowSize ?? true }
 		});
 		const fit = new FitAddon();
 		terminal.loadAddon(fit);
@@ -75,6 +77,16 @@
 		fit.fit();
 
 		const encoder = new TextEncoder();
+		// Ctrl+L is the `vmm.console.refresh` keybinding: let VS Code handle it (it calls refresh() below),
+		// so xterm does not also send its own ^L.
+		terminal.attachCustomKeyEventHandler((e) => !(e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key.toLowerCase() === 'l'));
+		/** Re-fits and repaints the terminal, then sends ^L so the shell or full-screen program redraws. */
+		const refresh = () => {
+			fit.fit();
+			terminal.refresh(0, terminal.rows - 1);
+			if (status === 'open') post({ kind: 'console.input', data: encoder.encode('\f') });
+			terminal.focus();
+		};
 		terminal.onData((data) => post({ kind: 'console.input', data: encoder.encode(data) }));
 		terminal.onBinary((data) => post({ kind: 'console.input', data: Uint8Array.from(data, (c) => c.charCodeAt(0) & 0xff) }));
 
@@ -99,6 +111,9 @@
 					break;
 				case 'console.data':
 					terminal.write(msg.data);
+					break;
+				case 'console.command':
+					if (msg.command === 'refresh') refresh();
 					break;
 			}
 		});

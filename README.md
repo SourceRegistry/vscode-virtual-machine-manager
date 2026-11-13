@@ -245,7 +245,10 @@ Remote Hyper-V and more libvirt features (clone, edit, storage pools) are on the
 
 * **Graphical console**: the machine's screen in an editor tab, with keyboard and mouse. Hyper-V
   machines use the same connection as *Virtual Machine Connection*; QEMU machines use VNC.
-* **Serial console**: a terminal on the machine's serial port, for Linux servers and boot logs.
+* **Serial console**: a terminal on the machine's serial port, for Linux servers and boot logs. Its
+  **Refresh Terminal** (<kbd>Ctrl</kbd>+<kbd>L</kbd>) re-fits the terminal to the tab and sends ^L so the
+  shell or a full-screen program redraws. A serial line cannot tell the guest its size; programs that ask
+  (`CSI 18 t`) get the tab's rows and columns (`vmm.console.serial.reportWindowSize`).
 * The tab's toolbar has **Send Ctrl+Alt+Del**, **Toggle Scaling**, **Type Clipboard Text**,
   **Reconnect**, the power actions and **Open in New Window**.
 * **Type Clipboard Text** types the clipboard into the machine as key presses, for consoles without a
@@ -265,6 +268,7 @@ When a console does ask for a password, **VM: Forget Console Sign-in** removes t
 | `vmm.refreshInterval` | `5` | Seconds between state refreshes while the view or the Overview is visible. |
 | `vmm.console.openInNewWindow` | `false` | Open consoles in a new window instead of an editor tab. |
 | `vmm.console.scaleViewport` | `true` | Scale graphical consoles to fit the tab. |
+| `vmm.console.serial.reportWindowSize` | `true` | Answer a guest's window-size query (`CSI 18 t`) on the serial console, so full-screen programs that ask can use the whole tab. |
 | `vmm.confirmPowerOff` | `true` | Ask before a hard power off (*Stop*). |
 | `vmm.ssh.user` | empty | Account to sign in as in a guest. Empty: your user name on this computer. Remembered per machine. |
 | `vmm.ssh.addConfigEntry` | `true` | Offer to add an ssh config entry before connecting. Turn off to connect by address without touching the file. |

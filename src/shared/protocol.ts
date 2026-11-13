@@ -18,7 +18,10 @@ import type {
 	VmStats
 } from '@vmm/sdk';
 
-export type ViewKind = 'overview' | 'vmSettings' | 'vmDashboard' | 'console.vnc' | 'console.serial' | 'console.preview' | 'console.rdp';
+/** Console actions run in the page: `refresh` re-fits the serial terminal and asks the guest to redraw. */
+export type ConsoleCommand = 'ctrlAltDel' | 'toggleScaling' | 'refresh';
+
+export type ViewKind ='overview' | 'vmSettings' | 'vmDashboard' | 'console.vnc' | 'console.serial' | 'console.preview' | 'console.rdp';
 
 export interface VmRef {
 	clusterId: string;
@@ -60,7 +63,11 @@ export interface BootData {
 	title: string;
 	ref?: VmRef;
 	vmName?: string;
-	settings?: { scaleViewport: boolean };
+	settings?: {
+		scaleViewport: boolean;
+		/** Serial console: answer `CSI 18 t` with the terminal's size in characters. */
+		reportWindowSize?: boolean;
+	};
 	/** RDP console: where the IronRDP WebAssembly module is served from. */
 	rdp?: { wasmUrl: string };
 }
@@ -199,7 +206,7 @@ export type HostToWebview =
 	| { kind: 'console.status'; status: ConsoleStatus; message?: string }
 	| { kind: 'console.data'; data: Uint8Array }
 	| { kind: 'console.credentials'; password: string }
-	| { kind: 'console.command'; command: 'ctrlAltDel' | 'toggleScaling' }
+	| { kind: 'console.command'; command: ConsoleCommand }
 	/** Type `text` as key presses (consoles without a clipboard channel). */
 	| { kind: 'console.type'; text: string }
 	| { kind: 'rdp.start'; config: RdpStartConfig }
